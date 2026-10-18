@@ -38,7 +38,8 @@
     <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.bcl.asyncinterfaces\8.0.0\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll"><LogicalName>emb.Microsoft.Bcl.AsyncInterfaces.dll</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="..\index.html"><LogicalName>emb.index.html</LogicalName></EmbeddedResource>
   </ItemGroup>
-  <Target Name="CopyWvLoaderX64" AfterTargets="Build">
+  <!-- 开发态：把 WebView2Loader.dll 复制到输出目录便于 dotnet run；Release 单文件已内嵌，不产生散落依赖 -->
+  <Target Name="CopyWvLoaderX64" AfterTargets="Build" Condition="'$(Configuration)'!='Release'">
     <Copy SourceFiles="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\runtimes\win-x64\native\WebView2Loader.dll" DestinationFiles="$(OutDir)WebView2Loader.dll" SkipUnchangedFiles="true" />
   </Target>
 </Project>

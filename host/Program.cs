@@ -33,30 +33,42 @@ namespace SoloChatHost
             Application.Run(new MainForm(FindAppDir(args)));
         }
 
-        /* 定位 index.html：优先命令行参数指定的目录，其次向上层搜索（兼容 dotnet run / 发布两种布局） */
+        /* 单文件运行时目录：用户私有（非公共 %TEMP%，防本机低权限进程抢占/侧载） */
+        static string RuntimeDir
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage", "runtime"); }
+        }
+
+        /* 定位 index.html：
+           ① 命令行显式指定目录 → 优先（开发/测试用）
+           ② DEBUG 构建才向上层搜索（兼容 dotnet run / 源码布局）
+           ③ Release 一律用内嵌资源释放到私有运行时目录
+           —— 修复：Release 下不再向上盲搜父目录，避免 Downloads/桌面等位置的恶意 index.html 被劫持为宿主桥页面 */
         static string FindAppDir(string[] args)
         {
             if (args.Length > 0 && File.Exists(Path.Combine(args[0], "index.html")))
                 return Path.GetFullPath(args[0]);
+#if DEBUG
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             for (int i = 0; i < 8 && dir != null; i++)
             {
                 if (File.Exists(Path.Combine(dir.FullName, "index.html"))) return dir.FullName;
                 dir = dir.Parent;
             }
-            /* 单文件模式：磁盘无 index.html → 从嵌入资源释放到 %TEMP%（覆盖写保证与 exe 同步） */
-            var tmp = Path.Combine(Path.GetTempPath(), "SoloChatHost");
+#endif
+            var rt = RuntimeDir;
             try
             {
-                Directory.CreateDirectory(tmp);
+                Directory.CreateDirectory(rt);
                 using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("emb.index.html"))
-                using (var fs = File.Create(Path.Combine(tmp, "index.html"))) { st.CopyTo(fs); }
+                using (var fs = File.Create(Path.Combine(rt, "index.html"))) { st.CopyTo(fs); }
             }
-            catch { if (!File.Exists(Path.Combine(tmp, "index.html"))) throw; }
-            return tmp;
+            catch { if (!File.Exists(Path.Combine(rt, "index.html"))) throw; }
+            return rt;
         }
 
-        /* 单文件模式支撑：托管依赖从嵌入资源按需加载；native WebView2Loader 释放到 %TEMP% */
+        /* 单文件模式支撑：托管依赖从嵌入资源按需加载；native WebView2Loader 始终释放到私有目录并设为 DLL 搜索路径
+           —— 修复：不再信任 exe 同目录（如 Downloads）的 WebView2Loader.dll，防 DLL 侧载 */
         static void SetupEmbedded()
         {
             AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
@@ -72,18 +84,15 @@ namespace SoloChatHost
                 }
                 catch { return null; }
             };
-            if (!File.Exists(Path.Combine(AppContext.BaseDirectory, "WebView2Loader.dll")))
+            var dir = RuntimeDir;
+            try
             {
-                var dir = Path.Combine(Path.GetTempPath(), "SoloChatHost");
-                try
-                {
-                    Directory.CreateDirectory(dir);
-                    using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("emb.WebView2Loader.dll"))
-                    using (var fs = File.Create(Path.Combine(dir, "WebView2Loader.dll"))) { st.CopyTo(fs); }
-                    SetDllDirectory(dir);
-                }
-                catch { }
+                Directory.CreateDirectory(dir);
+                using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("emb.WebView2Loader.dll"))
+                using (var fs = File.Create(Path.Combine(dir, "WebView2Loader.dll"))) { st.CopyTo(fs); }
+                SetDllDirectory(dir);
             }
+            catch { }
         }
 
         [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -160,8 +169,13 @@ namespace SoloChatHost
             core.NewWindowRequested += OnNewWindow;
             core.NavigationStarting += (o, e) =>
             {
-                // 防导航逃逸：仅允许虚拟主机内的页面
-                if (!e.Uri.StartsWith("https://app.local", StringComparison.Ordinal)) e.Cancel = true;
+                // 防导航逃逸：仅允许虚拟主机内的页面（精确校验 scheme + host，防 app.local.evil.com 子域名绕过）
+                if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out Uri u) ||
+                    u.Scheme != "https" ||
+                    !string.Equals(u.Host, "app.local", StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Cancel = true;
+                }
             };
             wv.Source = new Uri("https://app.local/index.html");
             quickBar = new QuickBarForm(this); // 可见性由页面 cfg（quickbar 消息）驱动
@@ -260,8 +274,10 @@ namespace SoloChatHost
                 Log("memtarget -> " + (low ? "low" : "normal"));
                 if (low)
                 {
-                    // 隐藏时追加两刀：① 渲染进程 JS 堆强制 GC（--js-flags=--expose-gc）② 宿主自身工作集压出（恢复时按需回页）
+                    // 隐藏时追加两刀：① 渲染进程 JS 堆强制 GC（--js-flags=--expose-gc，仅 DEBUG 构建注入该 flag）② 宿主自身工作集压出
+#if DEBUG
                     try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.gc && window.gc()"); } catch { }
+#endif
                     try { EmptyWorkingSet(GetCurrentProcess()); } catch { }
                 }
             }
@@ -365,11 +381,16 @@ namespace SoloChatHost
             e.Handled = true;
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                // 仅放行 http/https 外链，防 file://、UNC、ms-msdt:、search-ms: 等被 Shell 直接执行
+                if (Uri.TryCreate(e.Uri, UriKind.Absolute, out Uri u) &&
+                    (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
                 {
-                    FileName = e.Uri,
-                    UseShellExecute = true
-                });
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = u.AbsoluteUri,
+                        UseShellExecute = true
+                    });
+                }
             }
             catch { }
         }
@@ -398,7 +419,7 @@ namespace SoloChatHost
                     if (t == "http")
                     {
                         var idCopy = id;
-                        var reqCopy = JsonDocument.Parse(e.WebMessageAsJson).RootElement;
+                        var reqCopy = root.Clone(); // 独立副本，脱离 using 作用域；避免二次 Parse 的 ArrayPool 泄漏
                         Task.Run(() => RunHttpAsync(reqCopy, idCopy));
                     }
                     else if (t == "http.abort")
@@ -409,7 +430,7 @@ namespace SoloChatHost
                     else if (t == "fs")
                     {
                         var idCopy = id;
-                        var reqCopy = JsonDocument.Parse(e.WebMessageAsJson).RootElement;
+                        var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
                     }
                     else if (t == "hotkey")
@@ -493,6 +514,10 @@ namespace SoloChatHost
             {
                 var method = new HttpMethod(req.GetProperty("method").GetString());
                 var url = req.GetProperty("url").GetString();
+                // 仅放行 http/https 绝对 URI，防 file://、gopher:// 等被滥用
+                if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri) ||
+                    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                    throw new Exception("仅支持 http/https 请求");
                 using (var m = new HttpRequestMessage(method, url))
                 {
                     JsonElement hs;
@@ -505,7 +530,7 @@ namespace SoloChatHost
                                 m.Headers.TryAddWithoutValidation(p.Name, v);
                         }
                     }
-                    var body = req.GetProperty("body").GetString();
+                    var body = req.TryGetProperty("body", out JsonElement bEl) ? bEl.GetString() : null;
                     if (!string.IsNullOrEmpty(body))
                         m.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
@@ -608,13 +633,24 @@ namespace SoloChatHost
             catch (Exception ex) { Log("hostcfg save err: " + ex.Message); }
         }
 
+        /* 规范化根目录：保留盘符根的结尾反斜杠（如 D:\），其余去掉结尾分隔符 */
+        static string NormalizeRoot(string r)
+        {
+            string full = Path.GetFullPath(r).TrimEnd('\\', '/');
+            if (full.Length == 2 && full[1] == ':') full += "\\"; // 盘符根目录保留如 D:\
+            return full;
+        }
+
         /* 路径安全闸：root 必须是已授权根目录之一（页面按会话引用），rel 是其内相对路径 */
         static string FsRootFull(string root)
         {
-            string r = string.IsNullOrWhiteSpace(root) ? (wsRoots.Count == 1 ? wsRoots[0] : null) : root;
-            if (string.IsNullOrEmpty(r) || wsRoots.IndexOf(r) < 0)
+            string r = string.IsNullOrWhiteSpace(root) ? (wsRoots.Count == 1 ? wsRoots[0] : null) : root.Trim();
+            string match = string.IsNullOrEmpty(r)
+                ? null
+                : wsRoots.Find(x => string.Equals(NormalizeRoot(x), NormalizeRoot(r), StringComparison.OrdinalIgnoreCase));
+            if (match == null)
                 throw new Exception(wsRoots.Count == 0 ? "未选择工作区（输入区右侧工作区按钮）" : "工作区未授权（请重新通过工作区按钮选择）");
-            return Path.GetFullPath(r).TrimEnd('\\');
+            return NormalizeRoot(match);
         }
 
         static string GuardPath(string root, string rel)
@@ -623,24 +659,28 @@ namespace SoloChatHost
             rel = rel.Trim().Replace('/', '\\');
             if (Path.IsPathRooted(rel)) throw new Exception("必须使用工作区内相对路径");
             string rootFull = FsRootFull(root);
-            string full = Path.GetFullPath(Path.Combine(rootFull, rel));
-            if (!full.Equals(rootFull, StringComparison.OrdinalIgnoreCase) &&
-                !full.StartsWith(rootFull + "\\", StringComparison.Ordinal))
+            // 盘符根（D:\）结尾已带 \；普通根补 \ 作为前缀边界
+            string prefix = rootFull.EndsWith("\\", StringComparison.Ordinal) ? rootFull : rootFull + "\\";
+            string full = Path.GetFullPath(Path.Combine(prefix, rel));
+            if (!full.Equals(rootFull.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) &&
+                !full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 throw new Exception("路径越出工作区范围");
-            NoReparse(full, rootFull);
+            NoReparse(full, prefix);
             return full;
         }
 
         /* 路径每一级都不允许穿过符号链接 / 联接点（防白名单外内容被链入工作区） */
-        static void NoReparse(string full, string rootFull)
+        static void NoReparse(string full, string prefix)
         {
+            var rootFull = prefix.TrimEnd('\\');
             var di = new DirectoryInfo(rootFull);
             if (!di.Exists) throw new Exception("工作区目录不存在");
             if ((di.Attributes & FileAttributes.ReparsePoint) != 0) throw new Exception("工作区目录不能是符号链接");
-            if (full.Length <= rootFull.Length) return;
+            if (full.Length <= prefix.Length) return;
             string cur = rootFull;
-            foreach (var seg in full.Substring(rootFull.Length + 1).Split('\\'))
+            foreach (var seg in full.Substring(prefix.Length).Split('\\'))
             {
+                if (seg.Length == 0) continue;
                 cur = Path.Combine(cur, seg);
                 FileSystemInfo fsi = Directory.Exists(cur) ? (FileSystemInfo)new DirectoryInfo(cur)
                                     : File.Exists(cur) ? (FileSystemInfo)new FileInfo(cur) : null;
@@ -663,7 +703,7 @@ namespace SoloChatHost
                         break;
                     case "rmroot":
                         string rp = req.GetProperty("path").GetString() ?? "";
-                        wsRoots.RemoveAll(x => x.Equals(rp.Trim(), StringComparison.Ordinal));
+                        wsRoots.RemoveAll(x => string.Equals(NormalizeRoot(x), NormalizeRoot(rp.Trim()), StringComparison.OrdinalIgnoreCase));
                         SaveHostCfg();
                         PostFs(id, "fs.done", JsonSerializer.Serialize(new { roots = wsRoots }), null);
                         break;
@@ -758,7 +798,9 @@ namespace SoloChatHost
                     var owner = Visible ? (IWin32Window)this : null;
                     if (dlg.ShowDialog(owner) == DialogResult.OK)
                     {
-                        if (wsRoots.IndexOf(dlg.SelectedPath) < 0) wsRoots.Add(dlg.SelectedPath); // 加入授权白名单
+                        // 大小写不敏感去重（Windows 路径）
+                        if (!wsRoots.Exists(x => string.Equals(NormalizeRoot(x), NormalizeRoot(dlg.SelectedPath), StringComparison.OrdinalIgnoreCase)))
+                            wsRoots.Add(dlg.SelectedPath); // 加入授权白名单
                         SaveHostCfg();
                         Log("fs addroot: " + dlg.SelectedPath);
                         PostFs(id, "fs.done", JsonSerializer.Serialize(new { root = dlg.SelectedPath, roots = wsRoots }), null);

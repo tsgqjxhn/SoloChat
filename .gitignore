@@ -3,6 +3,10 @@ host/bin/
 host/obj/
 host/bar-debug.png
 
+# ---- dist 只保留单文件 exe，忽略发布时散落的 config/dll 等 ----
+dist/*
+!dist/SoloChatHost.exe
+
 # ---- 本地配置与隐私（绝不上传） ----
 # 内部开发日志：含本机路径、relay 端口、配置细节
 SoloChat-开发记录.md
