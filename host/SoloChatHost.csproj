@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>SoloChatHost</AssemblyName>
+    <RootNamespace>SoloChatHost</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- F3：Release 不产出 PDB/调试符号，避免把本机用户名与绝对构建路径写进产物 -->
+    <DebugType Condition="'$(Configuration)'=='Release'">None</DebugType>
+    <DebugSymbols Condition="'$(Configuration)'=='Release'">false</DebugSymbols>
+    <PathMap Condition="'$(Configuration)'=='Release'">$(MSBuildThisFileDirectory)=/_/src/</PathMap>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+  <!-- 单文件模式：托管依赖 + native loader + 页面全部嵌入 exe（磁盘存在同名文件时自动优先磁盘，开发态不受影响） -->
+  <ItemGroup>
+    <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\lib\net462\Microsoft.Web.WebView2.Core.dll"><LogicalName>emb.Microsoft.Web.WebView2.Core.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\lib\net462\Microsoft.Web.WebView2.WinForms.dll"><LogicalName>emb.Microsoft.Web.WebView2.WinForms.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\runtimes\win-x64\native\WebView2Loader.dll"><LogicalName>emb.WebView2Loader.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.text.json\8.0.5\lib\net462\System.Text.Json.dll"><LogicalName>emb.System.Text.Json.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.text.encodings.web\8.0.0\lib\net462\System.Text.Encodings.Web.dll"><LogicalName>emb.System.Text.Encodings.Web.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.memory\4.5.5\lib\net461\System.Memory.dll"><LogicalName>emb.System.Memory.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.buffers\4.5.1\lib\net461\System.Buffers.dll"><LogicalName>emb.System.Buffers.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.numerics.vectors\4.5.0\lib\net46\System.Numerics.Vectors.dll"><LogicalName>emb.System.Numerics.Vectors.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.runtime.compilerservices.unsafe\6.0.0\lib\net461\System.Runtime.CompilerServices.Unsafe.dll"><LogicalName>emb.System.Runtime.CompilerServices.Unsafe.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)system.threading.tasks.extensions\4.5.4\lib\net461\System.Threading.Tasks.Extensions.dll"><LogicalName>emb.System.Threading.Tasks.Extensions.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.bcl.asyncinterfaces\8.0.0\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll"><LogicalName>emb.Microsoft.Bcl.AsyncInterfaces.dll</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="..\index.html"><LogicalName>emb.index.html</LogicalName></EmbeddedResource>
+  </ItemGroup>
+  <Target Name="CopyWvLoaderX64" AfterTargets="Build">
+    <Copy SourceFiles="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\runtimes\win-x64\native\WebView2Loader.dll" DestinationFiles="$(OutDir)WebView2Loader.dll" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

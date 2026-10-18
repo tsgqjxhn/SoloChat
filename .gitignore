@@ -1,0 +1,26 @@
+# ---- host 编译产物不上传（可运行 exe 在 dist/；源码 Program.cs + csproj 随库） ----
+host/bin/
+host/obj/
+host/bar-debug.png
+
+# ---- 本地配置与隐私（绝不上传） ----
+# 内部开发日志：含本机路径、relay 端口、配置细节
+SoloChat-开发记录.md
+# 会话数据备份（含聊天记录）
+idb-backup/
+# 环境变量与本地密钥
+.env
+.env.*
+*.local
+# 其他本地备份与日志
+*.bak
+*.log
+
+# ---- 工具会话数据（含对话/配置，勿入库） ----
+.zcode/
+.playwright-mcp/
+
+# ---- 系统文件 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
