@@ -595,6 +595,10 @@ var DEF_CFG = {
   prompts: [],                  // / 提示词库 [{name, text}]
   searchProvider: 'none',       // none | serper | tavily | firecrawl
   searchKey: '', searchCount: 5,
+  searchRewrite: true,          // 查询改写：发送前用当前模型把问题改写成独立检索词（失败回退原查询）
+  searchFetch: true,            // 正文抓取：对前 N 条结果抓网页正文替代摘要（失败保留摘要）
+  searchFetchCount: 3,          // 抓取条数 0~5
+  proxy: '',                    // HTTP 代理（仅宿主桥通道生效）；留空=系统代理
   temperature: 0.7, maxTokens: 2048, systemPrompt: '',
   timeout: { connect: 15, first: 60, idle: 30 },
   shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: '', quickbar: 'Alt+Space' },
@@ -744,7 +748,12 @@ function loadCfg(){
   if (!Array.isArray(cfg.prompts)) cfg.prompts = [];
   if (!Array.isArray(cfg.presets) || !cfg.presets.length)
     cfg.presets = [{ id: 'p1', name: '默认', baseURL: cfg.baseURL || '', apiKey: cfg.apiKey || '',
-      models: Array.isArray(cfg.models) ? cfg.models.slice() : [], currentModel: cfg.currentModel || '' }];
+      models: Array.isArray(cfg.models) ? cfg.models.slice() : [], currentModel: cfg.currentModel || '', ctxAuto: true }];
+  /* 上下文窗口自动探测：旧配置若手填过非默认值则视为已定制，保持不覆盖 */
+  for (var ci = 0; ci < cfg.presets.length; ci++){
+    var cp = cfg.presets[ci];
+    if (typeof cp.ctxAuto !== 'boolean') cp.ctxAuto = !(cp.ctxLimit && +cp.ctxLimit !== 131072);
+  }
   var act = null;
   for (var pi = 0; pi < cfg.presets.length; pi++) if (cfg.presets[pi].id === cfg.activePreset) act = cfg.presets[pi];
   if (!act){ act = cfg.presets[0]; cfg.activePreset = act.id; }
@@ -1191,6 +1200,7 @@ var NET = (function(){
       }
     },
     send: function(msg){
+      if (msg && msg.t === 'http') msg.proxy = (typeof S !== 'undefined' && S.cfg && S.cfg.proxy) || ''; // 代理只随宿主桥通道下发
       if (this.engine === 'webview2') window.chrome.webview.postMessage(msg);
       else if (this.engine === 'sciter') window.xcall('solohost', JSON.stringify(msg)); // 同步投递，宿主异步回推
     },
@@ -1342,13 +1352,194 @@ var NET = (function(){
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-  /* 在线搜索三通道 */
-  function searchWeb(query){
+  /* ---- 联网搜索管线：查询预处理 → LLM 改写 → 三通道检索 → 网页正文抓取 → 结构化注入 ---- */
+  var SEARCH_HEADS = ['请帮我查', '请帮我搜索', '请帮我', '麻烦帮我', '能不能帮我', '可以帮我', '麻烦', '请你', '请问',
+    '帮我查', '帮我搜索', '帮我', '给我查', '查一下', '查询一下', '搜一下', '搜索一下', '检索一下',
+    '找一下', '查找一下', '想知道', '我要查', '我要搜索'];
+  var SEARCH_REFER = /(第\s*[一二三四五六七八九十\d]+\s*[个条项种类号页章节款]|上面|前面|刚才|之前|后者|前者|上述|上文|这个问题|那个问题|该问题|这些|那些|这个|那个|它|他们)/;
+
+  /* 规则预处理（档①）：去客套前缀；短且含指代 → 判定追问，拼上上一条用户消息 */
+  function prepQuery(raw, prev){
+    var s = String(raw || '').trim().replace(/\s+/g, ' ');
+    for (var pass = 0; pass < 3; pass++){ // 多轮去客套：麻烦请帮我查一下… → 实体
+      var before = s;
+      for (var i = 0; i < SEARCH_HEADS.length; i++){
+        if (s.indexOf(SEARCH_HEADS[i]) === 0){
+          var rest = s.slice(SEARCH_HEADS[i].length)
+            .replace(/^[\s,，。.、;；:：!！?？]+/, '').replace(/^一下/, '')
+            .replace(/^[\s,，。.、;；:：!！?？]+/, '');
+          if (rest) s = rest;
+          break;
+        }
+      }
+      if (s === before) break;
+    }
+    var follow = s.length > 0 && s.length <= 40 && SEARCH_REFER.test(s);
+    if (follow && prev){
+      var p = String(prev).replace(/\s+/g, ' ').trim();
+      if (p) s = p.slice(-160) + ' ' + s;
+    }
+    return { q: s || String(raw || '').trim(), follow: follow };
+  }
+  /* 当前消息发送前已入列，取更早的一条不同内容的用户消息作追问上下文 */
+  function lastUserBefore(msgs, raw){
+    var t = String(raw || '').trim();
+    for (var i = (msgs || []).length - 1; i >= 0; i--){
+      var m = msgs[i];
+      if (m && m.role === 'user'){
+        var c = String(m.content || '').trim();
+        if (c && c !== t) return c;
+      }
+    }
+    return null;
+  }
+
+  /* 非流式 chat 补全（查询改写用）：双通道，任何失败返回 null */
+  function chatOnce(messages, opt){
+    opt = opt || {};
+    var base = normBase(S.cfg.baseURL);
+    if (!base || !S.cfg.currentModel) return Promise.resolve(null);
+    var headers = { 'Content-Type': 'application/json' };
+    if (S.cfg.apiKey) headers['Authorization'] = 'Bearer ' + S.cfg.apiKey;
+    var body = { model: S.cfg.currentModel, messages: messages, stream: false,
+      temperature: opt.temperature == null ? 0.2 : opt.temperature, max_tokens: opt.maxTokens || 160 };
+    var ms = opt.timeout || 15000;
+    var url = base + '/chat/completions';
+    if (bridge.ok && S.cfg.useBridge){
+      return new Promise(function(resolve){
+        var id = 'q' + (++bridge.seq), acc = '', fin = false;
+        var to = setTimeout(function(){ if (fin) return; fin = true; bridge.abort(id); delete bridge.pend[id]; resolve(null); }, ms);
+        function stop(){ if (!fin){ fin = true; clearTimeout(to); delete bridge.pend[id]; } }
+        bridge.pend[id] = {
+          onChunk: function(t){ if (acc.length < 500000) acc += t; },
+          onDone: function(status){
+            if (fin) return; stop();
+            if (status && (status < 200 || status >= 300)) return resolve(null);
+            try { resolve(JSON.parse(acc).choices[0].message || null); } catch (e) { resolve(null); }
+          },
+          onError: function(){ stop(); resolve(null); }
+        };
+        bridge.send({ t: 'http', id: id, url: url, method: 'POST', headers: headers, body: JSON.stringify(body) });
+      });
+    }
+    var ac = new AbortController();
+    var t = setTimeout(function(){ ac.abort(); }, ms);
+    return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: ac.signal })
+      .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.json(); })
+      .then(function(j){ clearTimeout(t); return (j && j.choices && j.choices[0] && j.choices[0].message) || null; })
+      .catch(function(){ clearTimeout(t); return null; });
+  }
+  /* 查询改写（档③）：开启且已配模型才走；改写失败/过短回退原查询 */
+  function rewriteQuery(q, msgs){
+    if (!S.cfg.searchRewrite || isMock()) return Promise.resolve(q);
+    var sys = '你是搜索查询改写器。把用户问题改写成一条适合网页搜索的检索词：保留实体、年份、数字与限定，去掉客套与指代，使其独立可检索；不回答问题，只输出检索词本身，不要引号与解释。';
+    var ctx = '';
+    (msgs || []).slice(-3).forEach(function(m){
+      if (m && m.role === 'user' && m.content) ctx += '用户：' + String(m.content).slice(0, 160) + '\n';
+    });
+    return chatOnce([
+      { role: 'system', content: sys },
+      { role: 'user', content: (ctx ? '最近对话：\n' + ctx : '') + '当前问题：' + q }
+    ], { temperature: 0.2, maxTokens: 120, timeout: 15000 }).then(function(m){
+      var r = m && m.content ? String(m.content).trim().replace(/^["'「『\s]+/, '').replace(/["'」』\s]+$/, '').replace(/\s+/g, ' ') : '';
+      return r.length >= 2 && r.length <= 200 ? r : q;
+    });
+  }
+
+  function safeUrl(u){
+    try {
+      var p = new URL(String(u));
+      return (p.protocol === 'http:' || p.protocol === 'https:') ? p.href : null;
+    } catch (e) { return null; }
+  }
+  /* HTML → 纯文本：块级标签先转 \n，再去脚本样式与导航壳 */
+  function htmlToText(html){
+    var src = String(html || '')
+      .replace(/<(br\s*\/?|\/(p|div|li|h[1-6]|tr|section|article|blockquote|pre))\s*>/gi, '\n');
+    var doc = null;
+    try { doc = new DOMParser().parseFromString(src, 'text/html'); } catch (e) { return ''; }
+    if (!doc || !doc.body) return '';
+    var drop = doc.querySelectorAll('script,style,noscript,svg,canvas,iframe,nav,header,footer,aside,form,button,select,textarea,template');
+    for (var i = 0; i < drop.length; i++) if (drop[i].parentNode) drop[i].parentNode.removeChild(drop[i]);
+    return (doc.body.textContent || '').replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  /* 单页抓取（档④）：桥 GET 优先，浏览器直连受 CORS 约束，失败返回 null（回退摘要） */
+  function fetchPageText(u){
+    var href = safeUrl(u);
+    if (!href) return Promise.resolve(null);
+    var ms = 8000;
+    if (bridge.ok && S.cfg.useBridge){
+      return new Promise(function(resolve){
+        var id = 'p' + (++bridge.seq), acc = '', fin = false;
+        var to = setTimeout(function(){ if (fin) return; fin = true; bridge.abort(id); delete bridge.pend[id]; resolve(null); }, ms);
+        function stop(){ if (!fin){ fin = true; clearTimeout(to); delete bridge.pend[id]; } }
+        bridge.pend[id] = {
+          onChunk: function(t){ if (acc.length < 400000) acc += t; },
+          onDone: function(status){ if (fin) return; stop(); resolve((status >= 200 && status < 300) ? htmlToText(acc) : null); },
+          onError: function(){ stop(); resolve(null); }
+        };
+        bridge.send({ t: 'http', id: id, url: href, method: 'GET',
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml' } });
+      });
+    }
+    var ac = new AbortController();
+    var t = setTimeout(function(){ ac.abort(); }, ms);
+    return fetch(href, { signal: ac.signal, headers: { 'Accept': 'text/html,application/xhtml+xml' } })
+      .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.text(); })
+      .then(function(h){ clearTimeout(t); return h ? htmlToText(h) : null; })
+      .catch(function(){ clearTimeout(t); return null; });
+  }
+  function fetchPages(list){
+    if (!S.cfg.searchFetch || !list || !list.length) return Promise.resolve(list);
+    var n = clamp(parseInt(S.cfg.searchFetchCount, 10), 0, 5);
+    if (!n) return Promise.resolve(list);
+    var jobs = [];
+    for (var i = 0; i < list.length && jobs.length < n; i++){
+      (function(it){
+        /* 已是长文（Firecrawl markdown）或地址非法则跳过 */
+        if (!it || !safeUrl(it.url) || it.full || String(it.text || '').length >= 1600) return;
+        jobs.push(fetchPageText(it.url).then(function(t){
+          if (t && t.length >= 120){ it.text = t.slice(0, 3500); it.full = 1; }
+        }));
+      })(list[i]);
+    }
+    return jobs.length ? Promise.all(jobs).then(function(){ return list; }) : Promise.resolve(list);
+  }
+
+  /* POST JSON 双通道：桥/fetch，超时或非 2xx 返回 null */
+  function httpJSON(req, ms){
+    ms = ms || 15000;
+    if (bridge.ok && S.cfg.useBridge){
+      return new Promise(function(resolve){
+        var id = 's' + (++bridge.seq), acc = '', fin = false;
+        var to = setTimeout(function(){ if (fin) return; fin = true; bridge.abort(id); delete bridge.pend[id]; resolve(null); }, ms);
+        function stop(){ if (!fin){ fin = true; clearTimeout(to); delete bridge.pend[id]; } }
+        bridge.pend[id] = {
+          onChunk: function(t){ if (acc.length < 1000000) acc += t; },
+          onDone: function(status){
+            if (fin) return; stop();
+            if (status && (status < 200 || status >= 300)) return resolve(null);
+            try { resolve(req.parse(JSON.parse(acc))); } catch (e) { resolve(null); }
+          },
+          onError: function(){ stop(); resolve(null); }
+        };
+        bridge.send({ t: 'http', id: id, url: req.url, method: 'POST', headers: req.headers, body: req.body });
+      });
+    }
+    var ac = new AbortController();
+    var t = setTimeout(function(){ ac.abort(); }, ms);
+    return fetch(req.url, { method: 'POST', headers: req.headers, body: req.body, signal: ac.signal })
+      .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.json(); })
+      .then(function(j){ clearTimeout(t); try { return j ? req.parse(j) : null; } catch (e) { return null; } })
+      .catch(function(){ clearTimeout(t); return null; });
+  }
+  /* 三通道检索 + 地址校验 + URL 去重（Issue 17） */
+  function runProviders(query, num){
     var prov = (S.cfg.searchProvider || 'none').toLowerCase();
     var key = S.cfg.searchKey || '';
-    if (prov === 'none' || !prov || !key) return Promise.resolve(null);
-    var t0 = Date.now();
-    var num = clamp(parseInt(S.cfg.searchCount, 10) || 5, 1, 10);
+    if (prov === 'none' || !key) return Promise.resolve(null);
     var req = null;
     if (prov === 'serper'){
       req = {
@@ -1374,51 +1565,91 @@ var NET = (function(){
         }); }
       };
     } else return Promise.resolve(null);
-
-    function fmt(results){
-      if (!results || !results.length) return null;
-      var out = ['[在线搜索结果：' + query + ']'], total = 0;
-      for (var i = 0; i < results.length && total < 16384; i++){
-        var t = (results[i].text || '').slice(0, 1500);
-        total += t.length;
-        out.push('[' + (i + 1) + '] ' + (results[i].title || '') + '\n' + (results[i].url || '') + '\n' + t);
+    return httpJSON(req, 15000).then(function(list){
+      if (!list || !list.length) return null;
+      var seen = {}, out = [];
+      for (var i = 0; i < list.length; i++){
+        var it = list[i]; if (!it) continue;
+        var u = safeUrl(it.url);
+        if (!u || seen[u]) continue; // 非 http/https 与重复 URL 直接丢弃
+        seen[u] = 1; it.url = u; out.push(it);
       }
-      return out.join('\n\n');
-    }
-    /* 搜索元数据：条数/耗时/来源 */
-    function meta(results){
-      return {
-        block: fmt(results), n: results ? results.length : 0, ms: Date.now() - t0,
-        items: (results || []).slice(0, 8).map(function(r){ return { t: r.title || '', u: r.url || '' }; })
-      };
-    }
+      return out.length ? out : null;
+    });
+  }
 
-    if (bridge.ok && S.cfg.useBridge){
-      return new Promise(function(resolve){
-        var id = 's' + (++bridge.seq);
-        var acc = '', fin = false;
-        function done(r){ if (!fin){ fin = true; delete bridge.pend[id]; resolve(r); } }
-        bridge.pend[id] = {
-          onChunk: function(t){ acc += t; },
-          onDone: function(status){
-            if (fin) return;
-            if (status && status !== 200) return done(null);
-            try { done(meta(req.parse(JSON.parse(acc)))); } catch (e) { done(meta(null)); }
-          },
-          onError: function(){ done(null); }
-        };
-        bridge.send({ t: 'http', id: id, url: req.url, method: 'POST', headers: req.headers, body: req.body });
-      });
+  /* 结构化注入格式（档②）：编号 + 引用要求 + 正文/摘要标注，总量 16384 字符 */
+  function fmtBlock(list, query){
+    if (!list || !list.length) return null;
+    function pad(x){ return x < 10 ? '0' + x : '' + x; }
+    var ts = new Date();
+    var stamp = ts.getFullYear() + '-' + pad(ts.getMonth() + 1) + '-' + pad(ts.getDate()) + ' ' + pad(ts.getHours()) + ':' + pad(ts.getMinutes());
+    var entries = [], total = 0;
+    for (var i = 0; i < list.length && total < 16384; i++){
+      var body = String((list[i] && list[i].text) || '').slice(0, 3500);
+      if (!body) continue;
+      total += body.length;
+      entries.push({ title: ((list[i].title || '').trim()) || '（无标题）', url: list[i].url || '', body: body, full: !!list[i].full });
     }
-    var ac = new AbortController();
-    var t = setTimeout(function(){ ac.abort(); }, S.cfg.timeout.connect * 1000);
-    return fetch(req.url, { method: 'POST', headers: req.headers, body: req.body, signal: ac.signal })
-      .then(function(res){ clearTimeout(t); if (!res.ok) return meta(null); return res.json(); })
-      .then(function(j){ clearTimeout(t); return meta(req.parse(j)); })
-      .catch(function(){ clearTimeout(t); return meta(null); });
+    if (!entries.length) return null;
+    var out = ['【联网搜索结果 · ' + stamp + ' · 查询：' + query + '】',
+      '作答要求：仅依据下列结果作答；关键论断在句末标注对应编号 [N]；结果未覆盖的内容须明确说明「搜索结果未覆盖」；来源冲突时以较新来源为准。'];
+    for (var j = 0; j < entries.length; j++){
+      var e = entries[j];
+      out.push('[' + (j + 1) + '] ' + e.title + '\n' + e.url + '\n' + e.body + (e.full ? '' : '\n（摘要，未抓取网页全文）'));
+    }
+    return out.join('\n\n');
+  }
+
+  /* 入口：raw=用户原话；onStage=阶段回调（更新 live 指示器）；永不 reject */
+  function searchWeb(raw, onStage){
+    var stage = typeof onStage === 'function' ? onStage : function(){};
+    var prov = (S.cfg.searchProvider || 'none').toLowerCase();
+    var key = S.cfg.searchKey || '';
+    if (prov === 'none' || !prov || !key) return Promise.resolve(null);
+    var t0 = Date.now();
+    var num = clamp(parseInt(S.cfg.searchCount, 10) || 5, 1, 10);
+    var prep = prepQuery(raw, lastUserBefore(S.msgs, raw));
+    var q = prep.q;
+    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q }; }
+    stage('生成搜索查询…');
+    return rewriteQuery(prep.q, S.msgs).catch(function(){ return prep.q; })
+      .then(function(rq){
+        q = rq || prep.q;
+        stage('正在联网搜索：' + q);
+        return runProviders(q, num);
+      })
+      .then(function(list){
+        if (!list || !list.length){ stage('搜索无结果'); return fail(); }
+        stage('抓取网页正文…');
+        return fetchPages(list).then(function(l2){
+          var blk = fmtBlock(l2, q);
+          if (!blk){ stage('搜索无结果'); return fail(); }
+          var items = [];
+          for (var i = 0; i < Math.min(l2.length, 8); i++) items.push({ t: l2[i].title || '', u: l2[i].url || '' });
+          return { block: blk, n: l2.length, ms: Date.now() - t0, items: items, query: q };
+        });
+      })
+      .catch(function(){ return fail(); });
   }
 
   /* GET {base}/models；桥优先 */
+  /* /models 解析：模型列表 + 各家上下文窗口字段（OpenRouter context_window / vLLM max_model_len 等） */
+  function parseModels(j){
+    var data = (j && j.data) || [], list = [], ctx = {};
+    for (var i = 0; i < data.length; i++){
+      var m = data[i];
+      if (!m || !m.id) continue;
+      list.push(m.id);
+      var v = parseInt(m.context_window || m.max_context_length || m.context_length ||
+        m.max_context_tokens || m.max_model_len ||
+        (m.topProvider && m.topProvider.context_window) ||
+        (m.architecture && m.architecture.context_window) || 0, 10);
+      if (v > 0) ctx[m.id] = v;
+    }
+    return { list: list.length ? list : null, ctx: ctx };
+  }
+
   function fetchModels(){
     if (isMock()) return Promise.resolve({ list: ['mock-demo'] });
     var base = normBase(S.cfg.baseURL);
@@ -1440,8 +1671,7 @@ var NET = (function(){
             try {
               var j = JSON.parse(acc);
               if (j.error) return fin({ list: null, err: new Error('HTTP 401') });
-              var list = (j.data || []).map(function(m){ return m.id; }).filter(Boolean);
-              fin({ list: list.length ? list : null });
+              fin(parseModels(j));
             } catch (e) { fin({ list: null, err: new Error('HTTP ' + (status || 200)) }); }
           },
           onError: function(e){ fin({ list: null, err: e }); }
@@ -1458,10 +1688,7 @@ var NET = (function(){
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       })
-      .then(function(j){
-        var list = (j.data || []).map(function(m){ return m.id; }).filter(Boolean);
-        return { list: list.length ? list : null };
-      })
+      .then(function(j){ return parseModels(j); })
       .catch(function(e){ clearTimeout(t); return { list: null, err: e }; });
   }
 
@@ -1729,7 +1956,22 @@ var UI = (function(){
     if (!p) return;
     S.cfg.activePreset = id;
     if (model != null) p.currentModel = model;
+    applyCtx(); // 切组/切模型后按已探测的窗口映射刷新（ctxAuto 控制）
     mirrorPreset(); saveCfg(); renderComposerCtl();
+  }
+  /* 上下文窗口自动探测：/models 的窗口字段写入当前配置组「上下文上限」；ctxAuto=false 不覆盖手填值 */
+  function applyCtx(map){
+    if (map){ S.ctxMap = map; S.ctxMapPid = AP().id; }
+    var p = AP();
+    if (!S.ctxMap || S.ctxMapPid !== p.id || p.ctxAuto === false) return null;
+    var v = S.ctxMap[p.currentModel];
+    if (!v){
+      var ks = Object.keys(S.ctxMap);
+      if (ks.length === 1) v = S.ctxMap[ks[0]]; // 仅一个模型且 id 未对上：直接采信
+    }
+    if (!v || parseInt(p.ctxLimit, 10) === v) return null;
+    p.ctxLimit = v; saveCfg();
+    return v;
   }
   function presetInput(key, type, ph){
     var v = AP()[key];
@@ -1801,8 +2043,12 @@ var UI = (function(){
             sel, el('button', { class: 'btn btn-sec', 'data-m': 'fetch-models', text: '获取列表' })
           ]), manual
         ])));
-        b.appendChild(field('上下文上限', presetInput('ctxLimit', 'number', '131072'),
-          'tok 数（进度环分母，默认 131072）；占用按上一轮 usage 统计。'));
+        var ctxCk = el('input', { type: 'checkbox', 'data-preset': 'ctxAuto' });
+        ctxCk.checked = ap.ctxAuto !== false;
+        b.appendChild(field('上下文上限', el('div', { style: 'display:flex;gap:8px;align-items:center' }, [
+          presetInput('ctxLimit', 'number', '131072'),
+          el('label', { style: 'font-size:12px;white-space:nowrap' }, [ctxCk, ' 自动探测'])
+        ]), 'tok 数（进度环分母，默认 131072）；占用按上一轮 usage 统计。勾选「自动探测」后，获取模型列表时按接口返回的窗口字段（context_window / max_model_len 等）自动填入，取消勾选即锁定手填值。'));
 
         var streamCk = el('input', { type: 'checkbox', 'data-cfg': 'stream' });
         streamCk.checked = !!c.stream;
@@ -1823,6 +2069,11 @@ var UI = (function(){
           el('textarea', { 'data-cfg': 'systemPrompt', text: c.systemPrompt || '' })));
       }, true));
 
+      p.appendChild(acc('代理', function(b){
+        b.appendChild(field('HTTP 代理', cfgInput('proxy', 'text', 'http://127.0.0.1:7890'),
+          '留空=系统代理。格式 http://[user:pass@]host:port（缺 http:// 会自动补）。仅宿主桥通道生效：对话流式、模型列表、联网搜索、正文抓取、查询改写；浏览器直连与页面内请求跟随系统代理，无法单独指定。'));
+      }, false));
+
       p.appendChild(acc('在线搜索', function(b){
         var psel = el('select', { 'data-cfg': 'searchProvider', class: 'f-in' });
         [['none', '不启用'], ['serper', 'Serper（Google）'], ['tavily', 'Tavily'], ['firecrawl', 'Firecrawl']].forEach(function(pp){
@@ -1835,6 +2086,16 @@ var UI = (function(){
           return i;
         })(), '仅存本机。Serper/Tavily/Firecrawl 均为各家官网申请'));
         b.appendChild(field('结果条数', cfgInput('searchCount', 'number'), '1~10，默认 5。结果按条截断，总量受上下文裁剪保护。'));
+        var rwCk = el('input', { type: 'checkbox', 'data-cfg': 'searchRewrite' });
+        rwCk.checked = c.searchRewrite !== false;
+        var ftCk = el('input', { type: 'checkbox', 'data-cfg': 'searchFetch' });
+        ftCk.checked = c.searchFetch !== false;
+        b.appendChild(el('div', { class: 'f-row' }, [
+          el('label', {}, [rwCk, ' 搜索查询改写']),
+          el('label', { style: 'margin-left:18px' }, [ftCk, ' 抓取网页正文'])
+        ]));
+        b.appendChild(field('正文抓取条数', cfgInput('searchFetchCount', 'number'),
+          '查询改写：发送前用当前模型把问题改写成独立检索词（约 1~2 秒，失败回退原问题）；抓取正文：对前几条结果抓网页全文替代摘要（0~5 条，浏览器直连受 CORS 限制时自动回退摘要）。'));
       }, false));
 
       p.appendChild(acc('文件 Agent', function(b){
@@ -2536,7 +2797,8 @@ var UI = (function(){
       if (S.cfg.webSearch && !NET.isMock()){
         var live = el('div', { class: 'srch', text: '正在联网搜索：' + text });
         $('#msg-list').appendChild(live); maybeScroll(true);
-        NET.searchWeb(text).then(function(r){
+        var stage = function(s){ if (s){ live.textContent = s; maybeScroll(true); } };
+        NET.searchWeb(text, stage).then(function(r){
           live.remove();
           if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
           go(r && r.block, r);
@@ -3105,7 +3367,7 @@ var UI = (function(){
     if (kind === 'new'){
       var nm = window.prompt('新配置名称（提供商/策略）', '配置' + (ps.length + 1));
       if (!nm) return;
-      var np = { id: 'p' + Date.now().toString(36), name: nm, baseURL: '', apiKey: '', models: [], currentModel: '' };
+      var np = { id: 'p' + Date.now().toString(36), name: nm, baseURL: '', apiKey: '', models: [], currentModel: '', ctxAuto: true };
       S.cfg.presets = ps.concat([np]);
       applyPreset(np.id); openSettings();
       toast('已新建「' + nm + '」，请填写 Base URL / Key');
@@ -3148,7 +3410,7 @@ var UI = (function(){
   /* 对外接口 */
   return {
     AP: AP, applyPreset: applyPreset, presetField: presetField,
-    presetModels: presetModels, presetBtn: presetBtn, promptCard: promptCard,
+    presetModels: presetModels, applyCtx: applyCtx, presetBtn: presetBtn, promptCard: promptCard,
     init: function(){
       $list = $('#session-list'); $scroll = $('#msg-scroll'); $empty = $('#empty');
       $input = $('#input'); $send = $('#btn-send'); $chips = $('#chips');
@@ -3404,8 +3666,9 @@ var UI = (function(){
           return void UI.toast(msg, true);
         }
         UI.presetModels(list);
-        UI.openSettings(); // 重建弹层以刷新模型下拉
-        UI.toast('已获取 ' + list.length + ' 个模型');
+        var w = UI.applyCtx(r.ctx); // 上下文窗口自动探测（ctxAuto 控制）
+        UI.openSettings(); // 重建弹层以刷新模型下拉与上下文上限
+        UI.toast('已获取 ' + list.length + ' 个模型' + (w ? ' · 上下文窗口 ' + w + ' tok' : ''));
       });
     }
     else if (m === 'bindkey'){

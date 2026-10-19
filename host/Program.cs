@@ -123,6 +123,37 @@ namespace SoloChatHost
         readonly ConcurrentDictionary<string, CancellationTokenSource> inflight =
             new ConcurrentDictionary<string, CancellationTokenSource>();
         static readonly HttpClient Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        /* 页面 设置 → 代理：留空走系统默认（Http 原样）；按值缓存，配置变化即重建 handler */
+        static volatile HttpClient proxyHttp;
+        static volatile string proxyKey;
+        static HttpClient ClientFor(string proxy)
+        {
+            proxy = (proxy ?? "").Trim();
+            if (proxy.Length == 0) return Http;
+            if (proxy.IndexOf("://", StringComparison.Ordinal) < 0) proxy = "http://" + proxy;
+            if (string.Equals(proxy, proxyKey, StringComparison.Ordinal)) return proxyHttp ?? Http;
+            try
+            {
+                var uri = new Uri(proxy);
+                var addr = uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.Unescaped);
+                var handler = new HttpClientHandler { UseProxy = true, Proxy = new System.Net.WebProxy(addr) };
+                if (uri.UserInfo.Length > 0)
+                {
+                    var up = uri.UserInfo.Split(new[] { ':' }, 2);
+                    handler.Proxy.Credentials = new System.Net.NetworkCredential(
+                        Uri.UnescapeDataString(up[0]), up.Length > 1 ? Uri.UnescapeDataString(up[1]) : "");
+                }
+                var c = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+                proxyKey = proxy; proxyHttp = c;
+                return c;
+            }
+            catch (Exception ex)
+            {
+                Log("proxy invalid (" + ex.GetType().Name + ")，回退系统代理");
+                proxyKey = proxy; proxyHttp = null;
+                return Http;
+            }
+        }
         static readonly List<string> wsRoots = new List<string>(); // 已授权工作区根目录（只能经宿主对话框添加，页面按会话引用其一）
         static Point? qbPos;  // 快速输入条自绘位置（记住上次消失的位置）
 
@@ -514,6 +545,7 @@ namespace SoloChatHost
             {
                 var method = new HttpMethod(req.GetProperty("method").GetString());
                 var url = req.GetProperty("url").GetString();
+                var proxy = req.TryGetProperty("proxy", out JsonElement px) ? px.GetString() : null;
                 // 仅放行 http/https 绝对 URI，防 file://、gopher:// 等被滥用
                 if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -534,7 +566,7 @@ namespace SoloChatHost
                     if (!string.IsNullOrEmpty(body))
                         m.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-                    using (var resp = await Http.SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
+                    using (var resp = await ClientFor(proxy).SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
                     {
                         Post(id, "http.meta", null, null, (int)resp.StatusCode);
                         using (var stream = await resp.Content.ReadAsStreamAsync())
