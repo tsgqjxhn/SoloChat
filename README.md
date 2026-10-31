@@ -1,8 +1,8 @@
 # SoloChat
 
-**v0.2.0 · 一个 2.44 MB 的 exe，双击就是一个完整的本地 AI 聊天客户端。**
+**v0.2.1 · 一个 2.45 MB 的 exe，双击就是一个完整的本地 AI 聊天客户端。**
 
-没有安装器、没有 npm、没有构建步骤、没有云端。整个应用——界面、逻辑、图标、样式——全部内联在一个 `index.html` 里；配上宿主壳后发布成**单个 2.44 MB 的 `SoloChatHost.exe`**，托管 DLL、原生加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
+没有安装器、没有 npm、没有构建步骤、没有云端。整个应用——界面、逻辑、图标、样式——全部内联在一个 `index.html` 里；配上宿主壳后发布成**单个 2.45 MB 的 `SoloChatHost.exe`**，托管 DLL、原生加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
 ![首屏](screenshots/home.png)
 
@@ -10,7 +10,7 @@
 
 | 事实 | 数字 |
 |---|---|
-| 发布产物 | **单个 2.44 MB exe**（全内嵌，零散落依赖） |
+| 发布产物 | **单个 2.45 MB exe**（全内嵌，零散落依赖） |
 | 应用真实内存占用 | **~85 MB** 活动专用工作集（实测，非虚高口径） |
 | 数据存放 | **100% 本机**——IndexedDB + localStorage，不上传、无遥测 |
 | 外部依赖 | 仅系统预装的 WebView2 Runtime（Win10/11 自带，边际成本 0） |
@@ -32,6 +32,7 @@
 - **文档解析与 OCR** — docx / xlsx / pptx / rtf 及带文本层的 PDF 零依赖本地提取；扫描版 PDF 可选 **Mistral OCR** 或 **Azure 文档智能** 识别（自动回退、Key 进 DPAPI 保险库、附「测试识别」）
 - **代理** — 「通用设置」页内代理区块，默认 `http://127.0.0.1:7897`（Clash/mihomo 混合端口），宿主桥全通道生效，附「测试连通性」
 - **其他** — 深/浅双主题、Alt+Space 全局呼出（宿主）、侧栏分组置顶、快捷键自定义、导入导出、`mock` 离线演示
+- **v0.2.1 修复** — Work 模式可联网（```web 抓网页正文 / ```search 走搜索服务商）；工具结果不再以「你」的身份出现，改为一行一行的工具卡片（点开才看输出）；模型自吐 `<tool_call>` 伪标记自动剥除；`Alt+Space` 一次召唤
 - **v0.2.0 新增** — `Ctrl+K` 命令面板、`Ctrl+F` 会话内查找、消息分支（fork）、代码块工具条（复制/下载/换行/可选行号）、工具调用卡片、工作区目录树、```patch 补丁写入与产物版本回滚、Work 三套脚手架模板、失败自愈重试、设置六组 + 搜索 + 一键自检 + 存储面板 + 配置快照 + 诊断包、4 强调色与 4 档字号、会话按时间分组与拖拽排序、主页最近会话
 
 ## 截图
@@ -74,13 +75,13 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 - 数据按**页面来源（origin）隔离**，不写入 html 本身，也不在任何"缓存"里
 - 换浏览器、清数据、改路径都会看不到旧数据——长期数据请定期在 **设置 → 数据 → 导出** 备份
 
-## 体积与资源占用（v0.2.0 实测）
+## 体积与资源占用（v0.2.1 实测）
 
 | 项目 | 实测值 |
 |---|---|
-| 发布产物 | `SoloChatHost.exe` **2,557,952 字节（2.44 MB）**，单文件，无任何散落 dll / config |
+| 发布产物 | `SoloChatHost.exe` **2,567,168 字节（2.45 MB）**，单文件，无任何散落 dll / config |
 | 源码 | `index.html` 480 KB / 8.8k 行（CSS、JS、SVG 全内联）+ `Program.cs` 1.6k 行 |
-| 首次运行磁盘占用 | exe 2.44 MB + `%LOCALAPPDATA%\OpenPage` ≈ **65 MB**（其中 WebView2 运行时组件 ~60 MB：Widevine、过滤规则、着色器缓存；真正的聊天数据 IndexedDB 约 2 MB，随会话增长） |
+| 首次运行磁盘占用 | exe 2.45 MB + `%LOCALAPPDATA%\OpenPage` ≈ **65 MB**（其中 WebView2 运行时组件 ~60 MB：Widevine、过滤规则、着色器缓存；真正的聊天数据 IndexedDB 约 2 MB，随会话增长） |
 | 内存（可见空闲） | 6 个进程（宿主 + 5 个 WebView2），工作集合计 ≈ **374 MB**，私有内存 ≈ **140 MB** |
 | 内存（最小化） | 宿主自身工作集 56 MB → **2.2 MB**，全树工作集 ≈ **219 MB**（低内存态挂起渲染进程） |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime（系统级，随 Edge 更新） |
@@ -108,7 +109,7 @@ OpenPage/
 │   ├── Program.cs                    # WebView2 宿主（托盘 / 热键 / 桥 / 文件访问）
 │   ├── SoloChatHost.csproj           # 单文件发布：全部依赖内嵌
 │   └── app.ico
-├── dist/SoloChatHost.exe             # 发布产物（单文件，2.44 MB）
+├── dist/SoloChatHost.exe             # 发布产物（单文件，2.45 MB）
 ├── screenshots/                      # README 截图
 ├── 单文件AI聊天客户端-开发规范.md      # 架构与红线规范
 └── .gitignore
