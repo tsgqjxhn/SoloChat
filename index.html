@@ -65,7 +65,7 @@ input,textarea,select{font:inherit;color:inherit}
 .ic.fill{fill:currentColor;stroke:none}
 
 /* 布局骨架 */
-#app{display:flex;height:100vh}
+#app{display:flex;height:100vh;position:relative}
 #sidebar{
   width:var(--sb-w); flex:none; display:flex; flex-direction:column;
   background:var(--canvas); border-right:1px solid var(--hairline);
@@ -258,8 +258,30 @@ body.sb-collapsed.sb-float #sidebar{
 .md pre .code-bar .code-copy,.md pre .code-bar .code-run{position:static;top:auto;right:auto;padding:0}
 
 /* 运行面板（右侧抽屉，v1.9）：沙箱 iframe 预览 + 控制台 / C 解释输出 */
-#runner{position:relative;width:min(46vw,560px);flex:none;display:none;flex-direction:column;background:var(--canvas);border-left:1px solid var(--hairline)}
+/* v0.2.5：右侧面板改成悬浮抽屉 —— 脱离 flex 流，覆盖在主栏之上，不再挤压正文与输入框的宽度/高度 */
+#runner{position:absolute;right:12px;top:12px;bottom:var(--rn-b,12px);width:min(48vw,620px);z-index:45;
+  display:none;flex-direction:column;background:var(--canvas);border:1px solid var(--hairline);
+  border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.20),0 2px 8px rgba(0,0,0,.06);overflow:hidden}
 body.rn-open #runner{display:flex}
+/* 顶部分栏：工作区 / 运行 / 终端 */
+.rn-tabs{display:flex;gap:2px;flex:none}
+.rn-tab{position:relative;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--faint);
+  padding:5px 9px;border-radius:var(--r-sm);cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.rn-tab:hover{background:var(--soft);color:var(--body)}
+#runner[data-tab="ws"] .rn-tab[data-rt="ws"],#runner[data-tab="view"] .rn-tab[data-rt="view"],#runner[data-tab="out"] .rn-tab[data-rt="out"]{color:var(--ink);background:var(--soft)}
+.rn-tab.dot::after{content:'';position:absolute;right:3px;top:3px;width:5px;height:5px;border-radius:50%;background:var(--primary)}
+.rn-tab .rn-kind{margin-left:2px}
+.rn-tab .rn-kind:empty{display:none}
+.rn-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.rn-pane{display:none;flex:1;min-height:0;flex-direction:column;position:relative}
+#runner[data-tab="ws"] #pane-ws,#runner[data-tab="view"] #pane-view,#runner[data-tab="out"] #pane-out{display:flex}
+#pane-ws{overflow:auto}
+/* 分栏相关按钮只在该分栏出现 */
+#rn-ws-zip{display:none}
+#runner[data-tab="ws"] #rn-ws-zip{display:inline-flex}
+#rn-restart,#rn-clear,#rn-dl{display:none}
+#runner[data-tab="view"] #rn-restart,#runner[data-tab="out"] #rn-restart{display:inline-flex}
+#runner[data-tab="out"] #rn-clear,#runner[data-tab="out"] #rn-dl{display:inline-flex}
 /* 左缘拖宽把手 */
 .rn-resize{position:absolute;left:-3px;top:0;bottom:0;width:7px;z-index:12;cursor:col-resize;touch-action:none}
 .rn-resize::after{content:'';position:absolute;left:3px;top:0;bottom:0;width:1px;background:transparent;transition:background .12s}
@@ -284,33 +306,13 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .rn-pvbar[hidden]{display:none}
 .rn-pvbar .icon-btn[disabled]{opacity:.35;pointer-events:none}
 .rn-pvpath{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:11px;color:var(--muted)}
-#rn-view.pv #rn-frame{margin-top:30px;height:calc(100% - 30px)}
-.rn-console{flex:none;height:40%;min-height:110px;display:flex;flex-direction:column;border-top:1px solid var(--hairline)}
-.rn-ctools{height:30px;flex:none;display:flex;align-items:center;gap:4px;padding:0 10px;background:var(--soft);border-bottom:1px solid var(--hairline);font-size:11px;color:var(--muted)}
+#pane-view.pv #rn-frame{margin-top:30px;height:calc(100% - 30px)}
 .rn-ctools .sp{flex:1}
 .rn-mini{padding:2px 7px;font-size:11px;border-radius:var(--r-sm);line-height:1.5;color:var(--muted)}
 .rn-mini:hover{background:var(--card);color:var(--ink)}
-/* 控制台收合：只留工具条，预览区占满剩余高度（全屏展示 html 动画） */
-body.rn-cc .rn-console{height:auto;min-height:0}
-body.rn-cc #rn-out{display:none}
 /* v2.1：运行面板「工作区」区（Work 沙箱文件，v2.8 移到面板最上侧） */
-.rn-ws{flex:none;display:flex;flex-direction:column;min-height:0;max-height:40vh;border-bottom:1px solid var(--hairline);background:var(--soft)}
-.rn-ws-head{height:30px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--soft);border-bottom:1px solid var(--hairline);font-size:11px;color:var(--muted)}
-/* v2.7：运行面板收缩（收成窄条，可再展开；内容保留） */
-body.rn-min #runner{width:38px}
-body.rn-min .rn-head{padding:0;justify-content:center;flex-wrap:wrap;height:auto;min-height:var(--tb-h)}
-body.rn-min .rn-head b,body.rn-min .rn-head .sp,body.rn-min .rn-head #rn-dl,body.rn-min .rn-head #rn-close{display:none}
-body.rn-min .rn-min-v{display:block}
-body.rn-min .rn-view,body.rn-min .rn-console,body.rn-min .rn-ws,body.rn-min #rn-resize{display:none}
-body.rn-min #rn-min svg{transform:rotate(180deg)}
-.rn-min-v{display:none;writing-mode:vertical-rl;font-size:12px;color:var(--muted);letter-spacing:.2em;padding:10px 0;cursor:pointer;user-select:none}
-.rn-min-v:hover{color:var(--ink)}
-.rn-ws-tg{display:inline-flex;align-items:center;gap:4px;padding:2px 4px;border:0;border-radius:var(--r-sm);background:none;color:var(--body);font-size:12px;cursor:pointer}
-.rn-ws-tg:hover{background:var(--card)}
-.rn-ws-tg b{font-size:12px;font-weight:600;letter-spacing:.01em}
 .rn-ws-count{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
-#rn-ws:not(.rn-ws-open) #rn-ws-list{display:none}
-#rn-ws-list{margin:0;padding:0 0 4px;max-height:32vh;overflow:auto}
+#rn-ws-list{margin:0;padding:0 0 4px}
 #rn-ws-list .vfs-row{border-bottom:1px solid var(--hairline-soft)}
 #rn-ws-list .vfs-row:hover{background:var(--card)}
 #rn-ws-list .vfs-row.pv-on{background:var(--card)}
@@ -795,6 +797,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         </div>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
+        <button class="icon-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
       </div>
       <div id="win-ctl">
         <button class="win-btn" data-win="min" title="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
@@ -831,49 +834,41 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     </div>
   </main>
 
-  <aside id="runner" aria-label="运行（沙箱预览 / C 解释）">
+  <aside id="runner" data-tab="ws" aria-label="工作区 / 运行 / 终端">
     <div class="rn-resize" id="rn-resize" title="拖动调整宽度（双击复位）"></div>
     <div class="rn-head">
-      <b>运行</b><span class="rn-kind" id="rn-kind"></span>
+      <div class="rn-tabs" id="rn-tabs" role="tablist">
+        <button type="button" class="rn-tab" data-rt="ws" role="tab" title="本会话的沙箱工作区文件">工作区<span class="rn-ws-count" id="rn-ws-count"></span></button>
+        <button type="button" class="rn-tab" data-rt="view" role="tab" title="沙箱预览 / 文件预览">运行<span class="rn-kind" id="rn-kind"></span></button>
+        <button type="button" class="rn-tab" data-rt="out" role="tab" title="控制台 / 程序输出">终端</button>
+      </div>
+      <span class="rn-kind" id="rn-status" hidden></span>
       <span class="sp"></span>
-      <span class="rn-min-v" id="rn-min-v" title="展开运行面板">运行</span>
-      <button class="icon-btn" id="rn-min" title="收缩运行面板（内容保留）"><svg class="ic"><use href="#i-chev-r"/></svg></button>
-      <button class="icon-btn" id="rn-close" title="关闭运行面板"><svg class="ic"><use href="#i-close"/></svg></button>
+      <button class="btn btn-ghost rn-mini" id="rn-ws-zip" title="把沙箱工作区打包为 zip 下载（全程内存，不落临时文件）"><svg class="ic"><use href="#i-dl"/></svg>打包 zip</button>
+      <button class="btn btn-ghost rn-mini" id="rn-restart" title="重新运行当前代码块">重启</button>
+      <button class="btn btn-ghost rn-mini" id="rn-clear" title="清空终端">清空</button>
+      <button class="btn btn-ghost rn-mini" id="rn-dl" title="下载当前运行产物"><svg class="ic"><use href="#i-dl"/></svg>下载</button>
+      <button class="icon-btn" id="rn-close" title="关闭面板"><svg class="ic"><use href="#i-close"/></svg></button>
     </div>
-    <!-- v2.8：工作区移到面板最上侧（Work 产出优先可见；文件右侧可预览/运行/下载） -->
-    <div class="rn-ws" id="rn-ws">
-      <div class="rn-ws-head">
-        <button class="rn-ws-tg" id="rn-ws-tg" type="button" title="展开/收起沙箱工作区">
-          <svg class="ic"><use href="#i-chev-d"/></svg><b>工作区</b>
-        </button>
-        <span class="rn-ws-count" id="rn-ws-count"></span>
-        <span class="sp"></span>
-        <button class="btn btn-ghost rn-mini" id="rn-ws-zip" title="把沙箱工作区打包为 zip 下载（全程内存，不落临时文件）"><svg class="ic"><use href="#i-dl"/></svg>打包 zip</button>
+    <div class="rn-body">
+      <div class="rn-pane" id="pane-ws">
+        <div id="rn-ws-list"></div>
       </div>
-      <div id="rn-ws-list"></div>
-    </div>
-    <div class="rn-view" id="rn-view">
-      <div class="rn-pvbar" id="rn-pvbar" hidden>
-        <button class="icon-btn rn-mini" id="pv-back" title="后退"><svg class="ic"><use href="#i-chev-l"/></svg></button>
-        <button class="icon-btn rn-mini" id="pv-fwd" title="前进"><svg class="ic"><use href="#i-chev-r"/></svg></button>
-        <span class="rn-pvpath" id="pv-path" title=""></span>
-        <button class="btn btn-ghost rn-mini" id="pv-reload" title="重新加载预览">刷新</button>
-        <button class="icon-btn rn-mini" id="pv-close" title="关闭预览"><svg class="ic"><use href="#i-close"/></svg></button>
+      <div class="rn-pane rn-view" id="pane-view">
+        <div class="rn-pvbar" id="rn-pvbar" hidden>
+          <button class="icon-btn rn-mini" id="pv-back" title="后退"><svg class="ic"><use href="#i-chev-l"/></svg></button>
+          <button class="icon-btn rn-mini" id="pv-fwd" title="前进"><svg class="ic"><use href="#i-chev-r"/></svg></button>
+          <span class="rn-pvpath" id="pv-path" title=""></span>
+          <button class="btn btn-ghost rn-mini" id="pv-reload" title="重新加载预览">刷新</button>
+          <button class="icon-btn rn-mini" id="pv-close" title="关闭预览"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
+        <iframe id="rn-frame" sandbox="allow-scripts" title="沙箱预览"></iframe>
+        <pre class="rn-src" id="rn-src" hidden></pre>
+        <div class="rn-empty" id="rn-empty">点代码块右上角的 ▶ 在这里运行；Work 产物可在「工作区」里预览或运行</div>
       </div>
-      <iframe id="rn-frame" sandbox="allow-scripts" title="沙箱预览"></iframe>
-      <pre class="rn-src" id="rn-src" hidden></pre>
-      <div class="rn-empty" id="rn-empty">点击任意 HTML / SVG / JS / CSS / C 代码块右上角的 ▶ 在此运行；Work 沙箱文件可在上方「工作区」点「预览」或「运行」直接查看</div>
-    </div>
-    <div class="rn-console">
-      <div class="rn-ctools">
-        <span class="rn-sec-t" id="rn-status">控制台</span>
-        <span class="sp"></span>
-        <button class="icon-btn" id="rn-cc" title="收起控制台（让预览占满）"><svg class="ic"><use href="#i-chev-d"/></svg></button>
-        <button class="btn btn-ghost rn-mini" id="rn-restart" title="重新运行当前代码块">重启</button>
-        <button class="btn btn-ghost rn-mini" id="rn-clear" title="清空控制台">清空</button>
-        <button class="btn btn-ghost rn-mini" id="rn-dl" title="下载当前运行产物（源码文件）"><svg class="ic"><use href="#i-dl"/></svg>下载</button>
+      <div class="rn-pane" id="pane-out">
+        <div id="rn-out"></div>
       </div>
-      <div id="rn-out"></div>
     </div>
   </aside>
 </div>
@@ -888,6 +883,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <symbol id="i-logo" viewBox="0 0 1024 1024"><path d="M64 85.312h896V768H293.376L64 968.704V85.312z m85.312 85.376v609.92l112-97.92h613.376v-512H149.312z"/></symbol>
 <symbol id="i-work" viewBox="0 0 24 24"><path d="M8 12h8"/><path d="M4 8l4 4-4 4"/><path d="M20 8l-4 4 4 4"/><path d="M8 4l4 4.5 4-4.5"/><path d="M8 20.5l4-5 4 5"/><g fill="currentColor" stroke="none"><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="4" cy="8" r="1.6"/><circle cx="4" cy="16" r="1.6"/><circle cx="20" cy="8" r="1.6"/><circle cx="20" cy="16" r="1.6"/><circle cx="8" cy="4" r="1.6"/><circle cx="16" cy="4" r="1.6"/><circle cx="8" cy="20.5" r="1.6"/><circle cx="16" cy="20.5" r="1.6"/></g></symbol>
 <symbol id="i-agent" viewBox="0 0 1024 1024"><path fill="currentColor" stroke="none" d="M0 128v768h1024V128H0z m242.816 577.536L192 654.72l154.304-154.368L192 346.048l50.816-50.816L448 500.352l-205.184 205.184z m584.32 13.248H512V640h315.072v78.72z"/></symbol>
+<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
 <symbol id="i-gear" viewBox="0 0 1084 1024"><path style="fill:currentColor;stroke:none" d="M1072.147851 406.226367c-6.331285-33.456782-26.762037-55.073399-52.047135-55.073399-0.323417 0-0.651455 0.003081-0.830105 0.009241l-4.655674 0c-73.124722 0-132.618162-59.491899-132.618162-132.618162 0-23.731152 11.447443-50.336101 11.546009-50.565574 13.104573-29.498767 3.023185-65.672257-23.427755-84.127081l-1.601687-1.127342-134.400039-74.661726-1.700252-0.745401c-8.753836-3.805547-18.334698-5.735272-28.479231-5.735272-20.789593 0-41.235746 8.344174-54.683758 22.306575-14.741683 15.216028-65.622973 58.649474-104.721083 58.649474-39.450789 0-90.633935-44.286652-105.438762-59.784516-13.518857-14.247316-34.128258-22.753199-55.127302-22.753199-9.945862 0-19.354234 1.861961-27.958682 5.531982l-1.746455 0.74078-139.141957 76.431283-1.643269 1.139662c-26.537186 18.437884-36.675557 54.579032-23.584845 84.062398 0.115506 0.264895 11.579891 26.725075 11.579891 50.634877 0 73.126262-59.491899 132.618162-132.618162 132.618162l-4.581749 0c-0.318797-0.00616-0.636055-0.01078-0.951772-0.01078-25.260456 0-45.672728 21.618157-52.002472 55.0811-0.462025 2.453354-11.313456 60.622322-11.313456 106.117939 0 45.494078 10.85143 103.659965 11.314996 106.119479 6.334365 33.458322 26.758957 55.076479 52.036353 55.076479 0.320337 0 0.651455-0.00616 0.842426-0.012321l4.655674 0c73.126262 0 132.618162 59.491899 132.618162 132.616622 0 23.760413-11.444363 50.333021-11.546009 50.565574-13.093793 29.474125-3.041666 65.646075 23.395414 84.151722l1.569346 1.093459 131.838879 73.726895 1.675611 0.7377c8.750757 3.84251 18.305437 5.790715 28.397607 5.790715 21.082208 0 41.676209-8.706094 55.0888-23.290689 18.724339-20.347588 69.527086-62.362616 107.04815-62.362616 40.625872 0 92.72537 47.100385 107.759669 63.583903 13.441852 14.831008 34.176001 23.689571 55.470741 23.695731l0.00616 0c9.895039 0 19.27877-1.883523 27.893999-5.598205l1.711034-0.73924 136.659342-75.531873 1.617088-1.128882c26.492523-18.456365 36.601633-54.600594 23.538642-84.016195-0.115506-0.267974-11.595291-27.082374-11.595291-50.67646 0-73.124722 59.49344-132.616622 132.618162-132.616622l4.517066-0.00154c0.300316 0.00616 0.599092 0.009241 0.899409 0.009241 25.331299-0.00154 45.785153-21.619697 52.107197-55.054918 0.112426-0.589852 11.325776-59.507301 11.325776-106.14104C1083.464388 466.640776 1072.609877 408.67356 1072.147851 406.226367zM377.486862 945.656142l-115.32764-64.487932c5.082277-13.052211 15.437801-43.51815 15.437801-75.017486 0-109.382917-84.176364-199.816642-192.587488-208.134635-2.647404-15.427021-8.873963-54.967133-8.873963-85.667166 0-30.65691 6.223479-70.232445 8.869343-85.671786 108.415744-8.311832 192.592108-98.745557 192.592108-208.134635 0-31.416171-10.300081-61.797405-15.371577-74.854236l122.721583-67.40331c0.003081 0 0.00462 0.00154 0.007701 0.00154 4.423121 4.518606 22.121764 22.080182 46.558275 39.493911 39.929754 28.46229 77.952885 42.894416 113.014434 42.894416 34.716571 0 72.437845-14.151831 112.115025-42.06431 24.282503-17.07953 41.896442-34.302288 46.308782-38.74543 0.009241-0.00154 0.018481-0.00462 0.026182-0.00616l118.301542 65.726159c-5.077657 13.055291-15.416239 43.499669-15.416239 74.958962 0 109.389077 84.174824 199.822802 192.590568 208.134635 2.645865 15.462442 8.872423 55.107281 8.872423 85.671786 0 30.687711-6.223479 70.241685-8.869343 85.673326C890.042174 606.334084 805.86427 696.767809 805.86427 806.158426c0 31.450053 10.317022 61.851309 15.393138 74.903519l-119.783103 66.198965c-5.168521-5.490399-22.603811-23.363073-46.740005-41.288109-40.701336-30.224145-79.662378-45.549521-115.800446-45.549521-35.79155 0-74.458435 15.038919-114.927219 44.694774C400.22004 922.554885 382.666163 940.255068 377.486862 945.656142zM731.271848 511.646647c0-105.803762-86.081448-191.88059-191.888289-191.88059-105.803762 0-191.88059 86.076827-191.88059 191.88059 0 105.803762 86.076827 191.882129 191.88059 191.882129C645.19194 703.528777 731.271848 617.450409 731.271848 511.646647zM539.383558 395.903184c63.825696 0 115.751164 51.922387 115.751164 115.743463 0 63.825696-51.925468 115.751164-115.751164 115.751164-63.821076 0-115.743463-51.925468-115.743463-115.751164C423.640095 447.824031 475.562482 395.903184 539.383558 395.903184z"/></symbol>
@@ -1605,7 +1601,7 @@ var NET = (function(){
     if (tv && tv !== 'Default'){
       /* v2.9：优先用模型能力表里探测到的「该模型认哪个思考字段」，没有则沿用通用两分支 */
       var mmv = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-      var fld = (mmv && mmv.reason) || '';
+      var fld = (mmv && mmv.reason) || (reasonProfile(S.cfg.currentModel) || {}).field || '';
       var onOff = /^(enabled|disabled)$/i.test(tv);
       if (fld === 'reasoning'){
         body.reasoning = onOff ? { enabled: /^enabled$/i.test(tv) } : { effort: tv };
@@ -2357,6 +2353,24 @@ var NET = (function(){
   }
   var OUT_KEYS = ['max_completion_tokens', 'max_output_tokens', 'max_output', 'output_token_limit', 'max_tokens'];
   /* 单条 /models 记录 → 能力片段（接口给了就信接口，没给的留给目录/规则兜底） */
+  /* v0.2.5：按模型名推断「思考字段 + 可用档位」——接口目录常常只给一个 reasoning:true，
+     不告诉你能选 low/medium/high 还是 enabled/disabled，这里按厂商公开规格补齐。 */
+  var REASON_NAME = [
+    [/gpt-5/,                        'reasoning_effort', ['minimal', 'low', 'medium', 'high']],
+    [/(^|[^a-z])o[134]([^a-z]|$)/,   'reasoning_effort', ['low', 'medium', 'high']],
+    [/gemini-3|gemini-2\.5/,         'reasoning_effort', ['low', 'medium', 'high']],
+    [/claude|sonnet|opus|haiku/,     'reasoning_effort', ['low', 'medium', 'high']],
+    [/qwq|qwen3|qwen-3/,             'enable_thinking',  ['enabled', 'disabled']],
+    [/glm-4\.[5-9]|glm-z1|glm-5/,    'thinking',         ['enabled', 'disabled']],
+    [/doubao|seed-oss|kimi-k2/,      'thinking',         ['enabled', 'disabled']],
+    [/deepseek-r1|deepseek-reasoner/, 'enable_thinking',  ['enabled', 'disabled']]
+  ];
+  function reasonProfile(name){
+    var s2 = String(name || '').toLowerCase();
+    for (var i = 0; i < REASON_NAME.length; i++)
+      if (REASON_NAME[i][0].test(s2)) return { field: REASON_NAME[i][1], efforts: REASON_NAME[i][2].slice() };
+    return null;
+  }
   function modelCaps(m){
     var rec = {};
     var c = parseCtxVal(deepField(m, CTX_KEYS)); if (c) rec.ctx = c;
@@ -2391,6 +2405,13 @@ var NET = (function(){
     if (!reason && (m.reasoning === true || m.supports_reasoning === true ||
         (m.capabilities && m.capabilities.reasoning === true))) reason = 'reasoning_effort';
     if (reason) rec.reason = reason;
+    /* v0.2.5：思考档位 —— 目录给了就用目录，否则按模型名推断；两者都没有就不提供档位 */
+    var prof = reasonProfile(m.id || m.name || m.model || '');
+    var eff = null;
+    if (Array.isArray(m.reasoning_efforts) && m.reasoning_efforts.length) eff = m.reasoning_efforts.slice();
+    else if (prof && (!reason || prof.field === reason || reason === 'reasoning_effort')) eff = prof.efforts.slice();
+    if (eff) rec.efforts = eff;
+    if (!rec.reason && prof) rec.reason = prof.field;
     return rec;
   }
   /* 模型名 → 上下文窗口兜底推断：接口没给窗口字段时启用；规则按公开规格维护，命中才覆盖默认值 */
@@ -2744,6 +2765,7 @@ var NET = (function(){
     catalogCached: catalogCached,
     catFind: catFind,
     modelCaps: modelCaps,
+    reasonProfile: reasonProfile, // v0.2.5：UI 侧按模型名取思考档位
     estimate: estimate,
     searchWeb: searchWeb,
     openExternal: openExternal, // v0.2.3：Work 的 play 工具用（应用内播放窗口）
@@ -3760,14 +3782,42 @@ var RUNNER = (function(){
   function clearOut(){ if (out) out.textContent = ''; }
   function line(cls, txt){
     if (!out) return;
+    var rn = $('#runner');
+    if (rn && rn.getAttribute('data-tab') !== 'out'){
+      var t = rn.querySelector('.rn-tab[data-rt="out"]');
+      if (t) t.classList.add('dot');
+    }
     if (out.childNodes.length > 2000) out.removeChild(out.firstChild);
     out.appendChild(ce('span', 'rn-ln' + (cls ? ' ' + cls : ''), txt));
     out.scrollTop = out.scrollHeight;
   }
-  function open(){ document.body.classList.add('rn-open'); renderWs(); }
-  function close(){ document.body.classList.remove('rn-open'); document.body.classList.remove('rn-min'); }
+  /* v0.2.5：顶部分栏（工作区 / 运行 / 终端）——不再各区块单独折叠 */
+  function setTab(name){
+    var r = $('#runner'); if (!r) return;
+    if (['ws', 'view', 'out'].indexOf(name) < 0) name = 'ws';
+    r.setAttribute('data-tab', name);
+    try { localStorage.setItem('sc.rn.tab', name); } catch(e){}
+    if (name === 'ws') renderWs();
+    if (name === 'out'){ var t = r.querySelector('.rn-tab[data-rt="out"]'); if (t) t.classList.remove('dot'); }
+  }
+  function open(){
+    document.body.classList.add('rn-open');
+    var r = $('#runner');
+    if (r && !r.getAttribute('data-tab')) setTab('ws');
+    renderWs();
+  }
+  function close(){ document.body.classList.remove('rn-open'); }
 
   /* ---- v2.1：运行面板内的「工作区」区（Work 沙箱文件：列表 / 单文件下载 / 打包 zip）---- */
+  /* v0.2.5：切会话/重开应用后恢复工作区 —— 该会话有产物就打开面板并切到「工作区」 */
+  function syncForSession(sid){
+    if (!sid) return;
+    DB.workfsBySid(sid).then(function(fs){
+      if (S.sid !== sid) return;
+      if (fs && fs.length){ open(); setTab('ws'); }
+      else renderWs();
+    }, function(){});
+  }
   function renderWs(){
     bindOnce(); /* v2.5：首次进入即绑定（原来只有 ▶ 运行过才 bound，导致未运行时工作区/预览不可用） */
     if (!bound) return;
@@ -3781,15 +3831,6 @@ var RUNNER = (function(){
       if (!fs.length){
         list.appendChild(el('div', { class: 'hint', text: '沙箱工作区还没有文件。AI 用 ```vfs-write 写入（或回复里的 html/svg/js/css/md 代码块）后会自动出现在这里。' }));
         return;
-      }
-      /* v2.8：Work 模式有产物 → 自动展开工作区（用户手动收起过就不再打扰） */
-      if (S.cfg && S.cfg.mode === 'work'){
-        var box = $('#rn-ws'), tgEl = $('#rn-ws-tg'), useEl = tgEl && tgEl.querySelector('use');
-        var pref = '1'; try { pref = localStorage.getItem('sc.rn.ws') === '0' ? '0' : '1'; } catch(e){}
-        if (box && pref === '1'){
-          box.classList.add('rn-ws-open');
-          if (useEl) useEl.setAttribute('href', '#i-chev-d');
-        }
       }
       fs.sort(function(a, b){ return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
       /* v3.0 #11：按目录分组（可折叠），单层平铺时不加分组 */
@@ -3934,7 +3975,7 @@ var RUNNER = (function(){
     return '<!doctype html><html><head>' + head + '</head><body>\n' + content + '\n</body></html>';
   }
   function pvBarSync(){
-    var view = $('#rn-view');
+    var view = $('#pane-view');
     if (view) view.classList.toggle('pv', !!pv);
     var bb = $('#pv-back'), fb = $('#pv-fwd');
     if (bb) bb.disabled = !pvBack.length;
@@ -3967,6 +4008,7 @@ var RUNNER = (function(){
     });
   }
   function previewTo(sid, path, push){
+    setTab('view'); // v0.2.5：预览属于「运行」分栏
     if (push && pv && (pv.sid !== sid || pv.path !== path)){
       pvBack.push({ sid: pv.sid, path: pv.path });
       if (pvBack.length > 50) pvBack.shift();
@@ -4034,14 +4076,38 @@ var RUNNER = (function(){
       line(d.type === 'error' ? 'rn-err' : (d.type === 'warn' ? 'rn-warn' : ''), txt);
       if (cap) capFeed(txt, d.type === 'error');
     });
+    /* v0.2.5：抽屉底边 = 输入框上沿，面板悬浮但不压住输入框 */
+    var compEl = $('#composer');
+    function syncRnBottom(){
+      if (!compEl) return;
+      var h = compEl.getBoundingClientRect().height || 0;
+      document.documentElement.style.setProperty('--rn-b', Math.max(8, Math.round(h) + 8) + 'px');
+    }
+    if (compEl && window.ResizeObserver){
+      new ResizeObserver(syncRnBottom).observe(compEl);
+    }
+    syncRnBottom();
+    window.addEventListener('resize', syncRnBottom);
     $('#rn-close').addEventListener('click', close);
-    var rnMin = $('#rn-min');
-    if (rnMin) rnMin.addEventListener('click', function(){
-      var on = document.body.classList.toggle('rn-min');
-      if (on) line('rn-note', '▸ 运行面板已收缩（点左侧「运行」竖条或 ↗ 按钮展开）');
+    var pbtn = $('#btn-panel');
+    if (pbtn) pbtn.addEventListener('click', function(){
+      if (document.body.classList.contains('rn-open')) close(); else open();
     });
-    var rnMinV = $('#rn-min-v');
-    if (rnMinV) rnMinV.addEventListener('click', function(){ document.body.classList.remove('rn-min'); });
+    document.addEventListener('keydown', function(e){
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'j' || e.key === 'J')){
+        e.preventDefault();
+        if (document.body.classList.contains('rn-open')) close(); else open();
+      }
+    });
+    /* v0.2.5：顶部分栏切换 */
+    var rnTabs = $('#rn-tabs');
+    if (rnTabs) rnTabs.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('.rn-tab') : null;
+      if (!b) return;
+      setTab(b.getAttribute('data-rt'));
+      if (b.getAttribute('data-rt') === 'view' && pv) pvRender({ sid: pv.sid, path: pv.path });
+    });
+    try { var lastTab = localStorage.getItem('sc.rn.tab'); if (lastTab) $('#runner').setAttribute('data-tab', lastTab); } catch(e){}
     $('#rn-clear').addEventListener('click', clearOut);
     $('#rn-restart').addEventListener('click', function(){ if (cur) run(cur.kind, cur.code, true); });
     var dlBtn = $('#rn-dl');
@@ -4050,20 +4116,7 @@ var RUNNER = (function(){
     /* --- 工作区区（v2.1）--- */
     var zipBtn = $('#rn-ws-zip');
     if (zipBtn) zipBtn.addEventListener('click', function(){ UI.zipVfs(); });
-    var tg = $('#rn-ws-tg'), wsBox = $('#rn-ws'), tgUse = tg ? tg.querySelector('use') : null;
-    function applyWsTg(on){
-      if (wsBox) wsBox.classList.toggle('rn-ws-open', on);
-      if (tgUse) tgUse.setAttribute('href', on ? '#i-chev-d' : '#i-chev-u');
-    }
-    var wsOpen = true;
-    try { wsOpen = localStorage.getItem('sc.rn.ws') !== '0'; } catch(e){}
-    applyWsTg(wsOpen);
-    if (tg) tg.addEventListener('click', function(){
-      var on = !(wsBox && wsBox.classList.contains('rn-ws-open'));
-      applyWsTg(on);
-      try { localStorage.setItem('sc.rn.ws', on ? '1' : '0'); } catch(e){}
-      if (on) renderWs();
-    });
+
 
     /* --- v2.5：预览工具条（后退/前进/刷新/关闭）--- */
     var pbb = $('#pv-back'), pfb = $('#pv-fwd'), prb = $('#pv-reload'), pcb = $('#pv-close');
@@ -4072,19 +4125,6 @@ var RUNNER = (function(){
     if (prb) prb.addEventListener('click', function(){ if (pv) pvRender({ sid: pv.sid, path: pv.path }); });
     if (pcb) pcb.addEventListener('click', pvClose);
 
-    /* --- 控制台收合（便于全屏展示 html 动画）--- */
-    var ccBtn = $('#rn-cc'), ccUse = ccBtn ? ccBtn.querySelector('use') : null;
-    function applyCC(on){
-      document.body.classList.toggle('rn-cc', on);
-      if (ccUse) ccUse.setAttribute('href', on ? '#i-chev-u' : '#i-chev-d');
-      if (ccBtn) ccBtn.title = on ? '展开控制台' : '收起控制台（让预览占满）';
-    }
-    try { applyCC(localStorage.getItem('sc.rn.cc') === '1'); } catch(e){}
-    if (ccBtn) ccBtn.addEventListener('click', function(){
-      var on = !document.body.classList.contains('rn-cc');
-      applyCC(on);
-      try { localStorage.setItem('sc.rn.cc', on ? '1' : '0'); } catch(e){}
-    });
 
     /* --- 左缘拖宽（320~2400px，双击复位，持久化）--- */
     var rz = $('#rn-resize'), runner = $('#runner'), drag = null;
@@ -4167,6 +4207,7 @@ var RUNNER = (function(){
     open();
     kindEl.textContent = kind === 'c' ? 'C' : kind;
     clearOut();
+    setTab(kind === 'c' ? 'out' : 'view'); // v0.2.5：C 是纯控制台输出，其余先看画面
     if (kind === 'c'){
       srcEl.hidden = false; srcEl.textContent = code;
       frame.style.display = 'none';
@@ -4250,7 +4291,7 @@ var RUNNER = (function(){
   }
 
   return { run: run, runCapture: runCapture, close: close, open: open, reset: reset, download: download, runVfs: runVfs,
-    renderWs: renderWs, curKind: function(){ return cur && cur.kind; },
+    renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, open: open, close: close, curKind: function(){ return cur && cur.kind; },
     previewTo: previewTo, previewSource: previewSource, pvKind: pvKind, previewRefreshIf: previewRefreshIf }; /* v2.5/v2.8 */
 })();
 
@@ -4871,7 +4912,9 @@ var UI = (function(){
       var nm = { text: '文', image: '图', pdf: '档', audio: '音', video: '视' };
       bits.push(m.in.map(function(x){ return nm[x] || x; }).join('/'));
     }
-    if (m.reason) bits.push('思考');
+    if (m.reason){
+      bits.push('思考' + ((m.efforts && m.efforts.length) ? '·' + m.efforts.join('/') : ''));
+    }
     var s = bits.join(' · ');
     if (!s) return '能力未获取';
     return m.src === 'guess' ? s + ' · 推断' : s;
@@ -5454,7 +5497,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.4', ua = navigator.userAgent || '';
+      var ver = 'v0.2.5', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6115,6 +6158,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       renderMsgs();
       renderWsBtn();
       renderCtxRing();
+      RUNNER.syncForSession(sid); // v0.2.5：重进会话 → 有产物就自动打开工作区
       attachStreamView(); // 恢复该会话的流绑定/发送键状态
       /* 恢复草稿 */
       $input.value = S.drafts[sid] || '';
@@ -6910,6 +6954,10 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     if (selT && act !== selT){
       var list = String(S.cfg.thinkList || 'Default').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
       if (list.indexOf('Default') < 0) list.unshift('Default');
+      /* v0.2.5：优先用「该模型自动探测到的档位」（GPT-5 → minimal/low/medium/high；Qwen/GLM → enabled/disabled） */
+      var mmc = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
+      var effL = (mmc && mmc.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts) || null;
+      if (effL && effL.length) list = ['Default'].concat(effL);
       var cur = (S.cfg.thinkByModel && S.cfg.thinkByModel[S.cfg.currentModel]) || 'Default';
       selT.textContent = '';
       for (var i = 0; i < list.length; i++)
