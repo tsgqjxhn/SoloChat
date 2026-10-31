@@ -802,6 +802,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         </div>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
+        <button class="icon-btn" id="btn-handoff" title="交接到其他模式（带上下文，生成新会话，原会话保留）"><span style="font-size:15px;line-height:1">⇄</span></button>
         <button class="icon-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
       </div>
       <div id="win-ctl">
@@ -5646,7 +5647,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.7.0', ua = navigator.userAgent || '';
+      var ver = 'v0.8.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8030,7 +8031,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     renderPool: renderPool, mmUse: mmUse, mmToggleCfg: mmToggleCfg, mmDelete: mmDelete, mmSave: mmSave,
     fillMetaFromCatalog: fillMetaFromCatalog, ctxDisp: ctxDisp, ctxLimitFor: ctxLimitFor, mMeta: mMeta,
     renderCtxRing: renderCtxRing, metaLazy: metaLazy,
-    closePop: closePop, popOpen: popOpen,
+    closePop: closePop, popOpen: popOpen, openModal: openModal, confirmBox: confirmBox,
     moreToggle: moreToggle, popAct: popAct, popPrompts: popPrompts, popAt: popAt, importHistory: importHistory,
     touchSession: touchSession, streamDelta: streamDelta,
     /* v3.0：命令面板 / 查找 / 分支 / 维护面板 */
@@ -8300,6 +8301,20 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         }
         UI.toast('文件不存在（可能已删除）', true);
       });
+      return;
+    }
+    if (t.closest('#btn-handoff')){
+      var box = el('div', { style: 'padding:18px 20px;min-width:300px' });
+      box.appendChild(el('div', { style: 'font-size:14px;font-weight:600;margin-bottom:6px', text: '交接到哪个模式？' }));
+      box.appendChild(el('div', { class: 'hint', style: 'display:block;margin-bottom:12px', text: '会新建一个会话，带上最近 10 条压缩上下文与产物清单；原会话保留不动。' }));
+      var row = el('div', { class: 'f-actions', style: 'justify-content:flex-start' });
+      ['chat', 'work', 'agent'].forEach(function(m){
+        var b2 = el('button', { class: 'btn btn-sec', text: m.toUpperCase() });
+        b2.addEventListener('click', function(){ UI.closeModal(); HANDOFF.to(m); });
+        row.appendChild(b2);
+      });
+      box.appendChild(row);
+      UI.openModal(box, false, true);
       return;
     }
     var pb = t.closest('#seg-mode [data-persona]');
@@ -9158,6 +9173,53 @@ function delPersona(id){
   setCfg({ personas: (S.cfg.personas || []).filter(function(x){ return x.id !== id; }), persona: S.cfg.persona === id ? '' : S.cfg.persona });
   MODE.mountUI();
 }
+
+/* v0.7.0：跨模式交接 —— 带上下文与产物换模式，落成新会话（原会话不动） */
+var HANDOFF = (function(){
+  function summaryOf(msgs){
+    var out = [];
+    var start = Math.max(0, (msgs || []).length - 10);
+    for (var i = start; i < (msgs || []).length; i++){
+      var m = msgs[i];
+      if (!m || m.role === 'tool') continue;
+      var t = String(m.content || '').replace(/\s+/g, ' ').trim();
+      if (!t) continue;
+      out.push((m.role === 'user' ? '用户：' : '助手：') + t.slice(0, 300));
+    }
+    return out.join('\n');
+  }
+  function artifactsOf(sid){
+    return DB.allWorkfs().then(function(rows){
+      return (rows || []).filter(function(f){ return f.sid === sid; }).map(function(f){ return f.path; }).slice(0, 12);
+    }).catch(function(){ return []; });
+  }
+  function to(targetMode){
+    var cs = curSession();
+    if (!cs && !S.msgs.length){ UI.toast('当前没有可交接的对话', true); return; }
+    var text = summaryOf(S.msgs);
+    if (!text){ UI.toast('对话还是空的，没什么可交接', true); return; }
+    var oldMode = S.cfg.mode, oldTitle = (cs && cs.title) || '未命名';
+    var sid = uuid();
+    artifactsOf(cs && cs.id).then(function(files){
+      var sys = '【交接】本会话来自 ' + oldMode.toUpperCase() + ' 模式会话「' + oldTitle + '」，由用户主动交接。\n' +
+        '目标模式：' + targetMode.toUpperCase() + '。\n' +
+        (files.length ? '原会话产物（虚拟工作区）：' + files.join('、') + '\n' : '') +
+        '已压缩的前情（按时间）：\n' + text.slice(0, 3000);
+      var sess = { id: sid, title: '交接·' + targetMode + ' · ' + oldTitle, ts: Date.now(), pinned: false,
+        workspace: (cs && cs.workspace) || S.pendWs || '', msgCount: 1, systemPrompt: sys };
+      return DB.putSession(sess).then(function(){
+        return DB.putMessage({ id: uuid(), sid: sid, role: 'user', status: 'ok', ts: Date.now(), attachments: [],
+          content: '（交接自 ' + oldMode.toUpperCase() + '）请先复述你理解的待办与已有产物，再开始做。' }).then(function(){
+          setCfg({ mode: targetMode, persona: '' });
+          S.sessions.unshift(sess);
+          selectSession(sid);
+          UI.toast('已交接给 ' + targetMode.toUpperCase() + '（原会话保留）');
+        });
+      });
+    }).catch(function(e){ UI.toast('交接失败：' + (e && e.message || e), true); });
+  }
+  return { to: to, summaryOf: summaryOf };
+})();
 
 /* v0.5.0：子智能体（母智能体派活）—— 独立上下文、独立循环、只回最终答复
    与主对话的关系：母（当前会话）用 ```sub 名字 任务 派活；子在自己的消息数组里跑完，只把答案回灌成一条工具结果。
