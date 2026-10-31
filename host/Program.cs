@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -601,6 +602,12 @@ namespace SoloChatHost
                         var idCopy = id;
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
+                    }
+                    else if (t == "cmd") /* v0.9.0：命令执行（白名单 + 授权 cwd + 超时） */
+                    {
+                        var idCopy5 = id;
+                        var reqCopy5 = root.Clone();
+                        Task.Run(() => RunCmdAsync(reqCopy5, idCopy5));
                     }
                     else if (t == "file") /* v0.2.8：通用 URL→磁盘（图片/PDF/Office/压缩包等） */
             {
@@ -1442,7 +1449,136 @@ namespace SoloChatHost
             return full;
         }
 
-        /* 路径安全闸：root 必须是已授权根目录之一（页面按会话引用），rel 是其内相对路径 */
+    /* v0.9.0：Agent 命令执行（宿主侧）—— 白名单 + 工作区内 cwd + 超时 + 输出截断
+       只允许开发工具链；不接受 shell 元字符展开（进程直接启动，参数逐个传递，不经过 cmd.exe）。 */
+    /* net48 没有 ArgumentList，这里按 Windows 命令行规则手工转义 */
+    static string QuoteArg(string a)
+    {
+        if (a == null) return "\"\"";
+        if (a.Length == 0) return "\"\"";
+        if (a.IndexOfAny(new char[] { ' ', '\t', '"', '\n', '\v' }) < 0) return a;
+        var sb = new StringBuilder("\"");
+        int bs = 0;
+        foreach (char ch in a)
+        {
+            if (ch == '\\') bs++;
+            else if (ch == '"') { sb.Append('\\', bs * 2 + 1).Append('"'); bs = 0; }
+            else { if (bs > 0) { sb.Append('\\', bs); bs = 0; } sb.Append(ch); }
+        }
+        if (bs > 0) sb.Append('\\', bs * 2);
+        sb.Append('"');
+        return sb.ToString();
+    }
+
+    static readonly HashSet<string> CmdAllow = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "git", "node", "npm", "npx", "pnpm", "yarn", "python", "python3", "py",
+        "dotnet", "tsc", "pytest", "cargo", "go", "mvn", "gradle"
+    };
+
+    async Task RunCmdAsync(JsonElement req, string id)
+    {
+        try
+        {
+            string cmd = req.TryGetProperty("cmd", out JsonElement cEl) ? cEl.GetString() : null;
+            var args = new List<string>();
+            if (req.TryGetProperty("args", out JsonElement aEl) && aEl.ValueKind == JsonValueKind.Array)
+                foreach (JsonElement x in aEl.EnumerateArray())
+                    if (x.ValueKind == JsonValueKind.String) args.Add(x.GetString());
+            string cwd = req.TryGetProperty("cwd", out JsonElement wEl) ? wEl.GetString() : null;
+            int timeoutMs = 60000;
+            if (req.TryGetProperty("timeoutMs", out JsonElement tEl) && tEl.TryGetInt32(out int tv))
+                timeoutMs = Math.Min(Math.Max(tv, 1000), 300000);
+
+            if (string.IsNullOrWhiteSpace(cmd))
+            {
+                Post(id, "cmd.done", null, "命令为空", 400);
+                return;
+            }
+            string exeName = Path.GetFileNameWithoutExtension(cmd.Trim());
+            if (!CmdAllow.Contains(exeName))
+            {
+                Post(id, "cmd.done", null, "不在命令白名单：" + cmd + "（允许：" + string.Join("/", CmdAllow) + "）", 403);
+                return;
+            }
+            string cwdFull;
+            try
+            {
+                cwdFull = FsRootFull(string.IsNullOrWhiteSpace(cwd) ? null : cwd);
+            }
+            catch (Exception ex)
+            {
+                Post(id, "cmd.done", null, ex.Message, 403);
+                return;
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = cmd.Trim(),
+                WorkingDirectory = cwdFull,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            if (args.Count > 0) psi.Arguments = string.Join(" ", args.ConvertAll(new Converter<string, string>(QuoteArg)).ToArray());
+
+            var sbOut = new StringBuilder();
+            var sbErr = new StringBuilder();
+            Process p = new Process { StartInfo = psi };
+            try
+            {
+                p.OutputDataReceived += (s, e) =>
+                {
+                    if (e.Data == null) return;
+                    lock (sbOut) { if (sbOut.Length < 200000) sbOut.AppendLine(e.Data); }
+                };
+                p.ErrorDataReceived += (s, e) =>
+                {
+                    if (e.Data == null) return;
+                    lock (sbErr) { if (sbErr.Length < 60000) sbErr.AppendLine(e.Data); }
+                };
+                if (!p.Start())
+                {
+                    Post(id, "cmd.done", null, "进程启动失败", 500);
+                    return;
+                }
+                p.BeginOutputReadLine();
+                p.BeginErrorReadLine();
+                bool exited = p.WaitForExit(timeoutMs);
+                if (!exited)
+                {
+                    try { p.Kill(); } catch { }
+                    string tout = "";
+                    lock (sbOut) tout = sbOut.ToString();
+                    Post(id, "cmd.done", JsonSerializer.Serialize(new { code = -1, stdout = tout, stderr = "", timeout = true }), "超时（>" + timeoutMs + "ms）", 408);
+                    return;
+                }
+                string so, se;
+                lock (sbOut) so = sbOut.ToString();
+                lock (sbErr) se = sbErr.ToString();
+                int code = p.ExitCode;
+                var data = JsonSerializer.Serialize(new { code = code, stdout = so, stderr = se, timeout = false });
+                if (code != 0)
+                    Post(id, "cmd.done", data, "退出码 " + code, 200);
+                else
+                    Post(id, "cmd.done", data, null, 200);
+            }
+            finally
+            {
+                try { p.Dispose(); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Post(id, "cmd.done", null, ex.Message, 400);
+        }
+        await Task.CompletedTask;
+    }
+
+    /* 路径安全闸：root 必须是已授权根目录之一（页面按会话引用），rel 是其内相对路径 */
         static string FsRootFull(string root)
         {
             string r = string.IsNullOrWhiteSpace(root) ? (wsRoots.Count == 1 ? wsRoots[0] : null) : root.Trim();

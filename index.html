@@ -1569,7 +1569,10 @@ var NET = (function(){
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
-    var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方 // Work 沙箱短任务协议（v2.0）
+    var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
+    if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
+      '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
+      ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;
@@ -1776,6 +1779,13 @@ var NET = (function(){
       else if (d.t === 'media.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '下载失败')); else if (p.onError) p.onError(new Error(d.message || '下载失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
+      else if (d.t === 'cmd.done'){
+        delete bridge.pend[d.id];
+        var cd = null; try { cd = JSON.parse(d.data); } catch(e){}
+        if (p.resolve) p.resolve(cd ? cd : { code: -1, stdout: '', stderr: d.message || '' });
+        else if (p.onDone) p.onDone(d.data);
+      }
+      else if (d.t === 'cmd.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '命令执行失败')); else if (p.onError) p.onError(new Error(d.message || '命令执行失败')); }
       else if (d.t === 'secret.done' || d.t === 'secret.error'){
         var pv = bridge.pend[d.id];
         if (pv){ delete bridge.pend[d.id];
@@ -1790,6 +1800,18 @@ var NET = (function(){
       else if (this.engine === 'sciter') window.xcall('solohost', JSON.stringify(msg)); // 同步投递，宿主异步回推
     },
     abort: function(id){ this.send({ t: 'http.abort', id: id }); },
+    /* v0.9.0：宿主执行命令（白名单 + 授权 cwd + 超时）；仅 exe 宿主可用 */
+    cmd: function(exe, args, cwd, timeoutMs){
+      if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能执行命令'));
+      return new Promise(function(resolve, reject){
+        var id = 'c' + (++bridge.seq);
+        var to = setTimeout(function(){ if (!bridge.pend[id]) return; delete bridge.pend[id]; reject(new Error('命令超时（无回包）')); }, (timeoutMs || 60000) + 8000);
+        function done(v){ clearTimeout(to); resolve(v || {}); }
+        function fail(e){ clearTimeout(to); reject(e instanceof Error ? e : new Error(String(e))); }
+        bridge.pend[id] = { resolve: done, reject: fail, onDone: done, onError: fail };
+        bridge.send({ t: 'cmd', id: id, cmd: exe, args: args || [], cwd: cwd || '', timeoutMs: timeoutMs || 60000 });
+      });
+    },
     media: function(opts){ // v0.2.4：宿主侧下载视频（带 Referer/UA，落盘到 下载\SoloChat）
       if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能保存到磁盘'));
       opts = opts || {};
@@ -5647,7 +5669,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.8.0', ua = navigator.userAgent || '';
+      var ver = 'v0.9.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8760,7 +8782,7 @@ var FS = (function(){
     '沟通：动手前用两三句说明计划（改哪些文件、为什么），有歧义先问一次再继续；不要一边猜一边大幅改动。' +
     '结束格式：改动清单（文件:行/函数）→ 验证方式与结果 → 未验证项与风险，三段写完就停，不要复述整篇代码。';;
   function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -8850,6 +8872,31 @@ var FS = (function(){
         next(); return;
       }
       if (EXT.isKnownBuiltin(c.op) && !EXT.isOn(c.op)){ parts.push('[fs-result] ' + c.op + ' 已在扩展里关闭'); next(); return; }
+      if (c.op === 'cmd' || c.op === 'git'){
+        var raw = String(c.path || '').trim();
+        if (!raw){ parts.push('[cmd] 命令为空'); next(); return; }
+        if (c.op === 'git') raw = 'git ' + raw;
+        var ws = curWs();
+        UI.confirmBox({ title: '执行命令？', text: raw + (ws ? '\n工作目录：' + ws : '\n（未绑定工作区，将无法执行）'), okText: '执行', danger: true })
+          .then(function(ok){
+            if (!ok){ parts.push('[cmd] 用户拒绝了：' + raw); next(); return; }
+            var sp = raw.match(/^("[^"]+"|\S+)([\s\S]*)$/);
+            var exe = sp ? sp[1].replace(/^"/, '').replace(/"$/, '') : raw;
+            var rest = sp ? sp[2].trim() : '';
+            var arr = [];
+            var qre = /"([^"]*)"|(\S+)/g, qm;
+            while ((qm = qre.exec(rest))) arr.push(qm[1] != null ? qm[1] : qm[2]);
+            NET.bridge.cmd(exe, arr, ws, 90000).then(function(r){
+              var out = String(r.stdout || ''), err = String(r.stderr || '');
+              if (out.length > 4000) out = out.slice(0, 4000) + '\n…（截断）';
+              if (err.length > 1500) err = err.slice(0, 1500) + '\n…（截断）';
+              parts.push('[cmd] ' + raw + '\n退出码 ' + (r.code == null ? '?' : r.code) + (r.timeout ? '（超时）' : '') +
+                (out ? '\nSTDOUT:\n' + out : '') + (err ? '\nSTDERR:\n' + err : ''));
+              next();
+            }, function(e){ parts.push('[cmd] 执行失败：' + (e && e.message || e)); next(); });
+          });
+        return;
+      }
       NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, curWs()).then(
         function(r){
           if (c.op === 'fs-edit') return applyEdit(c, r).then(function(t){ parts.push(t); });
@@ -9005,7 +9052,9 @@ var EXT = (function(){
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
     { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
     { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
-    { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work'] }
+    { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work'] },
+    { id: 'cmd',        kind: 'tool', title: '执行命令',   brief: '工作区内跑 git/node/npm 等（需确认）', modes: ['agent'] },
+    { id: 'git',        kind: 'tool', title: 'Git 操作',   brief: 'git status/diff/log/commit（需确认）', modes: ['agent'] }
   ];
   function userItems(){ return (S.cfg.ext || []); }
   function offList(){ return (S.cfg.extOff || []); }
