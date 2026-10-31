@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
 <title>SoloChat · AI 对话</title>
 <script>
 /* 防闪烁：首帧前定主题 */
@@ -979,6 +979,8 @@ var DEF_CFG = {
      单文件零依赖：一份 JSON 目录 + localStorage 缓存，失败则静默降级。 */
   modelMeta: {},
   prompts: [],                  // / 提示词库 [{name, text}]
+  ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, code|body, modes, on}]
+  extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -1551,7 +1553,8 @@ var NET = (function(){
     sys += '\n\n' + MEDIA_HINT; // v2.3：告诉模型可以内嵌图片/视频（否则多数模型不会主动用）
     if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
-    if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol; // Work 沙箱短任务协议（v2.0）
+    if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
+    var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能 // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;
@@ -5558,8 +5561,46 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     });
 
     /* —— 页⑥ 关于 —— */
+    /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
+    page('ext', '扩展', function(p){
+      p.appendChild(el('div', { class: 'sub', text: '内置功能默认全部开启；关掉后模型调用会被直接拒绝。下面可添加自己的工具（一段 JS，围栏名=工具名）或技能（一段说明，模型需要时才加载全文，平时只占一行）。' }));
+      var list = el('div', { class: 'f-grid' });
+      p.appendChild(list);
+      function renderExt(){
+        list.innerHTML = '';
+        EXT.all().forEach(function(it){
+          var ck = el('input', { type: 'checkbox' }); ck.checked = it.on;
+          ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); });
+          var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : '工具');
+          var row = el('div', { class: 'f-row' }, [
+            el('label', {}, [ck, ' ' + (it.title || it.name)]),
+            el('span', { class: 'hint', text: kindName + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
+          ]);
+          if (it.kind !== 'builtin'){
+            var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+            delBtn.addEventListener('click', function(){ EXT.del(it.id); renderExt(); });
+            row.appendChild(delBtn);
+          }
+          list.appendChild(row);
+        });
+      }
+      renderExt();
+      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
+      var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"say","desc":"回显参数","code":"return arg;"}' });
+      p.appendChild(ta);
+      var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
+      addBtn.addEventListener('click', function(){
+        try {
+          var j = JSON.parse(ta.value);
+          if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
+          else { EXT.add(j); UI.toast('已添加：' + j.name); }
+          ta.value = ''; renderExt();
+        } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
+      });
+      p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
+    });
     page('about', '关于', function(p){
-      var ver = 'v0.3.0', ua = navigator.userAgent || '';
+      var ver = 'v0.4.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8646,7 +8687,7 @@ var FS = (function(){
     '沟通：动手前用两三句说明计划（改哪些文件、为什么），有歧义先问一次再继续；不要一边猜一边大幅改动。' +
     '结束格式：改动清单（文件:行/函数）→ 验证方式与结果 → 未验证项与风险，三段写完就停，不要复述整篇代码。';;
   function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -8728,6 +8769,14 @@ var FS = (function(){
         return;
       }
       var c = reads[done++];
+      if (c.op === 'skill'){
+        var skn = String(c.path || '').trim().split(/\s+/)[0];
+        var skb = EXT.skillText(skn);
+        parts.push(skb ? '[skill] ' + skn + '\n```\n' + skb.slice(0, 6000) + '\n```'
+                       : '[skill] 没有这个技能：' + skn + '（已有：' + (EXT.skillNames('agent').join(', ') || '无') + '）');
+        next(); return;
+      }
+      if (EXT.isKnownBuiltin(c.op) && !EXT.isOn(c.op)){ parts.push('[fs-result] ' + c.op + ' 已在扩展里关闭'); next(); return; }
       NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, curWs()).then(
         function(r){
           if (c.op === 'fs-edit') return applyEdit(c, r).then(function(t){ parts.push(t); });
@@ -8861,16 +8910,160 @@ var FS = (function(){
    与 FS 同构：assistant 落定 → 扫 ```run / ```vfs-write / ```vfs-list 围栏 →
    串行执行（RUNNER.runCapture / DB.workfsPut）→ [run-result] 回灌 → startStream 续跑。
    纯页内：无服务端、不写磁盘；VFS 仅存 IndexedDB workfs（按会话隔离）。 */
+
+/* v0.4.0：扩展系统 —— 内置能力 + tools + skills + plugins
+   设计：内置功能全部注册成条目、默认勾选；用户可关；用户可加自定义 tool（一段 JS）与 skill（一段说明），
+   skill 默认懒加载：提示词里只放名字+一句话，模型用到时才 ```skill 名字 取全文。 */
+var EXT = (function(){
+  var BUILTIN = [
+    { id: 'web',        kind: 'tool', title: '抓网页正文', brief: 'URL → 纯文本', modes: ['work','agent'] },
+    { id: 'search',     kind: 'tool', title: '联网搜索',   brief: '关键词 → 标题/链接/摘要', modes: ['work','agent'] },
+    { id: 'get',        kind: 'tool', title: '抓文件',     brief: 'URL → 落盘（图片/PDF/Office/音视频），文档抽正文', modes: ['work','agent'] },
+    { id: 'download',   kind: 'tool', title: '下载视频',   brief: 'B 站/直链 → mp4，HLS 自动拼接', modes: ['work'] },
+    { id: 'play',       kind: 'tool', title: '应用内播放', brief: 'URL → 悬浮播放窗口', modes: ['work'] },
+    { id: 'run',        kind: 'tool', title: '沙箱运行',   brief: 'html/js/css → 控制台输出', modes: ['work'] },
+    { id: 'preview',    kind: 'tool', title: '预览产物',   brief: '工作区文件 → 右侧面板', modes: ['work'] },
+    { id: 'vfs-write',  kind: 'tool', title: '写虚拟工作区', brief: '路径 + 完整内容', modes: ['work'] },
+    { id: 'vfs-list',   kind: 'tool', title: '列虚拟工作区', brief: '文件列表', modes: ['work'] },
+    { id: 'patch',      kind: 'tool', title: '打补丁',     brief: 'unified diff 局部修改', modes: ['work'] },
+    { id: 'fs-read',    kind: 'tool', title: '读本地文件', brief: '工作区相对路径', modes: ['agent'] },
+    { id: 'fs-write',   kind: 'tool', title: '写本地文件', brief: '新建 / 整文件替换', modes: ['agent'] },
+    { id: 'fs-edit',    kind: 'tool', title: '局部修改',   brief: '唯一匹配替换', modes: ['agent'] },
+    { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
+    { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] }
+  ];
+  function userItems(){ return (S.cfg.ext || []); }
+  function offList(){ return (S.cfg.extOff || []); }
+  function save(){ saveCfg(); }
+  function isOn(id){
+    var it = find(id);
+    if (it && it.kind !== 'builtin') return it.on !== false;
+    return offList().indexOf(id) < 0;
+  }
+  function find(id){
+    for (var i = 0; i < BUILTIN.length; i++) if (BUILTIN[i].id === id) return BUILTIN[i];
+    var u = userItems();
+    for (var j = 0; j < u.length; j++) if (u[j].id === id || u[j].name === id) return u[j];
+    return null;
+  }
+  function setOn(id, on){
+    var it = find(id);
+    if (!it) return;
+    if (it.kind === 'builtin'){
+      var l = offList().filter(function(x){ return x !== id; });
+      if (!on) l.push(id);
+      setCfg({ extOff: l }); save();
+    } else { it.on = !!on; save(); }
+  }
+  function add(item){
+    if (!item || !item.name) throw new Error('缺少 name');
+    if (!/^[a-z][a-z0-9-]{1,24}$/.test(item.name)) throw new Error('name 只能用小写字母/数字/短横，2-25 字符');
+    if (find(item.name) && item.kind !== 'builtin') throw new Error('名字已存在：' + item.name);
+    var u = userItems().slice();
+    u.push({ id: item.name, name: item.name, kind: item.kind === 'skill' ? 'skill' : 'tool',
+      title: item.title || item.name, desc: item.desc || '', code: item.code || '', body: item.body || '',
+      modes: item.modes || ['work'], on: item.on !== false });
+    setCfg({ ext: u }); save();
+    return item.name;
+  }
+  function del(id){
+    var u = userItems().filter(function(x){ return x.id !== id && x.name !== id; });
+    setCfg({ ext: u }); save();
+  }
+  /* 插件：{name, tools:[{name,desc,code}], skills:[{name,desc,body}]} 一次性展开成多条 */
+  function importPlugin(pk){
+    if (!pk || (!pk.tools && !pk.skills)) throw new Error('插件里没有 tools/skills');
+    var n = 0, t = pk.tools || [], sk = pk.skills || [], i;
+    for (i = 0; i < t.length; i++){ add({ kind: 'tool', name: t[i].name, desc: t[i].desc, code: t[i].code, modes: t[i].modes }); n++; }
+    for (i = 0; i < sk.length; i++){ add({ kind: 'skill', name: sk[i].name, desc: sk[i].desc, body: sk[i].body, modes: sk[i].modes }); n++; }
+    return n;
+  }
+  function toolsFor(mode){
+    var out = [];
+    var u = userItems();
+    for (var i = 0; i < u.length; i++){
+      var it = u[i];
+      if (it.kind !== 'tool' || it.on === false) continue;
+      if ((it.modes || ['work']).indexOf(mode) < 0) continue;
+      out.push(it);
+    }
+    return out;
+  }
+  function skillsFor(mode){
+    return userItems().filter(function(it){
+      return it.kind === 'skill' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0;
+    });
+  }
+  function hasTool(name){
+    var u = userItems();
+    for (var i = 0; i < u.length; i++) if (u[i].kind === 'tool' && u[i].name === name && u[i].on !== false) return u[i];
+    return null;
+  }
+  function isKnownBuiltin(name){
+    for (var i = 0; i < BUILTIN.length; i++) if (BUILTIN[i].id === name) return true;
+    return false;
+  }
+  function runTool(name, arg){
+    var it = hasTool(name);
+    if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
+    try {
+      var fn = new Function('arg', 'NET', 'SIZE', 'return (function(){' + (it.code || 'return "";') + '})();');
+      var r = fn(String(arg || ''), NET, sizeFmt);
+      return Promise.resolve(r && r.then ? r : String(r == null ? '' : r));
+    } catch (e){ return Promise.reject(e); }
+  }
+  function skillText(name){
+    var u = userItems(), i;
+    for (i = 0; i < u.length; i++)
+      if (u[i].kind === 'skill' && (u[i].name === name || u[i].id === name) && u[i].on !== false)
+        return '【技能 ' + name + '】' + (u[i].desc ? '（' + u[i].desc + '）' : '') + '\n' + (u[i].body || '（空技能）');
+    return '';
+  }
+  function skillNames(mode){ return skillsFor(mode).map(function(x){ return x.name; }); }
+  /* 提示词：只放「名字 + 一句话」，正文按需加载 */
+  function prompt(mode){
+    var lines = [], t = toolsFor(mode), s2 = skillsFor(mode), i, off = [];
+    for (i = 0; i < BUILTIN.length; i++)
+      if (BUILTIN[i].modes.indexOf(mode) >= 0 && !isOn(BUILTIN[i].id)) off.push(BUILTIN[i].id);
+    if (t.length){
+      lines.push('扩展工具（用户启用，围栏名就是名字，首行参数）：');
+      for (i = 0; i < t.length; i++) lines.push('```' + t[i].name + ' —— ' + (t[i].desc || t[i].title || ''));
+    }
+    if (s2.length){
+      lines.push('技能（需要时用 ```skill 名字 取全文，先取后用）：');
+      for (i = 0; i < s2.length; i++) lines.push('- ' + s2[i].name + '：' + (s2[i].desc || s2[i].title || ''));
+    }
+    if (off.length) lines.push('本轮已关闭的内置工具（调用会被拒绝）：' + off.join(' / '));
+    return lines.join('\n');
+  }
+  return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
+    isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
+    toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
+    runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt };
+})();
+
 var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|get|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|skill|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
+    }
+    /* v0.4.0：用户扩展工具 —— 围栏名动态，扫到名字匹配启用清单的才收 */
+    var cu = EXT.toolsFor(S.cfg.mode);
+    if (cu.length){
+      var re2 = /```([a-z][a-z0-9-]{1,24})(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, m2;
+      while ((m2 = re2.exec(content || ""))){
+        var hitExt = false;
+        for (var ci = 0; ci < cu.length; ci++){ if (cu[ci].name === m2[1]) hitExt = true; }
+        if (!hitExt) continue;
+        var nl2 = m2[2].indexOf(String.fromCharCode(10));
+        out.push({ op: m2[1], arg: (nl2 >= 0 ? m2[2].slice(0, nl2) : m2[2]).trim(), body: nl2 >= 0 ? m2[2].slice(nl2 + 1) : "" });
+      }
     }
     return out;
   }
@@ -9045,6 +9238,31 @@ var WORK = (function(){
         return;
       }
       var c = calls[done++];
+      /* v0.4.0：扩展系统 —— 关闭的内置工具直接拒绝；技能懒加载；自定义工具走 EXT.runTool */
+      if (EXT.isKnownBuiltin(c.op) && !EXT.isOn(c.op)){
+        add('[' + c.op + '] 该工具已在「设置 → 扩展」里关闭', { op: c.op, ok: false, brief: '已关闭' });
+        next(); return;
+      }
+      if (c.op === 'skill'){
+        var skName = String(c.arg || '').trim().split(/\s+/)[0];
+        var sk = EXT.skillText(skName);
+        add(sk ? '[skill] ' + skName + '\n```\n' + sk.slice(0, 6000) + '\n```'
+               : '[skill] 没有这个技能：' + skName + '（已有：' + (EXT.skillNames(S.cfg.mode).join(', ') || '无') + '）',
+            { op: 'skill', ok: !!sk, brief: skName });
+        next(); return;
+      }
+      var extTool = EXT.hasTool(c.op);
+      if (extTool){
+        var t0x = Date.now();
+        EXT.runTool(c.op, String(c.arg || '') + (c.body ? '\n' + c.body : '')).then(function(out){
+          var txt = String(out == null ? '' : out);
+          add('[' + c.op + '] ' + (txt.length > 4000 ? txt.slice(0, 4000) + '\n…（已截断）' : txt || '（无输出）'),
+            { op: c.op, ok: true, ms: Date.now() - t0x, brief: extTool.title || c.op });
+        }, function(e){
+          add('[' + c.op + '] 扩展工具执行失败：' + (e && e.message || e), { op: c.op, ok: false, brief: '执行失败' });
+        }).then(next);
+        return;
+      }
       /* ---- v0.2.1：联网抓取（页面侧真实请求，走宿主桥/代理，不受沙箱限制） ---- */
       if (c.op === 'web'){
         var u = NET.safeUrl(c.arg);
