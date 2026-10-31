@@ -117,6 +117,7 @@ namespace SoloChatHost
         NotifyIcon tray;
         bool realExit;
         bool hotReg;
+        int lastHotTick; // v0.2.0：热键去抖（一次按键只处理一次）
         bool memLow;
         bool busy; // v2.2：页面有生成在跑（busy 消息），期间不进低内存态
         IntPtr hotHwnd;
@@ -483,7 +484,14 @@ namespace SoloChatHost
             }
             if (m.Msg == WM_HOTKEY && m.WParam.ToInt64() == HOTKEY_ID)
             {
-                if (quickBar != null) quickBar.Toggle(); // 热键 = 显隐切换，不是聚焦
+                /* 一次按键可能收到两条 WM_HOTKEY（键盘软件、重复注册、长按自动重复）：
+                   250ms 内的后续消息直接吞掉，否则「显示→立刻隐藏」，看起来就是按了没反应 */
+                int now = Environment.TickCount;
+                if (unchecked(now - lastHotTick) >= 250)
+                {
+                    lastHotTick = now;
+                    if (quickBar != null) quickBar.Toggle();
+                }
             }
             if (m.Msg == 0x0018 && IsHandleCreated)
             {
@@ -1411,24 +1419,49 @@ namespace SoloChatHost
         public void Apply(bool show, string theme)
         {
             ApplyTheme(theme == "dark" ? "dark" : "light");
-            if (show && !Visible) { Reposition(); Show(); if (lastAns.Length > 0) PaintAnswer(); } // 重新呼出时恢复上一轮回答
+            if (show && !Visible) { Reposition(); Show(); if (lastAns.Length > 0) PaintAnswer(); PinTop(); } // 重新呼出时恢复上一轮回答
             else if (!show && Visible) Hide();
             ReassertTopMost();
         }
 
-        /* 托盘菜单召唤：显示并聚焦输入框（全局热键走 Toggle 显隐切换） */
+        /* 托盘菜单召唤：显示并聚焦输入框（全局热键走 Toggle） */
         public void Summon()
         {
             if (!Visible) { Reposition(); Show(); }
+            PinTop();
             ReassertTopMost();
-            FocusInput();
+            try { BeginInvoke((Action)(() => FocusInput())); } catch { FocusInput(); }
         }
 
-        /* 全局热键：显隐切换（再按一次隐藏） */
+        /* 全局热键：一次按下必然「召唤」
+           - 不可见 → 显示 + 聚焦
+           - 可见但焦点不在条上（被别的窗口盖住 / 用户在别的应用里）→ 拉到最前 + 聚焦，不隐藏
+           - 焦点已经在条上 → 隐藏
+           这样不会再出现「按一次没反应、按两次才出来」的观感问题（v0.2.0） */
         public void Toggle()
         {
-            if (Visible) { Hide(); main.QuickbarSync(false); }
-            else { Reposition(); Show(); ReassertTopMost(); FocusInput(); main.QuickbarSync(true); }
+            if (!Visible) { ShowAndFocus(); return; }
+            if (GetForegroundWindow() != Handle) { ShowAndFocus(); return; }
+            Hide(); main.QuickbarSync(false);
+        }
+
+        /* 显示 + 立即置顶 + 排到消息队尾再抢焦点（Show() 当下窗口还没真正映射，同步 Activate 会失败） */
+        void ShowAndFocus()
+        {
+            if (!Visible) { Reposition(); Show(); }
+            PinTop();
+            main.QuickbarSync(true);
+            try { BeginInvoke((Action)(() => { PinTop(); FocusInput(); })); }
+            catch { FocusInput(); }
+        }
+
+        /* 立即把窗口插到置顶层（任务栏之下），不等 2s 定时器 */
+        void PinTop()
+        {
+            if (!Visible || IsDisposed) return;
+            IntPtr tray = FindWindow("Shell_TrayWnd", null);
+            SetWindowPos(Handle, tray != IntPtr.Zero ? tray : HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
 
         /* ShowWithoutActivation 窗口不会自动获得焦点，需显式激活后聚焦输入框（v1.2.3：Alt+Space 后直接可打字） */
@@ -1608,9 +1641,7 @@ namespace SoloChatHost
                 if (IsDisposed || !Visible) return;
                 /* v1.8：插到 Shell_TrayWnd（任务栏）正下方——仍在置顶层、照旧盖过小组件源等全屏置顶窗，
                    但把任务栏让到我们上面；快速条停在屏幕底部时不再跟自适应任务栏抢 z 序 */
-                IntPtr tray = FindWindow("Shell_TrayWnd", null);
-                SetWindowPos(Handle, tray != IntPtr.Zero ? tray : HWND_TOPMOST, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                PinTop();
             };
             topTimer.Start();
         }
@@ -1623,6 +1654,8 @@ namespace SoloChatHost
         static extern IntPtr FindWindow(string cls, string title);
         [DllImport("user32.dll")]
         static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
 
         static Color Hx(string h) { return ColorTranslator.FromHtml(h); }
 
