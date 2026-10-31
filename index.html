@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
 <title>SoloChat · AI 对话</title>
 <script>
 /* 防闪烁：首帧前定主题 */
@@ -980,7 +980,7 @@ var DEF_CFG = {
      单文件零依赖：一份 JSON 目录 + localStorage 缓存，失败则静默降级。 */
   modelMeta: {},
   prompts: [],                  // / 提示词库 [{name, text}]
-  ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, code|body, modes, on}]
+  ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, url|body, modes, on}]（v1.0.0 工具只接受声明式 http）
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
   persona: '',                  // v0.6.0：当前选中的配方 id
@@ -1018,6 +1018,8 @@ var DEF_CFG = {
 var DEF_PARAMS = { temperature: 0.7, maxTokens: 0 };
 /* v3.0 #9：代理按域名分流——命中「直连例外」的请求不走代理（目录/自检/特定 API 更稳） */
 function isDirectHost(url){
+  /* v1.0.0：回环地址永远直连，不受代理设置影响 */
+  if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//i.test(String(url || ''))) return true;
   var raw = (typeof S !== 'undefined' && S.cfg && S.cfg.proxyDirect) || '';
   var list = String(raw).split(/[,，\s]+/).filter(Boolean);
   if (!list.length) return false;
@@ -3815,7 +3817,7 @@ var RUNNER = (function(){
 
   /* 沙箱文档同源策略：外层 sandbox="allow-scripts"（无 allow-same-origin → 不透明源，
      碰不到主窗 DOM / localStorage / 宿主桥）；内联 CSP 再禁一切外网请求。 */
-  var CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\'; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'">';
+  var CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'">';
 
   /* 注入沙箱的 console 桥：log/info/warn/error + 未捕获错误 → postMessage 回主窗 */
   var BRIDGE = '<scr' + 'ipt>(' + function(){
@@ -5653,8 +5655,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         });
       }
       renderExt();
-      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
-      var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"say","desc":"回显参数","code":"return arg;"}' });
+      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen","modes":["work"]}（声明式 HTTP，{arg} 会 URL 编码后填入；任意 JS 代码已停用）；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
+      var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}' });
       p.appendChild(ta);
       var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
       addBtn.addEventListener('click', function(){
@@ -5669,7 +5671,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.9.0', ua = navigator.userAgent || '';
+      var ver = 'v1.0.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9083,10 +9085,17 @@ var EXT = (function(){
     if (!item || !item.name) throw new Error('缺少 name');
     if (!/^[a-z][a-z0-9-]{1,24}$/.test(item.name)) throw new Error('name 只能用小写字母/数字/短横，2-25 字符');
     if (find(item.name) && item.kind !== 'builtin') throw new Error('名字已存在：' + item.name);
+    var kk0 = ['skill', 'agent'].indexOf(item.kind) >= 0 ? item.kind : 'tool';
+    /* v1.0.0：工具只能是声明式 HTTP（沙箱）——任意 JS 不再执行 */
+    if (kk0 === 'tool' && !item.url){
+      throw new Error('工具需要 url（声明式）：{"name":"查天气","type":"http","url":"https://…/{arg}"}' +
+        (item.code ? '；旧式 JS 代码工具已停用' : ''));
+    }
     var u = userItems().slice();
     var kk = ['skill', 'agent'].indexOf(item.kind) >= 0 ? item.kind : 'tool';
     u.push({ id: item.name, name: item.name, kind: kk,
-      title: item.title || item.name, desc: item.desc || '', code: item.code || '', body: item.body || item.prompt || '',
+      title: item.title || item.name, desc: item.desc || '', code: '', body: item.body || item.prompt || '',
+      url: item.url || '', method: item.method || 'GET', headers: item.headers || null, bodyTpl: item.body || '',
       tools: Array.isArray(item.tools) ? item.tools : [],
       writes: !!item.writes,
       maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
@@ -9102,7 +9111,7 @@ var EXT = (function(){
   function importPlugin(pk){
     if (!pk || (!pk.tools && !pk.skills)) throw new Error('插件里没有 tools/skills');
     var n = 0, t = pk.tools || [], sk = pk.skills || [], i;
-    for (i = 0; i < t.length; i++){ add({ kind: 'tool', name: t[i].name, desc: t[i].desc, code: t[i].code, modes: t[i].modes }); n++; }
+    for (i = 0; i < t.length; i++){ add({ kind: 'tool', name: t[i].name, desc: t[i].desc, url: t[i].url, method: t[i].method, headers: t[i].headers, body: t[i].body, modes: t[i].modes }); n++; }
     for (i = 0; i < sk.length; i++){ add({ kind: 'skill', name: sk[i].name, desc: sk[i].desc, body: sk[i].body, modes: sk[i].modes }); n++; }
     return n;
   }
@@ -9131,14 +9140,30 @@ var EXT = (function(){
     for (var i = 0; i < BUILTIN.length; i++) if (BUILTIN[i].id === name) return true;
     return false;
   }
+/* v1.0.0：插件沙箱 —— 自定义工具改为声明式（type:"http" 的 url/method/headers/body 模板），
+     不再执行任意 JS；CSP 已收回 'unsafe-eval'，旧式 code 工具一律拒绝执行并给出迁移提示。 */
+  function fillTpl(str, arg){
+    return String(str == null ? '' : str).split('{arg}').join(encodeURIComponent(String(arg == null ? '' : arg)));
+  }
   function runTool(name, arg){
     var it = hasTool(name);
     if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
-    try {
-      var fn = new Function('arg', 'NET', 'SIZE', 'return (function(){' + (it.code || 'return "";') + '})();');
-      var r = fn(String(arg || ''), NET, sizeFmt);
-      return Promise.resolve(r && r.then ? r : String(r == null ? '' : r));
-    } catch (e){ return Promise.reject(e); }
+    if (it.url){
+      var method = String(it.method || 'GET').toUpperCase();
+      var headers = {}, hs = it.headers || {};
+      for (var k in hs) if (Object.prototype.hasOwnProperty.call(hs, k)) headers[k] = fillTpl(hs[k], arg);
+      var body = null;
+      if (method !== 'GET' && method !== 'HEAD' && it.body != null) body = fillTpl(it.body, arg);
+      return NET.raw({ url: fillTpl(it.url, arg), method: method, headers: headers, body: body, timeout: 25000 })
+        .then(function(r){
+          var txt = String((r && r.text) || '');
+          if (txt.length > 4000) txt = txt.slice(0, 4000) + '\n…（截断）';
+          return '[' + name + '] HTTP ' + ((r && r.status) || '?') + '\n' + txt;
+        });
+    }
+    if (it.code) return Promise.reject(new Error('「' + name + '」是旧式 JS 工具，已按安全策略停用（不再执行任意代码）。'
+      + '请改成声明式：{"kind":"tool","name":"' + name + '","desc":"…","type":"http","url":"https://…/{arg}"}'));
+    return Promise.reject(new Error('「' + name + '」缺少可执行定义：声明式工具需要 url'));
   }
   function skillText(name){
     var u = userItems(), i;

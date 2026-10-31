@@ -134,7 +134,23 @@ namespace SoloChatHost
         /* v3.0：直连客户端（忽略系统与显式代理），供「直连例外」域名使用 */
         static readonly HttpClient DirectHttp = new HttpClient(new HttpClientHandler { UseProxy = false })
         { Timeout = Timeout.InfiniteTimeSpan };
-        static HttpClient ClientFor(string proxy)
+        /* v1.0.0：回环/内网域名走直连，别被用户代理设置挡掉 */
+    static bool IsLoopbackHost(string url)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            var u = new Uri(url);
+            string h = u.Host.ToLowerInvariant();
+            if (h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]" || h.EndsWith(".local")) return true;
+            if (System.Net.IPAddress.TryParse(u.Host, out var ip))
+                return System.Net.IPAddress.IsLoopback(ip);
+            return false;
+        }
+        catch { return false; }
+    }
+
+    static HttpClient ClientFor(string proxy)
         {
             proxy = (proxy ?? "").Trim();
             if (proxy.Length == 0) return Http;
@@ -792,7 +808,7 @@ namespace SoloChatHost
                             m.Content = new StringContent(body, Encoding.UTF8, ct ?? "application/json");
                     }
 
-                    using (var resp = await (direct ? DirectHttp : ClientFor(proxy)).SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
+                    using (var resp = await (direct || IsLoopbackHost(url) ? DirectHttp : ClientFor(proxy)).SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
                     {
                         Post(id, "http.meta", RespHeadersJson(resp), null, (int)resp.StatusCode);
                         using (var stream = await resp.Content.ReadAsStreamAsync())
