@@ -128,7 +128,7 @@
 
 ```js
 Session    { id, title, createdAt, updatedAt, pinned, model, systemPrompt,
-             params: { temperature, maxTokens }, msgCount }
+              params: { temperature?, maxTokens? }, msgCount }
 Message    { id, sid, role: 'user'|'assistant'|'system', content, reasoning?,
              status: 'ok'|'streaming'|'aborted'|'error', ts,
              attachments: [aid...], tokens?, errMsg? }
@@ -337,7 +337,7 @@ const host = {
 
 ### 8.1 Must（缺一不可）
 
-会话管理（新建 / 重命名 / 删除 / 置顶 / 搜索）｜流式对话｜停止生成｜重试｜重新生成｜编辑用户消息｜删除消息｜Markdown 渲染｜代码块复制｜图片输入（粘贴 / 选择 / 拖放三通道）｜模型切换｜参数设置（temperature / max_tokens / system prompt）｜明暗主题｜导入 / 导出 JSON｜错误提示与重试｜快捷键
+会话管理（新建 / 重命名 / 删除 / 置顶 / 搜索）｜流式对话｜停止生成｜重试｜重新生成｜编辑用户消息｜删除消息｜Markdown 渲染｜代码块复制｜图片输入（粘贴 / 选择 / 拖放三通道）｜模型切换｜参数设置（全局默认 + 会话级覆盖，会话优先；max_tokens 0=不限不传字段）｜明暗主题｜导入 / 导出 JSON｜错误提示与重试｜快捷键
 
 **快捷键表**：`Ctrl+Enter` 发送 ｜ `Esc` 停止生成 / 关弹层 ｜ `Ctrl+N` 新建会话 ｜ `Ctrl+K` 搜索会话 ｜ `↑`（空输入框时）回填上一条
 

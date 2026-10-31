@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
@@ -117,6 +118,7 @@ namespace SoloChatHost
         bool realExit;
         bool hotReg;
         bool memLow;
+        bool busy; // v2.2：页面有生成在跑（busy 消息），期间不进低内存态
         IntPtr hotHwnd;
         const int WM_HOTKEY = 0x0312;
         const int HOTKEY_ID = 0x5C1;
@@ -126,6 +128,9 @@ namespace SoloChatHost
         /* 页面 设置 → 代理：留空走系统默认（Http 原样）；按值缓存，配置变化即重建 handler */
         static volatile HttpClient proxyHttp;
         static volatile string proxyKey;
+        /* v3.0：直连客户端（忽略系统与显式代理），供「直连例外」域名使用 */
+        static readonly HttpClient DirectHttp = new HttpClient(new HttpClientHandler { UseProxy = false })
+        { Timeout = Timeout.InfiniteTimeSpan };
         static HttpClient ClientFor(string proxy)
         {
             proxy = (proxy ?? "").Trim();
@@ -232,6 +237,16 @@ namespace SoloChatHost
             }
             else if (act == "close") { Hide(); try { EnsureTray(); } catch { } }
             else if (act == "drag") { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)0x2, IntPtr.Zero); }
+            else if (act == "datadir")   /* v3.0：设置 → 关于「打开数据目录」 */
+            {
+                try
+                {
+                    var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage");
+                    if (Directory.Exists(dir))
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true });
+                }
+                catch (Exception ex) { Log("open datadir failed: " + ex.Message); }
+            }
         }
 
         /* 页面 → 宿主的自由消息（快速提问等） */
@@ -291,9 +306,10 @@ namespace SoloChatHost
         static extern int EmptyWorkingSet(System.IntPtr hProc);
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         static extern System.IntPtr GetCurrentProcess();
-        void SyncMemTarget() { SetMemTarget(!Visible || WindowState == FormWindowState.Minimized); }
+        void SyncMemTarget() { SetMemTarget(!busy && (!Visible || WindowState == FormWindowState.Minimized)); }
         void SetMemTarget(bool low)
         {
+            if (busy) low = false; // v2.2：有生成在跑 → 保持 Normal，别把 WebView 压进低内存态
             if (low == memLow) return;
             memLow = low;
             try
@@ -375,23 +391,94 @@ namespace SoloChatHost
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct RECT { public int L, T, R, B; }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct POINTL { public int x, y; }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct MINMAXINFO { public POINTL ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
         [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+        static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+        static extern int GetWindowLong32(IntPtr h, int i);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+        static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+        static extern int SetWindowLong32(IntPtr h, int i, int v);
+        [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+        const int GWL_STYLE = -16;
+        const long WS_CAPTION = 0x00C00000L; // WS_BORDER | WS_DLGFRAME
+        const uint SWP_FRAMECHANGED = 0x0020, SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001,
+                   SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+
+        long GetStyle() { return IntPtr.Size == 8 ? GetWindowLongPtr(Handle, GWL_STYLE).ToInt64() : GetWindowLong32(Handle, GWL_STYLE); }
+        void SetWinStyle(long v)
+        {
+            if (IntPtr.Size == 8) SetWindowLongPtr(Handle, GWL_STYLE, new IntPtr(v));
+            else SetWindowLong32(Handle, GWL_STYLE, (int)v);
+        }
+
+        /* v1.9：最大化时给窗口补回 WS_CAPTION 样式位（还原时移除）。
+           根因（本机对照实测）：FormBorderStyle.None 让最大化窗口缺 WS_CAPTION，
+           Explorer 据此把「铺满屏幕且无标题栏样式」的前台窗口判为全屏应用，抑制自适应
+           任务栏的悬停弹出。同一 rect 下，带 WS_CAPTION 的标准可缩放窗能正常弹出、
+           本窗口不能；运行时补上该位后立即恢复弹出（client 仍 1536×864 全出血）。
+           客户区由 WM_NCCALCSIZE 钉在工作区，故补样式位不会长出标题栏、视觉不变。 */
+        void SyncCaptionForMax()
+        {
+            if (!IsHandleCreated) return;
+            long st = GetStyle();
+            bool zoomed = IsZoomed(Handle) || (st & 0x01000000L) != 0; // WS_MAXIMIZE
+            bool hasCap = (st & WS_CAPTION) != 0;
+            if (zoomed == hasCap) return; // 状态已一致
+            SetWinStyle(zoomed ? (st | WS_CAPTION) : (st & ~WS_CAPTION));
+            SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
 
         protected override void WndProc(ref Message m)
         {
-            /* 全出血客户区（去标题栏 v1.2）：吞掉 NCCALCSIZE 消除边框留白（顶部深色边与四周空隙）；
-               最大化时按缩放边宽度内缩补偿 THICKFRAME 外扩，避免内容被顶出屏幕 */
+            /* 全出血客户区（去标题栏 v1.2）：吞掉 NCCALCSIZE 消除边框留白（顶部深色边与四周空隙） */
             if (m.Msg == 0x0083 && m.WParam != IntPtr.Zero) // WM_NCCALCSIZE
             {
                 if (WindowState == FormWindowState.Maximized)
                 {
-                    int fx = GetSystemMetrics(32) + GetSystemMetrics(92); // SM_CXSIZEFRAME + SM_CXPADDEDBORDER
-                    int fy = GetSystemMetrics(33) + GetSystemMetrics(92); // SM_CYSIZEFRAME + SM_CXPADDEDBORDER
+                    /* v1.8：客户区直接钉到目标显示器的工作区（原按边宽盲目内缩）。
+                       修：Win11 自适应任务栏悬停底部不弹——保证屏幕底边像素归属客户区，
+                       鼠标贴底收到的是客户区 WM_MOUSEMOVE（任务栏弹出检测依赖它），
+                       非客户死区条不会再把底边热区吃掉。 */
                     var rc = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
-                    rc.L += fx; rc.T += fy; rc.R -= fx; rc.B -= fy;
+                    var wa = Screen.FromRectangle(new Rectangle(rc.L, rc.T, rc.R - rc.L, rc.B - rc.T)).WorkingArea;
+                    rc.L = wa.Left; rc.T = wa.Top; rc.R = wa.Right; rc.B = wa.Bottom;
                     Marshal.StructureToPtr(rc, m.LParam, false);
                 }
                 m.Result = IntPtr.Zero;
+                return;
+            }
+            if (m.Msg == 0x0024) // WM_GETMINMAXINFO
+            {
+                base.WndProc(ref m); // 先让 WinForms 按 MaximizedBounds/工作区填好
+                /* v1.8：最大化矩形按标准窗口做法外扩边框宽度（起点 -fx,-fy，尺寸 +2fx,+2fy），
+                   使窗口矩形不再「精确等于屏幕」——精确等大时系统按全屏应用处理，
+                   抑制自适应任务栏的悬停弹出（SO#137005 同款成因）。
+                   客户区仍由上面的 WM_NCCALCSIZE 钉回工作区，视觉不变（全出血）。 */
+                try
+                {
+                    var mi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
+                    int fxi = GetSystemMetrics(32) + GetSystemMetrics(92);
+                    int fyi = GetSystemMetrics(33) + GetSystemMetrics(92);
+                    mi.ptMaxPosition.x -= fxi; mi.ptMaxPosition.y -= fyi;
+                    mi.ptMaxSize.x += 2 * fxi; mi.ptMaxSize.y += 2 * fyi;
+                    Marshal.StructureToPtr(mi, m.LParam, false);
+                }
+                catch { }
+                return;
+            }
+            if (m.Msg == 0x0005) // WM_SIZE：最大化/还原切换时同步 WS_CAPTION（修任务栏悬停不弹）
+            {
+                base.WndProc(ref m);
+                SyncCaptionForMax();
                 return;
             }
             if (m.Msg == WM_HOTKEY && m.WParam.ToInt64() == HOTKEY_ID)
@@ -478,12 +565,30 @@ namespace SoloChatHost
                         var qb = quickBar;
                         BeginInvoke((Action)(() => qb.Apply(show, th)));
                     }
+                    else if (t == "busy") // v2.2：页面告知有生成在跑 → 隐藏/最小化时不压内存（避免后台生成被打断）
+                    {
+                        bool bz = root.TryGetProperty("on", out JsonElement bzEl) && bzEl.ValueKind == JsonValueKind.True;
+                        BeginInvoke((Action)(() => { busy = bz; SyncMemTarget(); }));
+                    }
                     else if (t == "quick.answer")
                     {
                         var qaText = root.TryGetProperty("text", out JsonElement ta) ? ta.GetString() : "";
                         bool qaDone = root.TryGetProperty("done", out JsonElement td) && td.GetBoolean();
                         var qb2 = quickBar; var qaCopy = qaText;
                         BeginInvoke((Action)(() => qb2.ShowAnswer(qaCopy, qaDone)));
+                    }
+                    else if (t == "quick.cmd") // 小窗按钮 → 页面动作（文件/联网/Agent/新建/设置）
+                    {
+                        var qCmd = root.TryGetProperty("cmd", out JsonElement qc) ? qc.GetString() : "";
+                        PostRaw(JsonSerializer.Serialize(new { t = "quick.cmd", cmd = qCmd }));
+                    }
+                    else if (t == "quick.state") // 页面 → 小窗状态回显（联网/Agent/附件数）
+                    {
+                        bool qw = root.TryGetProperty("web", out JsonElement qwE) && qwE.ValueKind == JsonValueKind.True;
+                        bool qa2 = root.TryGetProperty("agent", out JsonElement qaE) && qaE.ValueKind == JsonValueKind.True;
+                        int qf = root.TryGetProperty("files", out JsonElement qfE) && qfE.ValueKind == JsonValueKind.Number ? qfE.GetInt32() : 0;
+                        var qb3 = quickBar;
+                        BeginInvoke((Action)(() => qb3.ApplyState(qw, qa2, qf)));
                     }
                     else if (t == "secret") // F4：密钥保险库（DPAPI），apiKey/searchKey 不落明文 localStorage
                     {
@@ -513,13 +618,20 @@ namespace SoloChatHost
             "|(Bearer\\s+)[A-Za-z0-9._\\-]{8,}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        /* v2.0（D4）：日志目录迁出 %TEMP% → LocalAppData\OpenPage\logs（零临时文件口径） */
+        static string LogDir
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage", "logs"); }
+        }
+
         /* F1：Release 构建日志整体禁用（宏剥离）；DEBUG 构建脱敏 + 限长。旧版曾明文写入，启动即删除。 */
         public static void Log(string s)
         {
 #if DEBUG
             try
             {
-                var p = Path.Combine(Path.GetTempPath(), "solo-host.log");
+                Directory.CreateDirectory(LogDir);
+                var p = Path.Combine(LogDir, "solo-host.log");
                 if (File.Exists(p) && new FileInfo(p).Length > 1024 * 1024) File.Delete(p); // 限长：超过 1MB 滚动删除
                 File.AppendAllText(p, DateTime.Now.ToString("HH:mm:ss.fff ") + Redact(s) + "\n");
             } catch { }
@@ -546,6 +658,8 @@ namespace SoloChatHost
                 var method = new HttpMethod(req.GetProperty("method").GetString());
                 var url = req.GetProperty("url").GetString();
                 var proxy = req.TryGetProperty("proxy", out JsonElement px) ? px.GetString() : null;
+                // v3.0：直连例外（页面 设置 → 代理按域名分流）→ 本次请求绕过代理
+                var direct = req.TryGetProperty("direct", out JsonElement dx) && dx.ValueKind == JsonValueKind.True;
                 // 仅放行 http/https 绝对 URI，防 file://、gopher:// 等被滥用
                 if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -562,13 +676,27 @@ namespace SoloChatHost
                                 m.Headers.TryAddWithoutValidation(p.Name, v);
                         }
                     }
-                    var body = req.TryGetProperty("body", out JsonElement bEl) ? bEl.GetString() : null;
-                    if (!string.IsNullOrEmpty(body))
-                        m.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-                    using (var resp = await ClientFor(proxy).SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
+                    /* v1.5：bodyB64 + contentType 支持二进制上传（文档 OCR 等）；body 仍为 JSON 文本 */
+                    var ct = req.TryGetProperty("contentType", out JsonElement ctEl) ? ctEl.GetString() : null;
+                    string b64 = null;
+                    if (req.TryGetProperty("bodyB64", out JsonElement b64El) && b64El.ValueKind == JsonValueKind.String)
+                        b64 = b64El.GetString();
+                    if (!string.IsNullOrEmpty(b64))
                     {
-                        Post(id, "http.meta", null, null, (int)resp.StatusCode);
+                        var bc = new ByteArrayContent(Convert.FromBase64String(b64));
+                        if (!string.IsNullOrEmpty(ct)) bc.Headers.TryAddWithoutValidation("Content-Type", ct);
+                        m.Content = bc;
+                    }
+                    else
+                    {
+                        var body = req.TryGetProperty("body", out JsonElement bEl) ? bEl.GetString() : null;
+                        if (!string.IsNullOrEmpty(body))
+                            m.Content = new StringContent(body, Encoding.UTF8, ct ?? "application/json");
+                    }
+
+                    using (var resp = await (direct ? DirectHttp : ClientFor(proxy)).SendAsync(m, HttpCompletionOption.ResponseHeadersRead, cts.Token))
+                    {
+                        Post(id, "http.meta", RespHeadersJson(resp), null, (int)resp.StatusCode);
                         using (var stream = await resp.Content.ReadAsStreamAsync())
                         using (var sr = new StreamReader(stream, new UTF8Encoding(false), false, 4096))
                         {
@@ -596,6 +724,31 @@ namespace SoloChatHost
                 CancellationTokenSource ignored;
                 inflight.TryRemove(id, out ignored);
             }
+        }
+
+        /* v1.5：把关键响应头带回页面——Azure 文档智能异步轮询需要 operation-location，content-type 用于判别错误体 */
+        static string RespHeadersJson(HttpResponseMessage resp)
+        {
+            var sb = new StringBuilder("{");
+            bool first = true;
+            Action<string, IEnumerable<string>> add = (k, vs) =>
+            {
+                if (vs == null) return;
+                var v = string.Join(",", vs);
+                if (string.IsNullOrEmpty(v)) return;
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append(JsonSerializer.Serialize(k)).Append(':').Append(JsonSerializer.Serialize(v));
+            };
+            foreach (var h in resp.Headers)
+                if (h.Key.Equals("Operation-Location", StringComparison.OrdinalIgnoreCase) ||
+                    h.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase))
+                    add(h.Key.ToLowerInvariant(), h.Value);
+            foreach (var h in resp.Content.Headers)
+                if (h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
+                    add(h.Key.ToLowerInvariant(), h.Value);
+            sb.Append('}');
+            return sb.ToString();
         }
 
         /* PostWebMessageAsJson 必须在 UI 线程调用；手工拼 JSON 规避 3.1 运行时类型序列化限制 */
@@ -702,8 +855,7 @@ namespace SoloChatHost
         }
 
         /* 路径每一级都不允许穿过符号链接 / 联接点（防白名单外内容被链入工作区） */
-        static void NoReparse(string full, string prefix)
-        {
+        static void NoReparse(string full, string prefix)        {
             var rootFull = prefix.TrimEnd('\\');
             var di = new DirectoryInfo(rootFull);
             if (!di.Exists) throw new Exception("工作区目录不存在");
@@ -719,6 +871,43 @@ namespace SoloChatHost
                 if (fsi != null && (fsi.Attributes & FileAttributes.ReparsePoint) != 0)
                     throw new Exception("路径经过符号链接/联接点，已拒绝");
             }
+        }
+
+        /* v1.4 工作区外写入闸：页面确认框已展示「位置+操作内容」，此处仍强制
+           ① 已选过工作区（否则文件 Agent 整体不可用）② 完整绝对路径
+           ③ 禁系统目录（Windows / Program Files）④ 逐级禁符号链接/联接点 ⑤ 大小仍受 FsMaxBytes 限制 */
+        static string GuardOutPath(string abs)
+        {
+            if (wsRoots.Count == 0) throw new Exception("未选择工作区，无法发起工作区外写入");
+            if (string.IsNullOrWhiteSpace(abs)) throw new Exception("路径为空");
+            abs = abs.Trim().Replace('/', '\\');
+            if (!Path.IsPathRooted(abs)) throw new Exception("工作区外写入必须提供完整绝对路径（含盘符）");
+            string full = Path.GetFullPath(abs);
+            string root = Path.GetPathRoot(full);
+            if (string.IsNullOrEmpty(root)) throw new Exception("无法解析目标路径");
+            string[] deny = {
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData\\Local\\Microsoft\\Windows")
+            };
+            foreach (var d in deny)
+                if (!string.IsNullOrEmpty(d) &&
+                    full.StartsWith(d.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("系统目录禁止写入：" + d);
+            /* 逐级检查已有路径不含符号链接/联接点 */
+            string acc = root; // "C:\" 或 UNC 根
+            foreach (var seg in full.Substring(root.Length).Split('\\'))
+            {
+                if (seg.Length == 0) continue;
+                acc = Path.Combine(acc, seg);
+                FileSystemInfo fsi = Directory.Exists(acc) ? (FileSystemInfo)new DirectoryInfo(acc)
+                                  : File.Exists(acc) ? (FileSystemInfo)new FileInfo(acc) : null;
+                if (fsi != null && (fsi.Attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new Exception("路径经过符号链接/联接点，已拒绝：" + acc);
+            }
+            return full;
         }
 
         void RunFsAsync(string op, JsonElement req, string id)
@@ -801,7 +990,9 @@ namespace SoloChatHost
         void FsWrite(JsonElement req, string id)
         {
             string rel = req.GetProperty("path").GetString() ?? "";
-            string p = GuardPath(ReqRoot(req), rel);
+            /* v1.4 工作区外写入：页面已弹「位置+操作内容」确认并带 out=1，此处再做路径闸 */
+            bool outRoot = req.TryGetProperty("out", out JsonElement oEl) && oEl.ValueKind == JsonValueKind.True;
+            string p = outRoot ? GuardOutPath(rel) : GuardPath(ReqRoot(req), rel);
             string data = req.TryGetProperty("data", out JsonElement dEl) ? (dEl.GetString() ?? "") : "";
             int n = FsUtf8.GetByteCount(data);
             if (n > FsMaxBytes) { PostFs(id, "fs.error", null, "内容超过 256KB，拒绝写入"); return; }
@@ -827,7 +1018,9 @@ namespace SoloChatHost
             {
                 using (var dlg = new FolderBrowserDialog { Description = "选择本会话的工作区根目录" })
                 {
-                    var owner = Visible ? (IWin32Window)this : null;
+                    // 快速条可见时以其为宿主（TopMost），避免选目录对话框被压在小窗后面
+                    var owner = (quickBar != null && quickBar.Visible) ? (IWin32Window)quickBar
+                              : Visible ? (IWin32Window)this : null;
                     if (dlg.ShowDialog(owner) == DialogResult.OK)
                     {
                         // 大小写不敏感去重（Windows 路径）
@@ -901,11 +1094,20 @@ namespace SoloChatHost
     {
         readonly MainForm main;
         readonly TextBox input;
-        readonly TextBox answer;
-        readonly Button send;
+        readonly RichTextBox answer; // v1.8：原 TextBox 显示裸 Markdown（**星号**），改 RTF 渲染
         readonly Panel pad;
+        readonly Panel tools;          // 左侧与原「问」同大的 44×44 框，四格各占 1/4（22×22）
+        readonly Button bFile, bWeb, bMore;
+        readonly Button clearBtn;      // 回答区右侧「清空」图标按钮（v1.4.1）
+        readonly Panel ansPanel;       // 回答区容器（Dock Bottom，含 answer + clearBtn）
+        readonly Label grip;           // 第四格：拖动把手（原「问」按钮的拖动职责移交至此）
+        readonly ComboBox mode;        // 右侧模式选择：Chat / Agent（选 Agent 自动弹文件夹选择）
+        readonly ContextMenuStrip moreMenu;
         const string PH = "快捷提问，Enter 发送，Esc 隐藏";
         bool ph;
+        bool syncState, webOn, agentOn; // syncState：页面回写状态时抑制 SelectedIndexChanged 上抛
+        int filesN;
+        readonly ToolTip tip = new ToolTip();
 
         public QuickBarForm(MainForm main)
         {
@@ -914,7 +1116,7 @@ namespace SoloChatHost
             TopMost = true;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            Size = new Size(480, 44);
+            Size = new Size(560, 44);
             try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             input = new TextBox();
@@ -931,24 +1133,37 @@ namespace SoloChatHost
                 else if (e.KeyCode == Keys.Escape) { RequestHide(); }
             };
 
-            send = new Button();
-            send.Text = "问";
-            send.FlatStyle = FlatStyle.Flat;
-            send.FlatAppearance.BorderSize = 0;
-            send.Dock = DockStyle.Right;
-            send.Width = 44;
-            send.Cursor = Cursors.SizeAll;
-            send.Font = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold);
-            /* 问按钮：单击发送，按住拖动可移动输入条位置 */
+            /* —— 左侧 44×44 框：四格（文件 / 联网搜索 / 更多 / 拖动把手），各 22×22 = 问框面积的 1/4。
+               v1.4.1：全部改 GDI+ 矢量图标（等价 SVG 路径输出），不再用文字字符 —— */
+            tools = new Panel { Dock = DockStyle.Left, Width = 44 };
+            bFile = NewCell(0, 0, "file");
+            bWeb = NewCell(22, 0, "web");
+            bMore = NewCell(0, 22, "more");
+            grip = new Label
+            {
+                Bounds = new Rectangle(22, 22, 22, 22),
+                Text = "",
+                Cursor = Cursors.SizeAll
+            };
+            tools.Controls.Add(bFile); tools.Controls.Add(bWeb); tools.Controls.Add(bMore); tools.Controls.Add(grip);
+
+            bFile.Click += (s, e) => Cmd("attach");   // 打开文件选择（页面 #file-input）
+            bWeb.Click += (s, e) => Cmd("web");       // 联网搜索开关
+            bMore.Click += (s, e) =>
+            {
+                moreMenu.Show(bMore, new Point(0, bMore.Height)); // 更多：小菜单（新建/主窗/设置）
+            };
+
+            /* 拖动把手：与原「问」按钮同一套按下-移动-松开逻辑 */
             Point mouse0 = Point.Empty, form0 = Point.Empty;
             bool dragHit = false, dragged = false;
-            send.MouseDown += (s, e) =>
+            grip.MouseDown += (s, e) =>
             {
                 if (e.Button != MouseButtons.Left) return;
                 dragHit = true; dragged = false;
                 mouse0 = Control.MousePosition; form0 = Location;
             };
-            send.MouseMove += (s, e) =>
+            grip.MouseMove += (s, e) =>
             {
                 if (!dragHit) return;
                 var m2 = Control.MousePosition;
@@ -957,33 +1172,217 @@ namespace SoloChatHost
                 dragged = true;
                 Location = new Point(form0.X + dx, form0.Y + dy);
             };
-            send.MouseUp += (s, e) =>
+            grip.MouseUp += (s, e) =>
             {
                 if (!dragHit) return;
                 dragHit = false;
                 if (dragged) main.SaveQuickbarPos(Location);
-                else Send();
             };
+
+            /* —— 右侧模式选择：Chat / Agent（原「问」按钮位置） —— */
+            mode = new ComboBox
+            {
+                Dock = DockStyle.Right, Width = 88,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Microsoft YaHei UI", 9.5f),
+                Cursor = Cursors.SizeAll // 该区也可按住拖动
+            };
+            mode.Items.AddRange(new object[] { "Chat", "Agent" });
+            mode.SelectedIndex = 0;
+            mode.SelectedIndexChanged += (s, e) =>
+            {
+                if (syncState) return;
+                bool ag = mode.SelectedIndex == 1;
+                if (ag == agentOn) return;
+                Cmd(ag ? "agent" : "chat"); // 选 Agent：页面回开文件夹选择提示框（默认文件夹免确认）
+            };
+            Point mm0 = Point.Empty, mf0 = Point.Empty;
+            bool mHit = false, mDrag = false;
+            mode.MouseDown += (s, e) =>
+            {
+                if (e.Button != MouseButtons.Left) return;
+                mHit = true; mDrag = false; mm0 = Control.MousePosition; mf0 = Location;
+            };
+            mode.MouseMove += (s, e) =>
+            {
+                if (!mHit) return;
+                var m2 = Control.MousePosition;
+                int dx = m2.X - mm0.X, dy = m2.Y - mm0.Y;
+                if (!mDrag && Math.Abs(dx) + Math.Abs(dy) < 6) return;
+                mDrag = true;
+                Location = new Point(mf0.X + dx, mf0.Y + dy);
+            };
+            mode.MouseUp += (s, e) => { if (mHit) { mHit = false; if (mDrag) main.SaveQuickbarPos(Location); } };
+
+            /* 更多菜单（v1.4：替代原「问」按钮的次要动作） */
+            moreMenu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9.5f) };
+            moreMenu.Items.Add("新建会话", null, (s, e) => Cmd("new"));
+            moreMenu.Items.Add("打开主窗", null, (s, e) => OpenMain());
+            moreMenu.Items.Add("设置", null, (s, e) => Cmd("settings"));
+            moreMenu.Items.Add(new ToolStripSeparator());
+            moreMenu.Items.Add("隐藏快速条 (Esc)", null, (s, e) => RequestHide());
 
             pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 11, 6, 11) };
             pad.Controls.Add(input);
 
-            /* 简要回答区：页面流式回传直接显示在此，不切回主窗（Dock 布局最后加入的先处理） */
-            answer = new TextBox();
-            answer.Multiline = true;
+            /* 简要回答区：页面流式回传直接显示在此，不切回主窗。
+               v1.4.1：回答区外层 ansPanel（Dock Bottom），右侧带「清空」矢量图标按钮，一键回到原状态 */
+            /* v1.8：回答区改 RichTextBox（只读），配合 MdToRtf 做轻量 Markdown 渲染：
+               标题/粗斜体/行内码/代码块/列表/引用/表格/链接，不再出现裸星号 */
+            answer = new RichTextBox();
             answer.ReadOnly = true;
             answer.BorderStyle = BorderStyle.None;
-            answer.ScrollBars = ScrollBars.Vertical;
+            answer.ScrollBars = RichTextBoxScrollBars.Vertical;
             answer.Font = new Font("Microsoft YaHei UI", 9.5f);
-            answer.Dock = DockStyle.Bottom;
-            answer.Height = 180;
-            answer.Visible = false;
+            answer.Dock = DockStyle.Fill;
+            answer.DetectUrls = false;
+            answer.Visible = true;
 
-            Opacity = 0.5; // 输入条整体半透明
-            Controls.Add(send);
+            clearBtn = new Button
+            {
+                Dock = DockStyle.Right, Width = 22,
+                FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 },
+                Cursor = Cursors.Hand, TabStop = false, UseMnemonic = false, Text = ""
+            };
+            tip.SetToolTip(clearBtn, "清空回答，回到初始状态");
+            clearBtn.Click += (s, e) => ClearAnswer();
+
+            ansPanel = new Panel { Dock = DockStyle.Bottom, Height = 0, Visible = false };
+            ansPanel.Controls.Add(answer);
+            ansPanel.Controls.Add(clearBtn); // 最后加入 → 先参与 Dock（右侧 22px）
+
+            Opacity = 0.5; // 输入条整体半透明（有回答时提高到 0.98 便于阅读）
+            /* Dock 顺序：最后加入的最先参与布局 —— ansPanel 底 → tools 左 → mode 右 → pad 填充中间 */
             Controls.Add(pad);
-            Controls.Add(answer);
+            Controls.Add(mode);
+            Controls.Add(tools);
+            Controls.Add(ansPanel);
             ApplyTheme("light");
+        }
+
+        Button NewCell(int x, int y, string kind)
+        {
+            return new Button
+            {
+                Name = kind,
+                Bounds = new Rectangle(x, y, 22, 22),
+                FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 },
+                Cursor = Cursors.Default, TabStop = false, UseMnemonic = false, Text = ""
+            };
+        }
+
+        /* 矢量图标（GDI+ 路径绘制，等价 SVG 输出；无文字字符），按 22×22 逻辑坐标绘制 */
+        static void PaintIcon(Control c, string kind, Color fg, bool badge)
+        {
+            var bmp = new Bitmap(Math.Max(8, c.Width), Math.Max(8, c.Height));
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var pen = new Pen(fg, 1.4f))
+                using (var brush = new SolidBrush(fg))
+                {
+                    if (kind == "file") /* 文件：折角文档 + 三行内容线；badge=有附件时右上角圆点 */
+                    {
+                        var p = new GraphicsPath();
+                        p.AddLine(6, 3.5f, 12.5f, 3.5f);
+                        p.AddLine(12.5f, 3.5f, 15.5f, 6.5f);
+                        p.AddLine(15.5f, 6.5f, 15.5f, 18.5f);
+                        p.AddLine(15.5f, 18.5f, 6, 18.5f);
+                        p.CloseFigure();
+                        g.DrawPath(pen, p);
+                        g.DrawLine(pen, 12.5f, 3.5f, 12.5f, 6.5f);
+                        g.DrawLine(pen, 12.5f, 6.5f, 15.5f, 6.5f);
+                        g.DrawLine(pen, 8, 10, 13.5f, 10);
+                        g.DrawLine(pen, 8, 12.5f, 13.5f, 12.5f);
+                        g.DrawLine(pen, 8, 15, 11.5f, 15);
+                        if (badge) g.FillEllipse(brush, 13.5f, 2, 6, 6);
+                    }
+                    else if (kind == "web") /* 联网：地球（外圆 + 经线椭圆 + 赤道） */
+                    {
+                        g.DrawEllipse(pen, 4, 4, 14, 14);
+                        g.DrawEllipse(pen, 8.5f, 4, 5, 14);
+                        g.DrawLine(pen, 4, 11, 18, 11);
+                    }
+                    else if (kind == "more") /* 更多：三点 */
+                    {
+                        g.FillEllipse(brush, 3.8f, 9.7f, 2.6f, 2.6f);
+                        g.FillEllipse(brush, 9.7f, 9.7f, 2.6f, 2.6f);
+                        g.FillEllipse(brush, 15.6f, 9.7f, 2.6f, 2.6f);
+                    }
+                    else if (kind == "grip") /* 拖动把手：3×3 点阵 */
+                    {
+                        for (int i = 0; i < 3; i++)
+                            for (int j = 0; j < 3; j++)
+                                g.FillEllipse(brush, 5.5f + i * 5, 5.5f + j * 5, 2, 2);
+                    }
+                    else if (kind == "clear") /* 清空：× */
+                    {
+                        g.DrawLine(pen, 6, 6, 15.5f, 15.5f);
+                        g.DrawLine(pen, 15.5f, 6, 6, 15.5f);
+                    }
+                }
+            }
+            var old = c.BackgroundImage;
+            c.BackgroundImage = bmp;
+            c.BackgroundImageLayout = ImageLayout.Center;
+            if (old != null) old.Dispose();
+        }
+
+        void ClearAnswer()
+        {
+            lastAns = "";
+            if (!IsDisposed) PaintAnswer(); // 回到初始状态：收起回答区、半透明、高度 44
+        }
+
+        void Cmd(string cmd)
+        {
+            main.PostRaw(JsonSerializer.Serialize(new { t = "quick.cmd", cmd }));
+        }
+
+        void OpenMain()
+        {
+            try
+            {
+                main.Show();
+                if (main.WindowState == FormWindowState.Minimized) main.WindowState = FormWindowState.Normal;
+                main.Activate();
+            }
+            catch { }
+        }
+
+        /* 页面状态回显：联网开关 / Agent 模式 / 待发附件数（页面 quick.state 推送） */
+        public void ApplyState(bool web, bool agent, int files)
+        {
+            if (IsDisposed) return;
+            syncState = true;
+            try { mode.SelectedIndex = agent ? 1 : 0; } finally { syncState = false; }
+            webOn = web; agentOn = agent; filesN = files;
+            PaintState();
+        }
+
+        void PaintState()
+        {
+            Color accent = BackColor.GetBrightness() < 0.5f ? Hx("#5e6ad2") : Hx("#cc785c");
+            Color baseBg = pad.BackColor, baseFg = ThemeFg();
+            bWeb.BackColor = webOn ? accent : baseBg;
+            bWeb.ForeColor = webOn ? Color.White : baseFg;
+            bFile.BackColor = filesN > 0 ? accent : baseBg;
+            bFile.ForeColor = filesN > 0 ? Color.White : baseFg;
+            mode.BackColor = agentOn ? accent : baseBg;
+            mode.ForeColor = agentOn ? Color.White : baseFg;
+            grip.BackColor = baseBg;
+            tools.BackColor = baseBg;
+            /* v1.4.1：矢量图标按当前主题/状态重绘（无文字字符） */
+            PaintIcon(bFile, "file", filesN > 0 ? Color.White : baseFg, filesN > 0);
+            PaintIcon(bWeb, "web", webOn ? Color.White : baseFg, false);
+            PaintIcon(bMore, "more", baseFg, false);
+            PaintIcon(grip, "grip", baseFg, false);
+            PaintIcon(clearBtn, "clear", baseFg, false);
+            tip.SetToolTip(bFile, filesN > 0 ? ("待发附件 " + filesN + " 个 · 点击继续添加") : "文件：添加图片/文本/文档");
+            tip.SetToolTip(bWeb, webOn ? "联网搜索：开（点击关闭）" : "联网搜索：关（点击开启）");
+            tip.SetToolTip(bMore, "更多：新建会话 / 打开主窗 / 设置");
+            tip.SetToolTip(grip, "按住拖动移动快速条");
+            tip.SetToolTip(mode, agentOn ? "Agent 模式：文件读写（工作区内免确认，区外逐次确认）" : "Chat 模式：常规对话。点选 Agent 可选择工作区文件夹");
         }
 
         /* 不抢主窗焦点地显示 */
@@ -1012,7 +1411,7 @@ namespace SoloChatHost
         public void Apply(bool show, string theme)
         {
             ApplyTheme(theme == "dark" ? "dark" : "light");
-            if (show && !Visible) { Reposition(); Show(); }
+            if (show && !Visible) { Reposition(); Show(); if (lastAns.Length > 0) PaintAnswer(); } // 重新呼出时恢复上一轮回答
             else if (!show && Visible) Hide();
             ReassertTopMost();
         }
@@ -1045,19 +1444,155 @@ namespace SoloChatHost
             catch { }
         }
 
-        /* 页面流式回传：在输入条内直接简要显示（不切回主窗） */
+        /* 页面流式回传：在输入条内直接简要显示（不切回主窗）。
+           v1.4：即使回答到达时小窗已被隐藏也先记住，重新呼出时仍显示；
+           总高 = min(268, 屏幕工作区 1/3)，保证不遮挡其它应用超过三分之一屏；
+           v1.4.1：回答区右侧带「清空」图标按钮，一键回到初始状态。 */
+        string lastAns = "";
+
         public void ShowAnswer(string text, bool done)
         {
+            lastAns = text ?? "";
             if (!Visible || IsDisposed) return;
-            bool has = !string.IsNullOrEmpty(text);
-            answer.Visible = has;
-            Height = has ? 224 : 44;
+            PaintAnswer();
+        }
+
+        /* v2.1：回答区是否已贴着底部（决定流式刷新要不要跟随滚动） */
+        bool AnswerAtBottom()
+        {
+            if (answer.TextLength == 0) return true;
+            try
+            {
+                var pt = answer.GetPositionFromCharIndex(answer.TextLength - 1);
+                return pt.Y <= answer.ClientSize.Height - 4;
+            }
+            catch { return true; }
+        }
+
+        void PaintAnswer()
+        {
+            bool has = !string.IsNullOrEmpty(lastAns);
+            int third = Screen.FromControl(this).WorkingArea.Height / 3;
+            int full = has ? Math.Min(268, Math.Max(60, third)) : 44;
             if (has)
             {
-                answer.Text = text;
-                answer.SelectionStart = answer.TextLength;
-                answer.ScrollToCaret();
+                /* v2.1：流式刷新不再无条件拽到底 —— 重设 RTF 会重置滚动条，
+                   故先记下"是否贴底"与用户当前视口首字符，重设后按需还原。 */
+                bool atBottom = AnswerAtBottom();
+                int keepIdx = -1;
+                if (!atBottom) { try { keepIdx = answer.GetCharIndexFromPosition(new Point(2, 2)); } catch { keepIdx = -1; } }
+                answer.Rtf = MdToRtf(lastAns); // v1.8：轻量 Markdown → RTF
+                if (atBottom)
+                {
+                    answer.SelectionStart = answer.TextLength;
+                    answer.ScrollToCaret();
+                }
+                else if (keepIdx >= 0 && keepIdx < answer.TextLength)
+                {
+                    answer.SelectionStart = keepIdx; // 用户自由滚动 → 保持原视口，不被流式更新打扰
+                    answer.ScrollToCaret();
+                }
+                answer.SelectionLength = 0;
             }
+            else answer.Text = "";
+            Opacity = has ? 0.98 : 0.5; // 有回答时提高不透明度，便于在半透明条上直接阅读
+            ansPanel.Height = Math.Max(0, full - 44);
+            ansPanel.Visible = has;
+            Height = full;
+        }
+
+        /* —— v1.8 轻量 Markdown → RTF（回答区） ——
+           支持：#~#### 标题、**粗**、*斜*、`行内码`、``` 代码块、-/1. 列表、> 引用、|表格|、--- 分隔线、[文本](链接)。
+           非 ASCII 一律走 \uN? 转义（N 为带符号 16 位），不依赖代码页。
+           colortbl 色表（按主题）：1=代码底 2=链接 3=次要 4=正文；正文基线 \fs19 = 9.5pt。 */
+        string MdToRtf(string md) // 实例方法：主题色取自本窗 BackColor
+        {
+            bool dark = BackColor.GetBrightness() < 0.5f;
+            var sb = new StringBuilder(md.Length * 2 + 256);
+            sb.Append(@"{\rtf1\ansi\uc1{\fonttbl{\f0\fnil\fcharset134 Microsoft YaHei UI;}{\f1\fnil Consolas;}}");
+            sb.Append(dark ? @"{\colortbl;\red42\green44\blue48;\red127\green179\blue255;\red154\green160\blue170;\red208\green214\blue224;}"
+                           : @"{\colortbl;\red228\green228\blue224;\red42\green106\blue208;\red119\green119\blue111;\red61\green61\blue58;}");
+            sb.Append(@"\cf4\f0\fs19 ");
+
+            var lines = md.Replace("\r\n", "\n").Split('\n');
+            bool inCode = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var ln = lines[i];
+                if (ln.TrimStart().StartsWith("```"))
+                {
+                    inCode = !inCode;
+                    if (!inCode) sb.Append(@"\par ");
+                    continue;
+                }
+                if (inCode) { sb.Append(@"{\f1\cb1\cf4 ").Append(Esc(ln)).Append(@"\cb0\cf4}\line "); continue; }
+
+                var t = ln.Trim();
+                if (t.Length == 0) { sb.Append(@"\par "); continue; }
+
+                var h = Regex.Match(t, @"^(#{1,4})\s+(.*)$");
+                if (h.Success)
+                {
+                    string[] fs = { "", @"\fs28\b", @"\fs24\b", @"\fs21\b", @"\fs19\b" };
+                    sb.Append(fs[h.Groups[1].Value.Length]).Append(' ')
+                      .Append(Inline(h.Groups[2].Value)).Append(@"\b0\par ");
+                    continue;
+                }
+                if (Regex.IsMatch(t, @"^(-{3,}|\*{3,})$")) { sb.Append(@"\emdash\emdash\emdash\par "); continue; }
+
+                var li = Regex.Match(t, @"^([-*+]|\d+\.)\s+(.*)$");
+                if (li.Success)
+                {
+                    string mk = li.Groups[1].Value;
+                    sb.Append(mk == "-" || mk == "*" || mk == "+" ? @"\u8226? " : mk + " ");
+                    sb.Append(Inline(li.Groups[2].Value)).Append(@"\par ");
+                    continue;
+                }
+                if (t.StartsWith(">")) { sb.Append(@"{\i\cf3 ").Append(Inline(t.TrimStart('>', ' '))).Append(@"\i0\cf4}\par "); continue; }
+                if (t.StartsWith("|"))
+                {
+                    var cells = t.Trim('|').Split('|');
+                    for (int c2 = 0; c2 < cells.Length; c2++)
+                    {
+                        if (c2 > 0) sb.Append(@" \u9474? "); // │
+                        sb.Append(Inline(cells[c2].Trim()));
+                    }
+                    sb.Append(@"\par ");
+                    continue;
+                }
+                sb.Append(Inline(ln)).Append(@"\par "); // 普通行保留原始缩进
+            }
+            sb.Append('}'); // RTF 根组收尾
+            return sb.ToString();
+        }
+
+        /* 行内标记：先转义 → 代码段抽占位防误伤 → 链接/粗/斜 → 还原代码段。
+           RTF 的格式开关写在 { } 组内，出组自动失效，无需手工复位。 */
+        static string Inline(string s)
+        {
+            s = Esc(s);
+            var codes = new List<string>();
+            s = Regex.Replace(s, "`([^`\n]+)`", m => { codes.Add(m.Groups[1].Value); return "\uE001" + (codes.Count - 1) + "\uE001"; });
+            s = Regex.Replace(s, @"\[([^\]]+)\]\((https?://[^\s)]+)\)", @"{\cf2\ul $1\ul0\cf4}");
+            s = Regex.Replace(s, @"\*\*([^*]+)\*\*", @"{\b $1}");
+            s = Regex.Replace(s, @"(^|[^*])\*([^*\n]+)\*(?!\*)", @"$1{\i $2}");
+            s = Regex.Replace(s, "\uE001(\\d+)\uE001", m => @"{\f1\cb1\cf4 " + codes[int.Parse(m.Groups[1].Value)] + @"\cb0\cf4}");
+            return s;
+        }
+
+        /* RTF 转义：\{ } 与控制符；非 ASCII → \uN?（带符号 16 位，带 '?' 兜底字符） */
+        static string Esc(string s)
+        {
+            var sb = new StringBuilder(s.Length + 16);
+            foreach (char c in s)
+            {
+                if (c == '\\' || c == '{' || c == '}') sb.Append('\\').Append(c);
+                else if (c == '\t') sb.Append(@"\tab ");
+                else if (c < 32) sb.Append(' ');
+                else if (c < 127) sb.Append(c);
+                else sb.Append(@"\u").Append((short)c).Append('?');
+            }
+            return sb.ToString();
         }
 
         /* 小组件源（MicrosoftStartFeedProvider）等全屏 TopMost 窗会压过先创建的置顶窗，
@@ -1070,9 +1605,12 @@ namespace SoloChatHost
             topTimer = new System.Windows.Forms.Timer { Interval = 2000 };
             topTimer.Tick += (s, e) =>
             {
-                if (!IsDisposed && Visible)
-                    SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                if (IsDisposed || !Visible) return;
+                /* v1.8：插到 Shell_TrayWnd（任务栏）正下方——仍在置顶层、照旧盖过小组件源等全屏置顶窗，
+                   但把任务栏让到我们上面；快速条停在屏幕底部时不再跟自适应任务栏抢 z 序 */
+                IntPtr tray = FindWindow("Shell_TrayWnd", null);
+                SetWindowPos(Handle, tray != IntPtr.Zero ? tray : HWND_TOPMOST, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             };
             topTimer.Start();
         }
@@ -1081,6 +1619,8 @@ namespace SoloChatHost
         static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         [DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern IntPtr FindWindow(string cls, string title);
         [DllImport("user32.dll")]
         static extern bool SetForegroundWindow(IntPtr h);
 
@@ -1098,8 +1638,10 @@ namespace SoloChatHost
             input.ForeColor = ph ? SystemColors.GrayText : Hx(d ? "#f7f8f8" : "#141413");
             answer.BackColor = pad.BackColor;
             answer.ForeColor = Hx(d ? "#d0d6e0" : "#3d3d3a");
-            send.BackColor = Hx(d ? "#5e6ad2" : "#cc785c");
-            send.ForeColor = Color.White;
+            if (lastAns.Length > 0) { try { answer.Rtf = MdToRtf(lastAns); } catch { } } // 主题色变化随 RTF 色表刷新
+            moreMenu.BackColor = pad.BackColor;
+            moreMenu.ForeColor = input.ForeColor;
+            PaintState(); // 左侧四格 + 模式选择按主题重绘
         }
 
         void Send()
