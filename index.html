@@ -755,6 +755,9 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .tc-bad{flex:none;font-size:11px;color:var(--danger)}
 .tc-meta{flex:none;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
 .tc-brief{flex:1;min-width:0;color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tc-btn{flex:none;margin-left:auto;font:inherit;font-size:11px;padding:2px 8px;border-radius:var(--r-sm);
+  border:1px solid var(--hairline);background:var(--canvas);color:var(--muted);cursor:pointer}
+.tc-btn:hover{color:var(--ink);border-color:var(--faint)}
 .tc-raw{margin:2px 0 8px}
 .tc-raw>summary{font-size:11px;color:var(--faint);cursor:pointer;padding:2px 0;list-style:none}
 .tc-raw>summary::-webkit-details-marker{display:none}
@@ -1732,6 +1735,13 @@ var NET = (function(){
       }
       else if (d.t === 'http.done'){ delete bridge.pend[d.id]; p.onDone(d.status); }
       else if (d.t === 'http.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || 'bridge error')); }
+      else if (d.t === 'media.progress'){ if (p.onProgress && d.data){ try { p.onProgress(JSON.parse(d.data)); } catch(e){} } }
+      else if (d.t === 'media.done'){
+        delete bridge.pend[d.id];
+        var md = null; try { md = JSON.parse(d.data); } catch(e){}
+        if (p.resolve) p.resolve(md || {}); else if (p.onDone) p.onDone(d.data);
+      }
+      else if (d.t === 'media.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '下载失败')); else if (p.onError) p.onError(new Error(d.message || '下载失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
       else if (d.t === 'secret.done' || d.t === 'secret.error'){
@@ -1748,6 +1758,18 @@ var NET = (function(){
       else if (this.engine === 'sciter') window.xcall('solohost', JSON.stringify(msg)); // 同步投递，宿主异步回推
     },
     abort: function(id){ this.send({ t: 'http.abort', id: id }); },
+    media: function(opts){ // v0.2.4：宿主侧下载视频（带 Referer/UA，落盘到 下载\SoloChat）
+      if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能保存到磁盘'));
+      opts = opts || {};
+      var id = 'md' + (++this.seq);
+      return new Promise(function(res, rej){
+        bridge.pend[id] = { resolve: res, reject: rej, onProgress: opts.onProgress };
+        bridge.send({ t: 'media', id: id, action: opts.bvid ? 'bili' : 'url', bvid: opts.bvid || '',
+          url: opts.url || '', qn: opts.qn || 80, referer: opts.referer || '',
+          proxy: (typeof S !== 'undefined' && S.cfg && S.cfg.proxy) || '' });
+      });
+    },
+    reveal: function(path){ if (this.ok && path) this.send({ t: 'reveal', path: path }); },
     vault: function(op, name, value){ // F4：密钥保险库（DPAPI），get→string|null / set→void
       if (!this.ok) return Promise.resolve(null);
       var id = 'v' + (++this.seq);
@@ -2034,6 +2056,9 @@ var NET = (function(){
   /* 单页抓取（档④）：桥 GET 优先，浏览器直连受 CORS 约束，失败返回 null（回退摘要） */
   /* v0.2.3：把外部地址交给宿主 —— mode='window' 是应用内播放窗口（同一浏览器环境，带 cookie/登录态），
      'browser' 是系统默认浏览器。纯网页版退化为 window.open。 */
+  /* v0.2.4：视频下载（宿主做，页面只收进度/结果） */
+  function mediaDownload(opts){ return bridge.media(opts); }
+  function revealPath(path){ bridge.reveal(path); }
   function openExternal(url, mode){
     var u = safeUrl(url);
     if (!u) return false;
@@ -2043,9 +2068,24 @@ var NET = (function(){
     try { window.open(u, '_blank', 'noopener'); return true; } catch (e) {}
     return false;
   }
+  /* v0.2.4：图片/媒体/压缩包之类抓成文本只会得到乱码，直接拒掉（web 工具只取文本） */
+  var BIN_RE = /\.(jpe?g|png|gif|webp|ico|bmp|avif|heic|mp4|m4s|mp3|m4a|flv|mov|avi|mkv|zip|rar|7z|gz|tar|pdf|woff2?|ttf|otf|eot|wasm|exe|msi|dmg|apk|jar)(\?|#|$)/i;
+  function isBinaryUrl(u){
+    try { return BIN_RE.test(new URL(String(u)).pathname); } catch (e) { return BIN_RE.test(String(u)); }
+  }
+  function looksBinary(t){
+    if (!t) return false;
+    var n = Math.min(t.length, 4000), bad = 0;
+    for (var i = 0; i < n; i++){
+      var c = t.charCodeAt(i);
+      if (c === 0xFFFD || (c < 32 && c !== 9 && c !== 10 && c !== 13)) bad++;
+    }
+    return n > 0 && bad / n > 0.02;
+  }
   function fetchPageText(u){
     var href = safeUrl(u);
     if (!href) return Promise.resolve(null);
+    if (isBinaryUrl(href)) return Promise.resolve(null); // 图片/视频等直接跳过
     var ms = 8000;
     if (bridge.ok && S.cfg.useBridge){
       return new Promise(function(resolve){
@@ -2054,7 +2094,12 @@ var NET = (function(){
         function stop(){ if (!fin){ fin = true; clearTimeout(to); delete bridge.pend[id]; } }
         bridge.pend[id] = {
           onChunk: function(t){ if (acc.length < 400000) acc += t; },
-          onDone: function(status){ if (fin) return; stop(); resolve((status >= 200 && status < 300) ? htmlToText(acc) : null); },
+          onDone: function(status){
+            if (fin) return; stop();
+            if (!(status >= 200 && status < 300)) return resolve(null);
+            var txt = htmlToText(acc);
+            resolve(looksBinary(txt) ? null : txt);
+          },
           onError: function(){ stop(); resolve(null); }
         };
         bridge.send({ t: 'http', id: id, direct: isDirectHost(href), url: href, method: 'GET',
@@ -2066,7 +2111,7 @@ var NET = (function(){
     var t = setTimeout(function(){ ac.abort(); }, ms);
     return fetch(href, { signal: ac.signal, headers: { 'Accept': 'text/html,application/xhtml+xml' } })
       .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.text(); })
-      .then(function(h){ clearTimeout(t); return h ? htmlToText(h) : null; })
+      .then(function(h){ clearTimeout(t); if (!h) return null; var txt = htmlToText(h); return looksBinary(txt) ? null : txt; })
       .catch(function(){ clearTimeout(t); return null; });
   }
   function fetchPages(list){
@@ -2702,6 +2747,9 @@ var NET = (function(){
     estimate: estimate,
     searchWeb: searchWeb,
     openExternal: openExternal, // v0.2.3：Work 的 play 工具用（应用内播放窗口）
+    mediaDownload: mediaDownload, // v0.2.4：Work 的 download 工具
+    isBinaryUrl: isBinaryUrl,
+    revealPath: revealPath,
     safeUrl: safeUrl,          // v0.2.1：Work 的 web 工具复用
     fetchPageText: fetchPageText, // v0.2.1：Work 的 web 工具复用（桥优先 → 无 CORS 限制）
     classify: classify,
@@ -2833,7 +2881,7 @@ var MD = (function(){
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
+        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play|download)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
@@ -2918,9 +2966,9 @@ var MD = (function(){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放', download: '下载视频' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -2932,7 +2980,7 @@ var MD = (function(){
       '<div class="th" data-tc="1">' +
       '<span class="tag">' + esc(lang) + '</span><span>' + esc(title) + '</span>' +
       (meta ? '<span class="meta">' + esc(meta) + '</span>' : '') +
-      (lang === 'web' || lang === 'search' || lang === 'play' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
+      (lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
       '<div class="tb"><pre><code>' + code + '</code></pre></div></div>';
   }
   function fsCard(c){
@@ -5406,7 +5454,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.3', ua = navigator.userAgent || '';
+      var ver = 'v0.2.4', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -5657,7 +5705,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     updateEmpty();
   }
   /* v0.2.1：工具卡片 —— 「运行 js / 写入 x.mjs / 抓取 URL / 搜索 q」一行一条，点开才看原始输出 */
-  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', read: '读取' };
+  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', download: '下载', read: '读取' };
   function toolEvents(m){
     if (m.tools && m.tools.length) return m.tools;
     var out = [], lines = String(m.content || '').split('\n');
@@ -5675,6 +5723,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         out.push({ op: 'web', ok: false, brief: (b[2] || b[1]).slice(0, 60) });
       else if ((b = /^\[search\]\s*(.+?)（(\d+)\s*条/.exec(l)))
         out.push({ op: 'search', q: b[1], n: +b[2], ok: true });
+      else if ((b = /^\[download\]\s*已保存：(.+?)（([^）]*)）/.exec(l)))
+        out.push({ op: 'download', path: b[1], size: b[2], ok: true });
       else if ((b = /^\[play\]\s*已在播放窗口打开：(.+)$/.exec(l)))
         out.push({ op: 'play', url: b[1], ok: true });
       else if ((b = /^\[preview\]\s*已在运行面板打开：(.+)$/.exec(l)))
@@ -5701,6 +5751,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
           el('span', { class: e.ok === false ? 'tc-bad' : 'tc-ok', text: e.ok === false ? '失败' : '完成' })];
         if (e.ms != null) cells.push(el('span', { class: 'tc-meta', text: e.ms + 'ms' }));
         if (brief) cells.push(el('span', { class: 'tc-brief', text: brief, title: brief }));
+        if (e.op === 'download' && e.path) cells.push(el('button', { class: 'tc-btn', type: 'button', 'data-reveal': e.path, text: '打开文件夹' }));
         card.appendChild(el('div', { class: 'tc-row' }, cells));
       }
       frag.appendChild(card);
@@ -7880,6 +7931,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       UI.toast('代码块换行：' + (S.cfg.codeNoWrap ? '关（横向滚动）' : '开'));
       return;
     }
+    var rv = t.closest('[data-reveal]');
+    if (rv){ NET.revealPath(rv.getAttribute('data-reveal')); return; }
     var tc = t.closest('[data-tc]');
     if (tc){ tc.parentNode.classList.toggle('collapsed'); return; }
     var cp = t.closest('.code-copy');
@@ -8660,11 +8713,12 @@ var WORK = (function(){
     '```patch —— 首行是相对路径，其余是 unified diff（@@ -a,b +c,d @@ 简版，上下文行以空格开头）；小改动比整文件重写省 token。\n' +
     '```preview —— 首行是工作区相对路径，在右侧运行面板的内置浏览器打开该文件；写完 html/svg/md 产物后用它自检。\n' +
     '```play —— 首行是视频/网页 URL；在应用内的独立播放窗口打开（同一浏览器环境、带 Referer 与登录态）。视频站（B 站、YouTube…）的播放器禁止被第三方页面内嵌，写进本地预览的 iframe 一定会显示「已阻止此内容」；要看视频就用 play，不要在 html 产物里塞 player 的 iframe。也不要在 run 里写"下载 mp4"——那需要 DASH 分片合并与 Referer 校验，沙箱做不到，别承诺。\n' +
+    '```download —— 首行是视频页 URL 或 BV 号；把视频下载成 mp4 存到「下载/SoloChat」，回灌保存路径、大小与清晰度。下载在宿主里做（带 Referer/UA），需要 exe 版；只能拿到单文件 mp4 流（一般 720p 以内），拿不到就如实说明原因，别承诺 4K/大会员画质。\n' +
     '注意：只有用户这轮要文件/页面时，回复里的 html/svg/js/css/md 代码块才会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
     '回答方式（重要）：用户说「爬一下 / 查一下 / 是什么 / 看看」时，默认把结论直接写在回复里（表格、条目或短段落），不要把答案包装成 html / md 文件，也不要为这类问题产出「产物」；只有用户明确要文件、网页、页面、导出、保存、下载、成品时才落盘，并在文末列产物清单。\n' +
     '纪律：① 先把手头需求转成验收清单（几条）；② 需要外部事实先用 web/search 取真实内容，禁止凭记忆编造，也不要拿"沙箱无网"当交付理由；③ 代码内嵌自检（console.assert / 结果比对打印）；④ 每轮结束声明清单哪几项已验证（引用输出）、哪几项未验证；⑤ 产生了文件才列产物清单，并写已知限制；⑥ 禁止编造"已测试"。'
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -8827,7 +8881,7 @@ var WORK = (function(){
     function finish(extra){
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview|play)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play|download)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events);
     }
     (function next(){
@@ -8844,6 +8898,11 @@ var WORK = (function(){
         var u = NET.safeUrl(c.arg);
         if (!u){
           add('[web] 地址无效（需 http/https 绝对地址）：' + (c.arg || '（空）'), { op: 'web', ok: false, brief: '地址无效' });
+          next(); return;
+        }
+        if (NET.isBinaryUrl(u)){
+          add('[web] 跳过（图片/媒体/二进制资源，web 只抓文本）：' + u + '；要保存视频用 download，要看起来用 play',
+            { op: 'web', url: u, ok: false, brief: '二进制资源，已跳过' });
           next(); return;
         }
         var t0 = Date.now();
@@ -8911,6 +8970,35 @@ var WORK = (function(){
           fs.sort(function(a, b){ return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
           var lines = fs.map(function(f){ return f.path + '（' + sizeFmt(f.size || 0) + '）'; });
           add('[vfs] 工作区文件（' + fs.length + ' 项）' + (lines.length ? '\n```\n' + lines.join('\n') + '\n```' : '（空）'), { op: 'list', n: fs.length, ok: true });
+        }).then(next);
+        return;
+      }
+      /* ---- v0.2.4：把视频下载成 mp4 落到磁盘（宿主持有 Referer/UA；网页版无此能力） ---- */
+      if (c.op === 'download'){
+        var darg = String(c.arg || '').trim();
+        var dhead = (darg.split('\n')[0] || '').trim();
+        var dm = /BV[0-9A-Za-z]{10}/.exec(dhead);
+        var dbvid = dm ? dm[0] : '';
+        var durl = /^https?:\/\//i.test(dhead) ? dhead : '';
+        if (!dbvid && !durl){
+          add('[download] 首行需要视频页 URL 或 BV 号：' + (dhead || '（空）'), { op: 'download', ok: false, brief: '缺少地址' });
+          next(); return;
+        }
+        var td0 = Date.now(), lastToast = 0;
+        NET.mediaDownload({
+          bvid: dbvid, url: durl, qn: 80,
+          onProgress: function(pr){
+            var now = Date.now();
+            if (now - lastToast < 1500) return;
+            lastToast = now;
+            UI.toast('下载中 ' + (pr.got / 1048576).toFixed(1) + ' / ' + (pr.total ? (pr.total / 1048576).toFixed(1) : '?') + ' MB');
+          }
+        }).then(function(r){
+          add('[download] 已保存：' + r.path + '（' + sizeFmt(r.size || 0) + (r.quality ? '，' + r.quality : '') + '）',
+            { op: 'download', path: r.path, size: sizeFmt(r.size || 0), ms: Date.now() - td0, ok: true });
+          UI.toast('视频已下载：' + r.path);
+        }, function(e){
+          add('[download] 下载失败：' + (e && e.message || e), { op: 'download', ok: false, brief: (e && e.message || String(e)).slice(0, 60) });
         }).then(next);
         return;
       }

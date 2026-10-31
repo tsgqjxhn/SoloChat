@@ -602,7 +602,30 @@ namespace SoloChatHost
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
                     }
-                    else if (t == "open") /* v0.2.3：页面请求打开外部地址；mode=window 用应用内播放窗口 */
+                    else if (t == "media") /* v0.2.4：把视频下载成 mp4 落到 下载SoloChat（宿主持有 Referer/UA，页面做不到） */
+            {
+                var idCopy2 = id;
+                var reqCopy2 = root.Clone();
+                Task.Run(() => RunMediaAsync(reqCopy2, idCopy2));
+            }
+            else if (t == "reveal") /* 在资源管理器中定位下载的文件 */
+            {
+                string rp = root.TryGetProperty("path", out JsonElement rpEl) ? rpEl.GetString() : "";
+                if (!string.IsNullOrEmpty(rp))
+                {
+                    var rpCopy = rp;
+                    BeginInvoke((Action)(() =>
+                    {
+                        try
+                        {
+                            if (File.Exists(rpCopy)) System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + rpCopy + "\"");
+                            else if (Directory.Exists(rpCopy)) System.Diagnostics.Process.Start("explorer.exe", "\"" + rpCopy + "\"");
+                        }
+                        catch { }
+                    }));
+                }
+            }
+            else if (t == "open") /* v0.2.3：页面请求打开外部地址；mode=window 用应用内播放窗口 */
             {
                 string ou = root.TryGetProperty("url", out JsonElement ouEl) ? ouEl.GetString() : "";
                 string om = root.TryGetProperty("mode", out JsonElement omEl) ? omEl.GetString() : "browser";
@@ -811,6 +834,173 @@ namespace SoloChatHost
                     add(h.Key.ToLowerInvariant(), h.Value);
             sb.Append('}');
             return sb.ToString();
+        }
+
+        /* ---- v0.2.4：视频下载（B 站）----
+           为什么必须由宿主做：playurl 与 CDN 都校验 Referer + UA，页面侧（app.local）既设不了 Referer，
+           也过不了 CORS；DASH 分片需要 ffmpeg 合并，所以走 fnval=0&platform=html5 的 durl 单文件 mp4。
+           落盘位置：%USERPROFILE%\Downloads\SoloChat */
+        const string MediaUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+        HttpClient MediaClient(string proxy)
+        {
+            var handler = new HttpClientHandler
+            {
+                UseCookies = true,
+                CookieContainer = new System.Net.CookieContainer(),
+                AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+            };
+            if (!string.IsNullOrEmpty(proxy))
+            {
+                handler.Proxy = new System.Net.WebProxy(proxy);
+                handler.UseProxy = true;
+            }
+            var hc = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(20) };
+            hc.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", MediaUA);
+            hc.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://www.bilibili.com/");
+            hc.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "*/*");
+            return hc;
+        }
+
+        static string SafeName(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return "video";
+            var sb = new StringBuilder();
+            foreach (var ch in s)
+            {
+                if (sb.Length >= max) break;
+                sb.Append(Array.IndexOf(Path.GetInvalidFileNameChars(), ch) >= 0 || ch == '\\' || ch == '/' ? '_' : ch);
+            }
+            var r = sb.ToString().Trim().TrimEnd('.');
+            return r.Length == 0 ? "video" : r;
+        }
+
+        async Task RunMediaAsync(JsonElement req, string id)
+        {
+            HttpClient hc = null;
+            try
+            {
+                string action = req.TryGetProperty("action", out JsonElement aEl) ? aEl.GetString() : "url";
+                string bvid = req.TryGetProperty("bvid", out JsonElement bvEl) && bvEl.ValueKind == JsonValueKind.String ? bvEl.GetString() : "";
+                string url = req.TryGetProperty("url", out JsonElement uEl) && uEl.ValueKind == JsonValueKind.String ? uEl.GetString() : "";
+                string proxy = req.TryGetProperty("proxy", out JsonElement pxEl) && pxEl.ValueKind == JsonValueKind.String ? pxEl.GetString() : "";
+                int qn = req.TryGetProperty("qn", out JsonElement qEl) && qEl.ValueKind == JsonValueKind.Number ? qEl.GetInt32() : 64;
+
+                string mediaUrl = url, title = "", quality = "", referer = "https://www.bilibili.com/";
+                long sizeHint = 0;
+
+                hc = MediaClient(proxy);
+                if (action == "bili")
+                {
+                    if (string.IsNullOrEmpty(bvid))
+                    {
+                        var m0 = Regex.Match(url ?? "", "(BV[0-9A-Za-z]{10})");
+                        if (m0.Success) bvid = m0.Groups[1].Value;
+                    }
+                    if (string.IsNullOrEmpty(bvid)) throw new Exception("没找到 BV 号（首行给视频页 URL 或 BV 号）");
+
+                    /* 先访问一次首页拿 buvid 等 cookie，降低风控概率 */
+                    try { await hc.GetAsync("https://www.bilibili.com/"); } catch { }
+
+                    var viewJson = await hc.GetStringAsync("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid);
+                    using (var vd = JsonDocument.Parse(viewJson))
+                    {
+                        var root2 = vd.RootElement;
+                        int vcode = root2.GetProperty("code").GetInt32();
+                        if (vcode != 0) throw new Exception("视频信息接口返回 code=" + vcode + "（可能已删除 / 需要登录 / 触发风控）");
+                        var data = root2.GetProperty("data");
+                        title = data.TryGetProperty("title", out JsonElement tEl) ? tEl.GetString() : "";
+                        long cid = data.GetProperty("cid").GetInt64();
+                        int pages = data.TryGetProperty("videos", out JsonElement vEl) ? vEl.GetInt32() : 1;
+
+                        var pu = "https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=" + qn + "&fnval=0&platform=html5&high_quality=1";
+                        var pj = await hc.GetStringAsync(pu);
+                        using (var pd = JsonDocument.Parse(pj))
+                        {
+                            var pr = pd.RootElement;
+                            int pcode = pr.GetProperty("code").GetInt32();
+                            if (pcode != 0) throw new Exception("取播放地址失败 code=" + pcode + "（可能需要登录或版权限制）");
+                            var pdata = pr.GetProperty("data");
+                            if (!pdata.TryGetProperty("durl", out JsonElement durl) || durl.GetArrayLength() == 0)
+                                throw new Exception("该视频没有单文件 mp4 流（可能只有 DASH 分片，需要合并）");
+                            var d0 = durl[0];
+                            mediaUrl = d0.GetProperty("url").GetString();
+                            sizeHint = d0.TryGetProperty("size", out JsonElement szEl) ? szEl.GetInt64() : 0;
+                            if (pdata.TryGetProperty("quality", out JsonElement qqEl) && qqEl.ValueKind == JsonValueKind.Number)
+                                quality = QnName(qqEl.GetInt32());
+                            if (pages > 1) title += "（P1）";
+                        }
+                    }
+                }
+                else
+                {
+                    if (string.IsNullOrEmpty(mediaUrl)) throw new Exception("缺少 url");
+                    referer = req.TryGetProperty("referer", out JsonElement rfEl) && rfEl.ValueKind == JsonValueKind.String ? rfEl.GetString() : "";
+                    if (!string.IsNullOrEmpty(referer)) hc.DefaultRequestHeaders.Remove("Referer");
+                    if (!string.IsNullOrEmpty(referer)) hc.DefaultRequestHeaders.TryAddWithoutValidation("Referer", referer);
+                }
+
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "SoloChat");
+                Directory.CreateDirectory(dir);
+                var baseName = SafeName(title, 70);
+                if (string.IsNullOrEmpty(baseName) || baseName == "video")
+                    baseName = SafeName(Path.GetFileNameWithoutExtension(new Uri(mediaUrl).AbsolutePath), 60);
+                var fileName = baseName + (string.IsNullOrEmpty(quality) ? "" : "_" + quality) + "_" + DateTime.Now.ToString("HHmmss") + ".mp4";
+                var path = Path.Combine(dir, fileName);
+
+                using (var resp = await hc.GetAsync(mediaUrl, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    if (!resp.IsSuccessStatusCode) throw new Exception("下载失败 HTTP " + (int)resp.StatusCode + "（CDN 拒绝，可能需要登录 cookie）");
+                    long total = resp.Content.Headers.ContentLength ?? sizeHint;
+                    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true))
+                    using (var st = await resp.Content.ReadAsStreamAsync())
+                    {
+                        var buf = new byte[1 << 16];
+                        long got = 0;
+                        int lastTick = 0, n;
+                        while ((n = await st.ReadAsync(buf, 0, buf.Length)) > 0)
+                        {
+                            await fs.WriteAsync(buf, 0, n);
+                            got += n;
+                            var now = Environment.TickCount;
+                            if (now - lastTick > 500)
+                            {
+                                lastTick = now;
+                                Post(id, "media.progress", "{\"got\":" + got + ",\"total\":" + total + "}", null, 0);
+                            }
+                        }
+                        sizeHint = got;
+                    }
+                }
+                Log("media ok: " + path + " (" + sizeHint + " B)");
+                Post(id, "media.done", "{\"path\":" + JsonSerializer.Serialize(path) + ",\"size\":" + sizeHint +
+                     ",\"title\":" + JsonSerializer.Serialize(title) + ",\"quality\":" + JsonSerializer.Serialize(quality) + "}", null, 0);
+            }
+            catch (Exception ex)
+            {
+                Log("media err: " + ex.Message);
+                Post(id, "media.error", null, ex.Message, 0);
+            }
+            finally
+            {
+                if (hc != null) hc.Dispose();
+            }
+        }
+
+        static string QnName(int qn)
+        {
+            switch (qn)
+            {
+                case 16: return "360p";
+                case 32: return "480p";
+                case 64: return "720p";
+                case 74: return "720p60";
+                case 80: return "1080p";
+                case 112: return "1080p+";
+                case 116: return "1080p60";
+                case 120: return "4K";
+                default: return qn + "p";
+            }
         }
 
         /* PostWebMessageAsJson 必须在 UI 线程调用；手工拼 JSON 规避 3.1 运行时类型序列化限制 */
