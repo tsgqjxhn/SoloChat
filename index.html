@@ -253,6 +253,10 @@ body.sb-collapsed.sb-float #sidebar{
 .code-run:hover{background:rgba(255,255,255,.08);color:var(--code-ink)}
 .code-run .ic{fill:currentColor;stroke:none;width:13px;height:13px}
 
+/* v0.2.2：工具栏内的按钮改走 flex 流式排列。老的 .code-copy/.code-run 是绝对定位（为旧版单按钮设计），
+   放进 .code-bar 后会叠在 .code-dl 上，表现为「复制按钮重叠出现」 */
+.md pre .code-bar .code-copy,.md pre .code-bar .code-run{position:static;top:auto;right:auto;padding:0}
+
 /* 运行面板（右侧抽屉，v1.9）：沙箱 iframe 预览 + 控制台 / C 解释输出 */
 #runner{position:relative;width:min(46vw,560px);flex:none;display:none;flex-direction:column;background:var(--canvas);border-left:1px solid var(--hairline)}
 body.rn-open #runner{display:flex}
@@ -2817,7 +2821,7 @@ var MD = (function(){
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|patch|preview)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; }
+        if (/^(run|vfs-write|vfs-list|patch|preview|web|search)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
@@ -2902,9 +2906,9 @@ var MD = (function(){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -2916,7 +2920,7 @@ var MD = (function(){
       '<div class="th" data-tc="1">' +
       '<span class="tag">' + esc(lang) + '</span><span>' + esc(title) + '</span>' +
       (meta ? '<span class="meta">' + esc(meta) + '</span>' : '') +
-      '<span class="meta">' + nline + ' 行</span></div>' +
+      (lang === 'web' || lang === 'search' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
       '<div class="tb"><pre><code>' + code + '</code></pre></div></div>';
   }
   function fsCard(c){
@@ -5390,7 +5394,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.1', ua = navigator.userAgent || '';
+      var ver = 'v0.2.2', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8642,7 +8646,8 @@ var WORK = (function(){
     '```patch —— 首行是相对路径，其余是 unified diff（@@ -a,b +c,d @@ 简版，上下文行以空格开头）；小改动比整文件重写省 token。\n' +
     '```preview —— 首行是工作区相对路径，在右侧运行面板的内置浏览器打开该文件；写完 html/svg/md 产物后用它自检。\n' +
     '注意：回复里的 html/svg/js/css/md 代码块会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
-    '纪律：① 先把手头需求转成验收清单（几条）；② 需要外部事实先用 web/search 取真实内容，禁止凭记忆编造；③ 代码内嵌自检（console.assert / 结果比对打印）；④ 每轮结束声明清单哪几项已验证（引用输出）、哪几项未验证；⑤ 最后给产物清单 + 已知限制；⑥ 禁止编造"已测试"。'
+    '回答方式（重要）：用户说「爬一下 / 查一下 / 是什么 / 看看」时，默认把结论直接写在回复里（表格、条目或短段落），不要把答案包装成 html / md 文件，也不要为这类问题产出「产物」；只有用户明确要文件、网页、页面、导出、保存、下载、成品时才落盘，并在文末列产物清单。\n' +
+    '纪律：① 先把手头需求转成验收清单（几条）；② 需要外部事实先用 web/search 取真实内容，禁止凭记忆编造，也不要拿"沙箱无网"当交付理由；③ 代码内嵌自检（console.assert / 结果比对打印）；④ 每轮结束声明清单哪几项已验证（引用输出）、哪几项未验证；⑤ 产生了文件才列产物清单，并写已知限制；⑥ 禁止编造"已测试"。'
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
     var re = /```(run|preview|patch|web|search|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
@@ -8738,8 +8743,23 @@ var WORK = (function(){
      自动写入虚拟工作区（文件名 index.html / style.css / script.js / 图-N.svg / 笔记-N.md，
      同名且内容不同则加序号），保证「用户要求的文档」不会只留在聊天里。 */
   var AUTO_EXT = { html: 'html', svg: 'svg', js: 'js', css: 'css', md: 'md' };
+  /* v0.2.2：只有用户这轮明确要「文件/页面/导出」时才自动落盘，避免「让他爬个视频，他回你一堆 html/md」 */
+  var ARTIFACT_HINT = /文件|网页|页面|网站|html|svg|css|markdown|\.md|导出|保存|下载|工作区|预览|打包|压缩|zip|卡片|可视化|演示|报告|文档|游戏/i;
+  function wantsArtifact(sid, ts){
+    return DB.msgsBySid(sid).then(function(list){
+      var last = null;
+      for (var i = 0; i < list.length; i++){
+        var m = list[i];
+        if (m.role === 'user' && (!ts || m.ts <= ts) && !/^\[(fs|run)-result\]/.test((m.content || '').trim())) last = m;
+      }
+      return !!(last && ARTIFACT_HINT.test(last.content || ''));
+    }, function(){ return true; }); /* 读不到就按旧行为（照常落盘） */
+  }
   function autoVfs(msg){
     if (!msg || msg.status !== 'ok' || !msg.content) return;
+    wantsArtifact(msg.sid, msg.ts).then(function(yes){ if (yes) autoVfsSave(msg); });
+  }
+  function autoVfsSave(msg){
     var re = /```(html|svg|js|javascript|css|md|markdown)[ \t]*\r?\n([\s\S]*?)```/gi, m, jobs = [];
     while ((m = re.exec(msg.content))){
       var lang = (m[1] || '').toLowerCase();
