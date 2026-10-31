@@ -981,6 +981,9 @@ var DEF_CFG = {
   prompts: [],                  // / 提示词库 [{name, text}]
   ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, code|body, modes, on}]
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
+  personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
+  persona: '',                  // v0.6.0：当前选中的配方 id
+  autoRoute: true,              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -1548,6 +1551,15 @@ var NET = (function(){
   }
   /* 构造请求体：上下文裁剪（§4.3） */
   function buildBody(session, msgs, attsData, attsText, searchBlock){
+  /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜，猜中才切（顶栏会跟着变，不会偷偷改） */
+  if (S.cfg.autoRoute && msgs && msgs.length){
+    var lastU = '';
+    for (var li = msgs.length - 1; li >= 0; li--){ if (msgs[li].role === 'user'){ lastU = String(msgs[li].content || ''); break; } }
+    if (lastU){
+      var wantMode = MODE.route(lastU);
+      if (wantMode !== S.cfg.mode){ setCfg({ mode: wantMode, persona: '' }); }
+    }
+  }
     var sys = (session.systemPrompt || S.cfg.systemPrompt) || '';
     var cs = curSession();
     sys += '\n\n' + MEDIA_HINT; // v2.3：告诉模型可以内嵌图片/视频（否则多数模型不会主动用）
@@ -1555,7 +1567,8 @@ var NET = (function(){
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
-    var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体 // Work 沙箱短任务协议（v2.0）
+    var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
+    var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方 // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;
@@ -5582,6 +5595,9 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
           ' 子智能体：' + SUB.profiles('work').length + ' 个（Work）/ ' + SUB.profiles('agent').length + ' 个（Agent）。';
       }
       renderModeBox();
+      var arCk = el('input', { type: 'checkbox' }); arCk.checked = !!S.cfg.autoRoute;
+      arCk.addEventListener('change', function(){ setCfg({ autoRoute: arCk.checked }); });
+      p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [arCk, ' 自动选模式（按本轮输入猜该用 Chat / Work / Agent，顶栏会跟着变）'])]));
       var list = el('div', { class: 'f-grid' });
       p.appendChild(list);
       function renderExt(){
@@ -5602,16 +5618,27 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
           }
           list.appendChild(row);
         });
+        MODE.personas().forEach(function(pp){
+          var delBtn2 = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+          delBtn2.addEventListener('click', function(){ delPersona(pp.id); renderExt(); });
+          var prow = el('div', { class: 'f-row' }, [
+            el('label', {}, [' ' + (pp.name || pp.id)]),
+            el('span', { class: 'hint', text: '自定义模式 · 底座 ' + pp.base + ' · ' + String(pp.prompt || '').slice(0, 40) })
+          ]);
+          prow.appendChild(delBtn2);
+          list.appendChild(prow);
+        });
       }
       renderExt();
-      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
+      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
       var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"say","desc":"回显参数","code":"return arg;"}' });
       p.appendChild(ta);
       var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
       addBtn.addEventListener('click', function(){
         try {
           var j = JSON.parse(ta.value);
-          if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
+          if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
+          else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
           else { EXT.add(j); UI.toast('已添加：' + j.name); }
           ta.value = ''; renderExt();
         } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
@@ -5619,7 +5646,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.5.0', ua = navigator.userAgent || '';
+      var ver = 'v0.6.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8275,10 +8302,22 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       });
       return;
     }
+    var pb = t.closest('#seg-mode [data-persona]');
+    if (pb){
+      var pid = pb.getAttribute('data-persona');
+      var pp = MODE.persona(pid);
+      setCfg({ persona: pid, mode: (pp && pp.base) || 'work' });
+      var dms = document.querySelectorAll('#seg-mode [data-mode]');
+      for (var di = 0; di < dms.length; di++) dms[di].classList.toggle('on', dms[di].getAttribute('data-mode') === S.cfg.mode);
+      MODE.mountUI();
+      if (UI.updateEmpty) UI.updateEmpty();
+      return;
+    }
     var mb = t.closest('#seg-mode [data-mode]');
     if (mb){
       var md = mb.getAttribute('data-mode');
-      setCfg({ mode: md });
+      setCfg({ mode: md, persona: '' });
+      MODE.mountUI();
       UI.renderComposerCtl();
       UI.updateEmpty(); // 草稿态切换模式时刷新中央提示
       /* v2.7：切换模式不再弹 toast 提示；v2.9：Agent 的工作区选择按钮就在主页，不再自动弹系统选目录框 */
@@ -8950,7 +8989,8 @@ var EXT = (function(){
     { id: 'fs-edit',    kind: 'tool', title: '局部修改',   brief: '唯一匹配替换', modes: ['agent'] },
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
     { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
-    { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] }
+    { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
+    { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work'] }
   ];
   function userItems(){ return (S.cfg.ext || []); }
   function offList(){ return (S.cfg.extOff || []); }
@@ -9065,6 +9105,59 @@ var EXT = (function(){
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt };
 })();
 
+/* v0.6.0：模式层 —— 自动路由 + 自定义模式（配方）
+   路由：按本轮输入猜该用哪个模式（只在 autoRoute 开时生效，切了就看得见）。
+   配方：名字 + 一段提示词 + 底座（chat/work/agent）；选中后挂在底座上跑，提示词追加进 system。 */
+var MODE = (function(){
+  var RULES = [
+    ['agent', /(工作区|仓库|改代码|重构|单元测试|跑测试|读一下|目录结构|\bgit\b|\bdiff\b|补丁|\.(js|ts|tsx|py|java|go|rs|md|json|html)\b)/i],
+    ['work',  /(抓|爬|下载|检索|搜索|查一下|网页|链接|视频|图片|截图|表格|\bpdf\b|docx|excel|接口|\bapi\b|脚本|生成.*(html|图表|报告))/i]
+  ];
+  function personas(){ return S.cfg.personas || []; }
+  function persona(id){
+    var l = personas();
+    for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
+    return null;
+  }
+  function route(text){
+    var t = String(text || '');
+    for (var i = 0; i < RULES.length; i++) if (RULES[i][1].test(t)) return RULES[i][0];
+    return 'chat';
+  }
+  function promptFor(){
+    var p = persona(S.cfg.persona);
+    if (!p) return '';
+    return '模式配方「' + (p.name || p.id) + '」：' + (p.prompt || '');
+  }
+  function mountUI(){
+    var seg = document.getElementById('seg-mode');
+    if (!seg) return;
+    var old = seg.querySelectorAll('[data-persona]');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    personas().forEach(function(p){
+      var b = el('button', { type: 'button', 'data-persona': p.id, title: '自定义模式：' + (p.prompt || '').slice(0, 60) });
+      b.textContent = p.name || p.id;
+      if (S.cfg.persona === p.id) b.classList.add('on');
+      seg.appendChild(b);
+    });
+  }
+  return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI };
+})();
+
+/* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
+function addPersona(j){
+  var id = 'p' + Date.now().toString(36);
+  var list = (S.cfg.personas || []).slice();
+  list.push({ id: id, name: j.name || ('模式' + (list.length + 1)), base: ['chat','work','agent'].indexOf(j.base) >= 0 ? j.base : 'work', prompt: j.prompt || '' });
+  setCfg({ personas: list });
+  MODE.mountUI();
+  return id;
+}
+function delPersona(id){
+  setCfg({ personas: (S.cfg.personas || []).filter(function(x){ return x.id !== id; }), persona: S.cfg.persona === id ? '' : S.cfg.persona });
+  MODE.mountUI();
+}
+
 /* v0.5.0：子智能体（母智能体派活）—— 独立上下文、独立循环、只回最终答复
    与主对话的关系：母（当前会话）用 ```sub 名字 任务 派活；子在自己的消息数组里跑完，只把答案回灌成一条工具结果。
    子不能再派子（MAX_DEPTH=1），避免无限套娃与 token 爆炸。 */
@@ -9152,7 +9245,27 @@ var SUB = (function(){
       })();
     });
   }
-  return { profiles: profiles, prompt: prompt, run: run, find: find };
+  /* 并行派活：最多同时 3 个，单个失败不影响其他 */
+  function runAll(items, depth){
+    return new Promise(function(resolve){
+      if (!items.length) return resolve([]);
+      var results = new Array(items.length), started = 0, done = 0;
+      function worker(){
+        if (started >= items.length) return;
+        var idx = started++, it = items[idx], t0 = Date.now();
+        run(it.task, it.name, depth || 0).then(function(txt){
+          results[idx] = { name: it.name, ok: true, text: String(txt), ms: Date.now() - t0 };
+        }, function(e){
+          results[idx] = { name: it.name, ok: false, text: String((e && e.message) || e), ms: Date.now() - t0 };
+        }).then(function(){
+          done++;
+          if (done === items.length) resolve(results); else worker();
+        });
+      }
+      for (var k = 0; k < Math.min(3, items.length); k++) worker();
+    });
+  }
+  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find };
 })();
 
 var WORK = (function(){
@@ -9161,7 +9274,7 @@ var WORK = (function(){
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|get|skill|sub|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|skill|suball|sub|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -9363,6 +9476,26 @@ var WORK = (function(){
                : '[skill] 没有这个技能：' + skName + '（已有：' + (EXT.skillNames(S.cfg.mode).join(', ') || '无') + '）',
             { op: 'skill', ok: !!sk, brief: skName });
         next(); return;
+      }
+      if (c.op === 'suball'){
+        var rawLines = String(c.body || c.arg || '').split(/\r?\n/);
+        var items = [];
+        for (var sli = 0; sli < rawLines.length; sli++){
+          var ln = rawLines[sli].trim(); if (!ln) continue;
+          var mm2 = ln.match(/^([a-z][a-z0-9-]{1,24})\s*[|:：]\s*(.+)$/) || ln.match(/^([a-z][a-z0-9-]{1,24})\s+(.+)$/);
+          if (mm2) items.push({ name: mm2[1], task: mm2[2] });
+        }
+        if (!items.length){ add('[suball] 没解析出任务（每行：名字 | 任务）', { op: 'suball', ok: false, brief: '解析失败' }); next(); return; }
+        var t0a = Date.now();
+        SUB.runAll(items, 0).then(function(rs){
+          var outTxt = rs.map(function(r){ return '【' + r.name + '】' + (r.ok ? '' : '（失败）') + '\n' + String(r.text).slice(0, 3000); }).join('\n\n');
+          var allOk = true; for (var ri = 0; ri < rs.length; ri++) if (!rs[ri].ok) allOk = false;
+          add('[suball] ' + rs.length + ' 个并行完成（' + (Date.now() - t0a) + 'ms）\n' + outTxt,
+            { op: 'suball', ok: allOk, ms: Date.now() - t0a, brief: rs.map(function(r){ return r.name; }).join(' + ') });
+        }, function(e){
+          add('[suball] 失败：' + (e && e.message || e), { op: 'suball', ok: false, brief: '失败' });
+        }).then(next);
+        return;
       }
       if (c.op === 'sub'){
         var subName = String(c.arg || '').trim().split(/\s+/)[0];
@@ -9593,6 +9726,7 @@ NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){ saveCfg(); }); // 迁移：把旧 localStorage 明文密钥入保险库并脱敏重写
 UI.init();
+MODE.mountUI(); // v0.6.0：自定义模式按钮
 if (!Vault.avail) UI.toast('未连接宿主：API Key 将明文存于浏览器 localStorage，建议使用桌面版', true);
 DB.open()
   .then(function(){ UI.reloadSessions(true); }) // 每次启动进入新建会话（草稿态，发送首条消息才落库）；不再做任何自动删除
