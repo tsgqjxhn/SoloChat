@@ -1554,7 +1554,8 @@ var NET = (function(){
     if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
-    var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能 // Work 沙箱短任务协议（v2.0）
+    var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
+    var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体 // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;
@@ -2828,7 +2829,8 @@ var NET = (function(){
     classify: classify,
     normBase: normBase,
     isMock: isMock,
-    bridge: bridge,
+    chatOnce: chatOnce,       // v0.5.0：子智能体单次调用
+  bridge: bridge,
     fs: fsCall
   };
 })();
@@ -5564,17 +5566,34 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
       p.appendChild(el('div', { class: 'sub', text: '内置功能默认全部开启；关掉后模型调用会被直接拒绝。下面可添加自己的工具（一段 JS，围栏名=工具名）或技能（一段说明，模型需要时才加载全文，平时只占一行）。' }));
+      var modeBox = el('div', { class: 'sub' });
+      p.appendChild(modeBox);
+      function renderModeBox(){
+        function cnt(mode){
+          var on = 0, all = EXT.all();
+          for (var i = 0; i < all.length; i++){
+            var it = all[i];
+            if ((it.modes || []).indexOf(mode) < 0) continue;
+            if (it.on !== false) on++;
+          }
+          return on;
+        }
+        modeBox.textContent = '模式 = 提示词档位 + 工具集 + 限额。Chat：' + cnt('chat') + ' 项能力（默认无工具）；Work：' + cnt('work') + ' 项；Agent：' + cnt('agent') + ' 项。' +
+          ' 子智能体：' + SUB.profiles('work').length + ' 个（Work）/ ' + SUB.profiles('agent').length + ' 个（Agent）。';
+      }
+      renderModeBox();
       var list = el('div', { class: 'f-grid' });
       p.appendChild(list);
       function renderExt(){
         list.innerHTML = '';
         EXT.all().forEach(function(it){
           var ck = el('input', { type: 'checkbox' }); ck.checked = it.on;
-          ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); });
-          var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : '工具');
+          ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox(); });
+          var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : (it.kind === 'agent' ? '子智能体' : '工具'));
+          var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
           var row = el('div', { class: 'f-row' }, [
             el('label', {}, [ck, ' ' + (it.title || it.name)]),
-            el('span', { class: 'hint', text: kindName + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
+            el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
           ]);
           if (it.kind !== 'builtin'){
             var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
@@ -5585,7 +5604,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         });
       }
       renderExt();
-      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
+      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"say","desc":"回显参数","code":"return arg;","modes":["work"]}；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
       var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"say","desc":"回显参数","code":"return arg;"}' });
       p.appendChild(ta);
       var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
@@ -5600,7 +5619,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.4.0', ua = navigator.userAgent || '';
+      var ver = 'v0.5.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8930,7 +8949,8 @@ var EXT = (function(){
     { id: 'fs-write',   kind: 'tool', title: '写本地文件', brief: '新建 / 整文件替换', modes: ['agent'] },
     { id: 'fs-edit',    kind: 'tool', title: '局部修改',   brief: '唯一匹配替换', modes: ['agent'] },
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
-    { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] }
+    { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
+    { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] }
   ];
   function userItems(){ return (S.cfg.ext || []); }
   function offList(){ return (S.cfg.extOff || []); }
@@ -8960,8 +8980,11 @@ var EXT = (function(){
     if (!/^[a-z][a-z0-9-]{1,24}$/.test(item.name)) throw new Error('name 只能用小写字母/数字/短横，2-25 字符');
     if (find(item.name) && item.kind !== 'builtin') throw new Error('名字已存在：' + item.name);
     var u = userItems().slice();
-    u.push({ id: item.name, name: item.name, kind: item.kind === 'skill' ? 'skill' : 'tool',
-      title: item.title || item.name, desc: item.desc || '', code: item.code || '', body: item.body || '',
+    var kk = ['skill', 'agent'].indexOf(item.kind) >= 0 ? item.kind : 'tool';
+    u.push({ id: item.name, name: item.name, kind: kk,
+      title: item.title || item.name, desc: item.desc || '', code: item.code || '', body: item.body || item.prompt || '',
+      tools: Array.isArray(item.tools) ? item.tools : [],
+      maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
       modes: item.modes || ['work'], on: item.on !== false });
     setCfg({ ext: u }); save();
     return item.name;
@@ -9042,13 +9065,103 @@ var EXT = (function(){
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt };
 })();
 
+/* v0.5.0：子智能体（母智能体派活）—— 独立上下文、独立循环、只回最终答复
+   与主对话的关系：母（当前会话）用 ```sub 名字 任务 派活；子在自己的消息数组里跑完，只把答案回灌成一条工具结果。
+   子不能再派子（MAX_DEPTH=1），避免无限套娃与 token 爆炸。 */
+var SUB = (function(){
+  var MAX_DEPTH = 1;
+  function profiles(mode){
+    return EXT.all().filter(function(it){
+      return it.kind === 'agent' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0;
+    });
+  }
+  function find(name, mode){
+    var l = profiles(mode || S.cfg.mode), i;
+    for (i = 0; i < l.length; i++) if (l[i].name === name || l[i].id === name) return l[i];
+    return null;
+  }
+  function prompt(mode){
+    var l = profiles(mode), i, out = [];
+    if (!l.length) return '';
+    out.push('子智能体（你有权派活，格式 ' + '```' + 'sub 名字 任务，它会独立跑完只回最终答复，不占你的上下文）：');
+    for (i = 0; i < l.length; i++) out.push('```sub ' + l[i].name + ' —— ' + (l[i].desc || l[i].title || ''));
+    return out.join('\n');
+  }
+  function childTools(p){
+    var want = p.tools || [], out = [], i;
+    for (i = 0; i < want.length; i++){
+      if (want[i] === 'skill' || EXT.hasTool(want[i]) || EXT.isKnownBuiltin(want[i])) out.push(want[i]);
+    }
+    return out;
+  }
+  function scanChild(content, names){
+    var re = /```([a-z][a-z0-9-]{1,24})(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, m, out = [];
+    while ((m = re.exec(content || ''))){
+      if (names.indexOf(m[1]) < 0) continue;
+      var nl = m[2].indexOf('\n');
+      out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim() });
+    }
+    return out;
+  }
+  /* 子侧工具：只允许纯函数型（扩展工具 / skill / web / search / get），不碰文件与下载 */
+  var CHILD_SAFE = ['web', 'search', 'get', 'skill'];
+  function runToolInChild(c){
+    if (c.op === 'skill'){
+      var n = c.arg.split(/\s+/)[0];
+      return Promise.resolve(EXT.skillText(n) || '（没有这个技能：' + n + '）');
+    }
+    if (EXT.hasTool(c.op)) return EXT.runTool(c.op, c.arg).catch(function(e){ return '工具失败：' + (e && e.message || e); });
+    var u = NET.safeUrl(c.arg);
+    if (!u) return Promise.resolve('（参数不是合法 URL）');
+    if (c.op === 'web') return NET.fetchPageText(u, 4000).then(function(t){ return String(t || '').slice(0, 4000); });
+    if (c.op === 'search') return NET.searchWeb(c.arg, 5).then(function(r){
+      return (r || []).map(function(x){ return '- ' + x.title + ' ' + x.url + '\n  ' + (x.snippet || ''); }).join('\n');
+    });
+    return Promise.resolve('（子智能体不支持 ' + c.op + '）');
+  }
+  function run(task, name, depth){
+    depth = depth || 0;
+    return new Promise(function(resolve, reject){
+      if (depth >= MAX_DEPTH) return reject(new Error('子智能体不能再派子智能体'));
+      var p = find(name);
+      if (!p) return reject(new Error('没有这个子智能体：' + name + '（已有：' + (profiles(S.cfg.mode).map(function(x){ return x.name; }).join(', ') || '无') + '）'));
+      var t = String(task || '').trim();
+      if (!t) return reject(new Error('任务为空'));
+      var names = childTools(p).filter(function(n){ return n === 'skill' || EXT.hasTool(n) || CHILD_SAFE.indexOf(n) >= 0; });
+      var sys = p.body || p.prompt || ('你是子智能体「' + name + '」。独立完成任务，只回结果，不要客套话，不要复述任务。');
+      if (names.length){
+        sys += '\n需要时可用围栏（首行是参数）：' + names.map(function(n){ return '```' + n; }).join('、');
+        if (names.indexOf('skill') >= 0) sys += '；```skill 名字 取技能全文。';
+      }
+      var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
+      var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, 6));
+      (function next(){
+        turns++;
+        NET.chatOnce(msgs, { maxTokens: p.maxTokens || 1200, timeout: p.timeout || 120000, temperature: 0.2 })
+          .then(function(r){
+            var content = String((r && r.content) || '').trim();
+            if (!content) return reject(new Error('子智能体无响应（模型返回空）'));
+            msgs.push({ role: 'assistant', content: content });
+            var calls = scanChild(content, names);
+            if (!calls.length || turns >= max) return resolve(content);
+            Promise.all(calls.slice(0, 4).map(runToolInChild)).then(function(outs){
+              msgs.push({ role: 'user', content: '[工具结果]\n' + outs.join('\n---\n') + '\n（继续；任务完成就直接给结论）' });
+              next();
+            }, function(e){ reject(e); });
+          }, function(e){ reject(e); });
+      })();
+    });
+  }
+  return { profiles: profiles, prompt: prompt, run: run, find: find };
+})();
+
 var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|get|skill|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|skill|sub|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -9250,6 +9363,17 @@ var WORK = (function(){
                : '[skill] 没有这个技能：' + skName + '（已有：' + (EXT.skillNames(S.cfg.mode).join(', ') || '无') + '）',
             { op: 'skill', ok: !!sk, brief: skName });
         next(); return;
+      }
+      if (c.op === 'sub'){
+        var subName = String(c.arg || '').trim().split(/\s+/)[0];
+        var subTask = (String(c.arg || '').replace(subName, '') + (c.body ? '\n' + c.body : '')).trim();
+        var t0s = Date.now();
+        SUB.run(subTask, subName, 0).then(function(txt){
+          add('[sub] ' + subName + '\n```\n' + String(txt).slice(0, 6000) + '\n```', { op: 'sub', ok: true, ms: Date.now() - t0s, brief: subName });
+        }, function(e){
+          add('[sub] ' + subName + ' 失败：' + (e && e.message || e), { op: 'sub', ok: false, brief: '失败' });
+        }).then(next);
+        return;
       }
       var extTool = EXT.hasTool(c.op);
       if (extTool){
