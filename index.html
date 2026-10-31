@@ -5609,7 +5609,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
           var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
           var row = el('div', { class: 'f-row' }, [
             el('label', {}, [ck, ' ' + (it.title || it.name)]),
-            el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
+            el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + (it.kind === 'agent' && it.writes ? ' · 可写(暂存)' : '') + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
           ]);
           if (it.kind !== 'builtin'){
             var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
@@ -5646,7 +5646,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v0.6.0', ua = navigator.userAgent || '';
+      var ver = 'v0.7.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9024,6 +9024,7 @@ var EXT = (function(){
     u.push({ id: item.name, name: item.name, kind: kk,
       title: item.title || item.name, desc: item.desc || '', code: item.code || '', body: item.body || item.prompt || '',
       tools: Array.isArray(item.tools) ? item.tools : [],
+      writes: !!item.writes,
       maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
       modes: item.modes || ['work'], on: item.on !== false });
     setCfg({ ext: u }); save();
@@ -9183,7 +9184,7 @@ var SUB = (function(){
   function childTools(p){
     var want = p.tools || [], out = [], i;
     for (i = 0; i < want.length; i++){
-      if (want[i] === 'skill' || EXT.hasTool(want[i]) || EXT.isKnownBuiltin(want[i])) out.push(want[i]);
+      if (want[i] === 'skill' || want[i] === 'write' || EXT.hasTool(want[i]) || EXT.isKnownBuiltin(want[i])) out.push(want[i]);
     }
     return out;
   }
@@ -9192,7 +9193,20 @@ var SUB = (function(){
     while ((m = re.exec(content || ''))){
       if (names.indexOf(m[1]) < 0) continue;
       var nl = m[2].indexOf('\n');
-      out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim() });
+      var argTxt = (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim();
+      var bodyTxt = nl >= 0 ? m[2].slice(nl + 1) : '';
+      if (m[1] === 'write' && !bodyTxt.trim()){
+        var rest2 = content.slice(m.index + m[0].length);
+        var inner = rest2.match(/^\s*```[a-zA-Z0-9+#-]*[ \t]*\r?\n/);
+        if (inner){
+          var tail2 = rest2.slice(inner[0].length);
+          var end2 = tail2.indexOf('\n```');
+          if (end2 < 0) end2 = tail2.length;
+          bodyTxt = tail2.slice(0, end2);
+          re.lastIndex = m.index + m[0].length + inner[0].length + end2;
+        }
+      }
+      out.push({ op: m[1], arg: argTxt, body: bodyTxt });
     }
     return out;
   }
@@ -9203,6 +9217,7 @@ var SUB = (function(){
       var n = c.arg.split(/\s+/)[0];
       return Promise.resolve(EXT.skillText(n) || '（没有这个技能：' + n + '）');
     }
+    if (c.op === 'badwrite') return Promise.resolve('（写盘被拒：' + c.arg + '）');
     if (EXT.hasTool(c.op)) return EXT.runTool(c.op, c.arg).catch(function(e){ return '工具失败：' + (e && e.message || e); });
     var u = NET.safeUrl(c.arg);
     if (!u) return Promise.resolve('（参数不是合法 URL）');
@@ -9220,14 +9235,42 @@ var SUB = (function(){
       if (!p) return reject(new Error('没有这个子智能体：' + name + '（已有：' + (profiles(S.cfg.mode).map(function(x){ return x.name; }).join(', ') || '无') + '）'));
       var t = String(task || '').trim();
       if (!t) return reject(new Error('任务为空'));
+      var canWrite = !!(p.writes || (p.tools || []).indexOf('write') >= 0);
       var names = childTools(p).filter(function(n){ return n === 'skill' || EXT.hasTool(n) || CHILD_SAFE.indexOf(n) >= 0; });
+      if (canWrite) names.push('write');
       var sys = p.body || p.prompt || ('你是子智能体「' + name + '」。独立完成任务，只回结果，不要客套话，不要复述任务。');
       if (names.length){
         sys += '\n需要时可用围栏（首行是参数）：' + names.map(function(n){ return '```' + n; }).join('、');
         if (names.indexOf('skill') >= 0) sys += '；```skill 名字 取技能全文。';
       }
+      if (canWrite){
+        sys += '\n写文件：用 ' + '```' + 'write 相对路径（体为完整文件内容）。你写的东西不会直接进用户仓库，' +
+               '会暂存到 _sub/' + name + '/ 下，由母智能体审阅后再合并——所以放心写，写完整的文件。';
+      }
       var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
       var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, 6));
+      var staged = [], stagedBytes = 0, stagedNames = [];
+      function stageWrites(calls){
+        var keep = [];
+        for (var wi = 0; wi < calls.length; wi++){
+          var wc = calls[wi];
+          if (wc.op !== 'write'){ keep.push(wc); continue; }
+          var rel = String(wc.arg || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+          if (!rel || rel.indexOf('..') >= 0){ keep.push({ op: 'badwrite', arg: '非法路径：' + wc.arg }); continue; }
+          var bodyTxt = String(wc.body || '');
+          var fm = bodyTxt.match(/^[ \t]*```[a-zA-Z0-9+#-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/);
+          if (fm) bodyTxt = fm[1];
+          if (staged.length >= 6 || stagedBytes + bodyTxt.length > 300000){
+            keep.push({ op: 'badwrite', arg: '超出暂存上限（6 个文件 / 300KB）：' + rel }); continue;
+          }
+          staged.push({ rel: rel, text: bodyTxt }); stagedBytes += bodyTxt.length; stagedNames.push(rel);
+        }
+        return keep;
+      }
+      function flushStaged(){
+        if (!staged.length) return Promise.resolve('');
+        return stageFiles(name, staged);
+      }
       (function next(){
         turns++;
         NET.chatOnce(msgs, { maxTokens: p.maxTokens || 1200, timeout: p.timeout || 120000, temperature: 0.2 })
@@ -9236,7 +9279,10 @@ var SUB = (function(){
             if (!content) return reject(new Error('子智能体无响应（模型返回空）'));
             msgs.push({ role: 'assistant', content: content });
             var calls = scanChild(content, names);
-            if (!calls.length || turns >= max) return resolve(content);
+            calls = canWrite ? stageWrites(calls) : calls;
+            if (!calls.length || turns >= max){
+              return flushStaged().then(function(note){ resolve(content + (note || '')); }, function(){ resolve(content); });
+            }
             Promise.all(calls.slice(0, 4).map(runToolInChild)).then(function(outs){
               msgs.push({ role: 'user', content: '[工具结果]\n' + outs.join('\n---\n') + '\n（继续；任务完成就直接给结论）' });
               next();
@@ -9265,7 +9311,27 @@ var SUB = (function(){
       for (var k = 0; k < Math.min(3, items.length); k++) worker();
     });
   }
-  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find };
+  /* 暂存落盘：写到 _sub/<子名>/<相对路径>，绝不覆盖用户文件；母智能体审阅后再合并 */
+  function stageFiles(name, list, wsOverride){
+    var cs = curSession();
+    var ws = wsOverride || (cs && cs.workspace) || '';
+    if (!list || !list.length) return Promise.resolve('');
+    if (!ws) return Promise.resolve('\n\n【暂存改动 ' + list.length + ' 个，但当前会话没有绑定工作区，未落盘】');
+    var lines = [], chain = Promise.resolve();
+    list.forEach(function(it){
+      var tgt = '_sub/' + name + '/' + it.rel;
+      chain = chain.then(function(){
+        return NET.fs('write', tgt, it.text, ws, false).then(function(){
+          lines.push('- ' + tgt + '（' + it.text.length + ' 字符）');
+        }, function(e){ lines.push('- ' + tgt + ' 写入失败：' + ((e && e.message) || e)); });
+      });
+    });
+    return chain.then(function(){
+      return '\n\n【暂存改动】' + lines.length + ' 个（未合并，归 ' + name + '）\n' + lines.join('\n') +
+        '\n母智能体可用 fs-read 审阅，确认后用 fs-write / fs-edit 合并到真实路径。';
+    });
+  }
+  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find, stageFiles: stageFiles, scanChild: scanChild };
 })();
 
 var WORK = (function(){
@@ -9719,7 +9785,14 @@ var WORK = (function(){
 })();
 
 /* 调试钩子（仅当 localStorage['sc.debug']==='1'）：便于自动化测试 Work 沙箱的纯函数 */
-try { if (localStorage.getItem('sc.debug') === '1') window.SC_WORK = WORK; } catch (e) {}
+try {
+  if (localStorage.getItem('sc.debug') === '1'){
+    window.SC_WORK = WORK;
+    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE,
+      ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
+      bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; } };
+  }
+} catch (e) {}
 loadCfg();
 document.body.classList.add('sb-collapsed'); // 默认收起：左缘热区呼出 / ☰ 固定
 NET.bridge.init();
