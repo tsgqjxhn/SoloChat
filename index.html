@@ -749,6 +749,11 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .msg.toolmsg{padding:4px 0 0}
 .msg.toolmsg .msg-head{opacity:.7}
 .msg.toolmsg .msg-body{padding-top:2px}
+.msg-imgs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.lightbox{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;background:rgba(8,10,14,.82);cursor:zoom-out}
+.lightbox.on{display:flex}
+.lightbox img{max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5);background:#fff}
+.msg-img{max-width:220px;max-height:150px;border-radius:8px;border:1px solid var(--hairline);cursor:zoom-in;object-fit:cover;background:var(--soft)}
 .tc{border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--canvas);overflow:hidden;margin:2px 0 6px}
 .tc-row{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:12px;line-height:1.5}
 .tc-row+.tc-row{border-top:1px solid var(--hairline)}
@@ -1574,6 +1579,11 @@ var NET = (function(){
         for (var j2 = 0; j2 < urls.length; j2++)
           parts.push({ type: 'image_url', image_url: { url: urls[j2] } });
         out.push({ role: 'user', content: parts });
+      } else if (mm.imgs && mm.imgs.length){
+        var pImg = [{ type: 'text', text: content || ' ' }];
+        for (var k3 = 0; k3 < mm.imgs.length; k3++)
+          pImg.push({ type: 'image_url', image_url: { url: mm.imgs[k3] } });
+        out.push({ role: mm.role === 'tool' ? 'user' : mm.role, content: pImg });
       } else {
         out.push({ role: mm.role === 'tool' ? 'user' : mm.role, content: content }); // v0.2.1：工具结果内部角色是 tool，发给模型时降级为 user（OpenAI 兼容端点多不认 tool role）
       }
@@ -4724,6 +4734,20 @@ var OCR = (function(){
 })();
 /*  */
 var UI = (function(){
+  var lbEl = null;
+  function lightbox(url){ /* v0.2.9：图片放大查看，点任意处/ESC 关闭 */
+    if (!url) return;
+    if (!lbEl){
+      lbEl = document.createElement('div');
+      lbEl.className = 'lightbox';
+      lbEl.addEventListener('click', function(){ lbEl.classList.remove('on'); });
+      document.body.appendChild(lbEl);
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && lbEl) lbEl.classList.remove('on'); });
+    }
+    lbEl.innerHTML = '';
+    lbEl.appendChild(document.createElement('img')).src = url;
+    lbEl.classList.add('on');
+  }
   var $list, $scroll, $empty, $input, $send, $chips, $modal, $panel, $title;
 
   /* 主题（§8.4：手动覆盖后持久化；auto 跟随系统） */
@@ -5533,7 +5557,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.8', ua = navigator.userAgent || '';
+      var ver = 'v0.2.9', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -5875,6 +5899,14 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       body.textContent = m.content;
     }
     n.appendChild(body);
+    /* v0.2.9：抓到的图片显示缩略图（点击放大），让用户看到模型实际看到的画面 */
+    if (m.imgs && m.imgs.length){
+      var imgsBox = el('div', { class: 'msg-imgs' });
+      for (var ii = 0; ii < m.imgs.length; ii++)
+        imgsBox.appendChild(el('img', { class: 'msg-img', src: m.imgs[ii], alt: '抓取的图片', loading: 'lazy',
+          'data-zoom': m.imgs[ii], title: '点击查看大图' }));
+      n.appendChild(imgsBox);
+    }
     /* v1.8：正文不再自动折叠（原先超 2000px 自动收起，每次都要点「展开全文」） */
     if (m.attachments && m.attachments.length){
       var ats = el('div', { class: 'msg-atts' });
@@ -7888,6 +7920,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       renderMsgs();
       autosize();
     },
+    lightbox: lightbox,
     toast: toast, applyTheme: applyTheme, openSettings: openSettings, closeModal: closeModal,
     modalOpen: modalOpen, confirmBox: confirmBox, renderSessions: renderSessions,
     renderMsgs: renderMsgs, selectSession: selectSession, createSession: createSession,
@@ -8017,6 +8050,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       UI.toast('代码块换行：' + (S.cfg.codeNoWrap ? '关（横向滚动）' : '开'));
       return;
     }
+    var zimg = t.closest('[data-zoom]');
+    if (zimg){ UI.lightbox(zimg.getAttribute('data-zoom')); return; }
     var rv = t.closest('[data-reveal]');
     if (rv){ NET.revealPath(rv.getAttribute('data-reveal')); return; }
     var tc = t.closest('[data-tc]');
@@ -8800,7 +8835,8 @@ var WORK = (function(){
     '```preview —— 首行是工作区相对路径，在右侧运行面板的内置浏览器打开该文件；写完 html/svg/md 产物后用它自检。\n' +
     '```play —— 首行是视频/网页 URL；在应用内的独立播放窗口打开（同一浏览器环境、带 Referer 与登录态）。视频站（B 站、YouTube…）的播放器禁止被第三方页面内嵌，写进本地预览的 iframe 一定会显示「已阻止此内容」；要看视频就用 play，不要在 html 产物里塞 player 的 iframe。也不要在 run 里写"下载 mp4"——那需要 DASH 分片合并与 Referer 校验，沙箱做不到，别承诺。\n' +
     '```download —— 首行是要保存的东西：B 站视频页 URL / BV 号，或能直接下到文件的媒体直链（.mp4/.mp3）。落盘到「下载/SoloChat」并回灌路径、大小与清晰度。宿主带 Referer/UA 下载，需要 exe 版。规则：① 说「爬/下载/保存视频」一律用它，不要用 web 抓视频页（那只会拿到网页 html）；② 网页地址（含 B 站以外的站点）会被判失败并回「这是网页不是视频文件」，此时如实转述，别改口说保存成功；③ HLS（.m3u8）不分片合并，不支持；④ B 站只走单文件流，通常 ≤720p，拿不到就说明原因，别承诺 4K/大会员画质。\n' +
-    '```get —— 首行是文件直链；把任意网页文件抓下来存到「下载/SoloChat」，扩展名按真实类型定（图片 / PDF / docx / xlsx / pptx / mp4 / mp3 / zip / md / json / html 都行）。可提文本的（pdf/docx/xlsx/pptx/rtf/md/txt/json/csv/html）会顺手抽前 4000 字回灌，够你直接读内容回答问题；图片和音视频只落盘、不解读。需要 exe 版。和 web 的分工：只要正文文字用 web；要文件本体（尤其二进制）用 get。\n' +
+    '```get —— 首行是文件直链；把任意网页文件抓下来存到「下载/SoloChat」，扩展名按真实类型定（图片 / PDF / docx / xlsx / pptx / mp4 / mp3 / zip / md / json / html 都行）。可提文本的（pdf/docx/xlsx/pptx/rtf/md/txt/json/csv/html）会顺手抽前 4000 字回灌，够你直接读内容回答问题；图片会作为图片附给你直接看（可用它回答「图里是什么/截图里写了什么」）；音视频只落盘。HLS 直播/点播的 .m3u8 也用它：宿主会按清单逐片抓取并拼成 .ts（fMP4 则是 .mp4）。需要 exe 版。和 web 的分工：只要正文文字用 web；要文件本体（尤其二进制）用 get。\n' +
+    '绝不回答「我无法访问网络 / 抓取网页 / 读取该链接」——你有 web（抓页面文本）、get（抓任意文件）、download（下视频）三个工具，先调用再说；只有工具真的返回失败才向用户报告失败原因。\n' +
     'B 站固定套路（别在 JS 渲染的首页上浪费轮次）：找视频 → ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 （榜单 JSON，字段 data.list[].bvid）；查单个视频信息 → ```web https://api.bilibili.com/x/web-interface/view?bvid=BVxxx ；拿到 bvid 再 ```download（视频页 URL 或 BV 都行）。https://www.bilibili.com 首页是 JS 渲染的，web 只能抓到导航栏文字。\n' +
     '注意：只有用户这轮要文件/页面时，回复里的 html/svg/js/css/md 代码块才会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
     '回答方式（重要）：用户说「爬一下 / 查一下 / 是什么 / 看看」时，默认把结论直接写在回复里（表格、条目或短段落），不要把答案包装成 html / md 文件，也不要为这类问题产出「产物」；只有用户明确要文件、网页、页面、导出、保存、下载、成品时才落盘，并在文末列产物清单。\n' +
@@ -8813,10 +8849,12 @@ var WORK = (function(){
     }
     return out;
   }
-  function note(content, sid, tools){ /* v2.2：可指定会话；后台会话只落库，不动当前视图
-                                        v0.2.1：Work 工具结果 role='tool'（不再冒充「你」发言），tools 供 UI 画卡片 */
+  function note(content, sid, tools, imgs){ /* v2.2：可指定会话；后台会话只落库，不动当前视图
+                                        v0.2.1：Work 工具结果 role='tool'（不再冒充「你」发言），tools 供 UI 画卡片
+                                        v0.2.9：imgs = data URL 数组，作为图片内容发给多模态模型 */
     sid = sid || S.sid;
     var um = { id: uuid(), sid: sid, role: 'tool', content: content, status: 'ok', ts: Date.now(), attachments: [], tools: tools || [] };
+    if (imgs && imgs.length) um.imgs = imgs.slice(0, 4);
     DB.putMessage(um);
     if (sid === S.sid){ S.msgs.push(um); UI.appendMsgNode(um); } // v2.4：追加而非整列表重建（滚动/图片抖动主因）
     return um;
@@ -8963,14 +9001,15 @@ var WORK = (function(){
     runCalls(calls, msg.sid);
   }
   function runCalls(calls, sid0){
-    var parts = [], events = [], done = 0, w0 = stOf(sid0);
+    var parts = [], events = [], imgs = [], done = 0, w0 = stOf(sid0);
     /* v0.2.1：一次工具结果 = 一条 role='tool' 消息；文本给模型，events 给 UI 画一行行卡片 */
     function add(text, ev){ parts.push(text); if (ev) events.push(ev); }
+  function addImg(dataUrl){ if (dataUrl && imgs.length < 4) imgs.push(dataUrl); }
     function finish(extra){
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
       if (!/^\[(run-result|vfs|web|search|preview|play|download|get)\]/.test(body)) body = '[run-result]\n' + body;
-      note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events);
+      note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
       if (w0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
@@ -9076,6 +9115,13 @@ var WORK = (function(){
         }).then(function(r){
           var head = '[get] 已保存：' + r.path + '（' + sizeFmt(r.size || 0) + '，' + (r.ext || '') + (r.mime ? ' / ' + r.mime : '') + '）';
           var meta = { op: 'get', path: r.path, size: sizeFmt(r.size || 0), ms: Date.now() - tg0, ok: true };
+          /* v0.2.9：图片 → data URL 随结果附上，模型直接看图 */
+          if (r.img && r.b64){
+            var durl = 'data:' + (r.mime || 'image/png') + ';base64,' + r.b64;
+            addImg(durl);
+            add(head + '\n（图片已附在本条结果里，请直接看图片内容作答，不要猜）', meta);
+            next(); return;
+          }
           if (!r.b64){ add(head, meta); next(); return; }
           return NET.fileText(r).then(function(txt){
             txt = String(txt || '').replace(/\r/g, '').trim();

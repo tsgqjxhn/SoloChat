@@ -1126,6 +1126,128 @@ namespace SoloChatHost
             return p;
         }
 
+        /* ---- v0.2.9：HLS（.m3u8）下载 —— 按清单逐片抓取再拼接。
+           TS 分片直接拼成 .ts；fMP4（EXT-X-MAP）先写 init 段再拼分片成 .mp4。
+           支持 master 清单选最高码率、AES-128 加密分片。 ---- */
+        static string[] M3u8Lines(string text)
+        {
+            return text.Replace("\r", "").Split('\n');
+        }
+
+        static bool IsM3u8(string mediaType, Uri uri)
+        {
+            return (mediaType ?? "").IndexOf("mpegurl", StringComparison.OrdinalIgnoreCase) >= 0
+                || uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static string Attr(string line, string name)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(line, name + "=(\"[^\"]*\"|[^,]*)");
+            return m.Success ? m.Groups[1].Value.Trim('"') : null;
+        }
+
+        async Task<string> DownloadHlsAsync(HttpClient hc, string m3u8Url, string dir, string baseName, string id)
+        {
+            var text = await hc.GetStringAsync(m3u8Url);
+            var lines = M3u8Lines(text);
+
+            /* master 清单：取 BANDWIDTH 最大的变体 */
+            if (text.IndexOf("#EXT-X-STREAM-INF", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string best = null; long bestBw = -1;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (!lines[i].StartsWith("#EXT-X-STREAM-INF")) continue;
+                    long bw = 0; long.TryParse(Attr(lines[i], "BANDWIDTH"), out bw);
+                    for (int j = i + 1; j < lines.Length; j++)
+                    {
+                        var l = lines[j].Trim();
+                        if (l.Length == 0 || l[0] == '#') continue;
+                        if (bw > bestBw) { bestBw = bw; best = l; }
+                        break;
+                    }
+                }
+                if (string.IsNullOrEmpty(best)) throw new Exception("HLS master 清单里没有可用的变体");
+                var vurl = new Uri(new Uri(m3u8Url), best).ToString();
+                return await DownloadHlsAsync(hc, vurl, dir, baseName, id);
+            }
+
+            var baseUri = new Uri(m3u8Url);
+            var segs = new List<string>();
+            string keyUri = null, ivHex = null, mapUri = null;
+            foreach (var raw in lines)
+            {
+                var l = raw.Trim();
+                if (l.Length == 0) continue;
+                if (l.StartsWith("#EXT-X-KEY"))
+                {
+                    var mth = Attr(l, "METHOD");
+                    if (mth != null && mth.ToUpperInvariant() == "AES-128") { keyUri = Attr(l, "URI"); ivHex = Attr(l, "IV"); }
+                    else if (mth != null && mth.ToUpperInvariant() == "NONE") keyUri = null;
+                }
+                else if (l.StartsWith("#EXT-X-MAP")) mapUri = Attr(l, "URI");
+                else if (l[0] != '#') segs.Add(new Uri(baseUri, l).ToString());
+            }
+            if (segs.Count == 0) throw new Exception("HLS 清单里没有分片");
+
+            byte[] key = null;
+            if (!string.IsNullOrEmpty(keyUri)) key = await hc.GetByteArrayAsync(new Uri(baseUri, keyUri).ToString());
+
+            bool fmp4 = !string.IsNullOrEmpty(mapUri) || Text_of(segs[0]).EndsWith(".m4s", StringComparison.OrdinalIgnoreCase);
+            var ext = fmp4 ? ".mp4" : ".ts";
+            var outPath = UniquePath(dir, baseName + ext);
+            long got = 0, expectAll = 0;
+
+            using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                if (!string.IsNullOrEmpty(mapUri))
+                {
+                    var init = await hc.GetByteArrayAsync(new Uri(baseUri, mapUri).ToString());
+                    await fs.WriteAsync(init, 0, init.Length);
+                    got += init.Length;
+                }
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    var buf = await hc.GetByteArrayAsync(segs[i]);
+                    if (key != null)
+                    {
+                        byte[] iv = new byte[16];
+                        if (!string.IsNullOrEmpty(ivHex))
+                        {
+                            var h = ivHex.StartsWith("0x") || ivHex.StartsWith("0X") ? ivHex.Substring(2) : ivHex;
+                            for (int k = 0; k < 16 && k * 2 + 1 < h.Length; k++)
+                                iv[k] = Convert.ToByte(h.Substring(k * 2, 2), 16);
+                        }
+                        else
+                        {
+                            var seq = BitConverter.GetBytes((long)i);
+                            if (BitConverter.IsLittleEndian) Array.Reverse(seq);
+                            Array.Copy(seq, 0, iv, 8, 8);
+                        }
+                        using (var aes = System.Security.Cryptography.Aes.Create())
+                        {
+                            aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+                            aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+                            aes.Key = key;
+                            aes.IV = iv;
+                            using (var dec = aes.CreateDecryptor())
+                            {
+                                try { buf = dec.TransformFinalBlock(buf, 0, buf.Length); }
+                                catch { /* 分片未加密或长度非块整数倍：原样写入 */ }
+                            }
+                        }
+                    }
+                    await fs.WriteAsync(buf, 0, buf.Length);
+                    got += buf.Length; expectAll += buf.Length;
+                    if (i % 5 == 0) Post(id, "media.progress", "{\"got\":" + got + ",\"total\":" + (fmp4 ? got : got) + ",\"seg\":" + (i + 1) + ",\"segs\":" + segs.Count + "}", null, 0);
+                }
+            }
+            Log("hls ok: " + outPath + " (" + got + " B, " + segs.Count + " 片)");
+            return outPath;
+        }
+
+        static string Text_of(string s) { return s ?? ""; }
+
         async Task RunFileAsync(JsonElement req, string id)
         {
             HttpClient hc = null;
@@ -1145,6 +1267,20 @@ namespace SoloChatHost
                     var mediaType = resp.Content.Headers.ContentType != null && resp.Content.Headers.ContentType.MediaType != null
                         ? resp.Content.Headers.ContentType.MediaType : "";
                     long total = resp.Content.Headers.ContentLength ?? 0;
+                    if (IsM3u8(mediaType, uri))
+                    {
+                        var dirH = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "SoloChat");
+                        Directory.CreateDirectory(dirH);
+                        var baseH = SafeName(string.IsNullOrEmpty(want) ? Path.GetFileNameWithoutExtension(uri.AbsolutePath) : want, 60);
+                        if (string.IsNullOrEmpty(baseH)) baseH = "hls";
+                        var pHls = await DownloadHlsAsync(hc, url, dirH, baseH, id);
+                        var fHls = new FileInfo(pHls);
+                        Post(id, "file.done", "{\"path\":" + JsonSerializer.Serialize(pHls) +
+                            ",\"size\":" + fHls.Length + ",\"mime\":" + JsonSerializer.Serialize(mediaType) +
+                            ",\"ext\":" + JsonSerializer.Serialize(fHls.Extension) +
+                            ",\"name\":" + JsonSerializer.Serialize(fHls.Name) + "}", null, 0);
+                        return;
+                    }
                     if (total > 200L * 1024 * 1024) throw new Exception("文件太大（" + (total / 1048576) + " MB），超过 200 MB 上限");
 
                     byte[] bytes;
@@ -1186,12 +1322,17 @@ namespace SoloChatHost
                     /* 可提取文本的类型（docx/xlsx/pptx/pdf/rtf + 纯文本）→ 回传 base64 让页面用现有解析器读 */
                     string[] docExts = { ".pdf", ".docx", ".xlsx", ".pptx", ".rtf", ".epub", ".md", ".txt", ".json", ".csv", ".html", ".htm", ".xml", ".yml", ".yaml" };
                     bool wantText = Array.IndexOf(docExts, ext) >= 0 && bytes.Length <= 16 * 1024 * 1024;
+                    /* v0.2.9：图片也回传字节 —— 页面转 data URL 附给多模态模型真正「看」 */
+                    bool isImg = mediaType.StartsWith("image/") || ext == ".png" || ext == ".jpg" || ext == ".jpeg"
+                        || ext == ".webp" || ext == ".gif" || ext == ".bmp" || ext == ".avif";
+                    bool wantB64 = (wantText || isImg) && bytes.Length <= 16 * 1024 * 1024;
                     var payload = "{\"path\":" + JsonSerializer.Serialize(path) +
                         ",\"size\":" + bytes.Length +
                         ",\"mime\":" + JsonSerializer.Serialize(mediaType) +
                         ",\"ext\":" + JsonSerializer.Serialize(ext) +
                         ",\"name\":" + JsonSerializer.Serialize(Path.GetFileName(path)) + "}";
-                    if (readBack && wantText)
+                    if (isImg) payload = payload.Substring(0, payload.Length - 1) + ",\"img\":true}";
+                    if (readBack && wantB64 && (wantText || isImg))
                     {
                         payload = payload.Substring(0, payload.Length - 1) +
                             ",\"b64\":" + JsonSerializer.Serialize(Convert.ToBase64String(bytes)) + "}";
