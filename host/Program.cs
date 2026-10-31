@@ -875,6 +875,36 @@ namespace SoloChatHost
             return r.Length == 0 ? "video" : r;
         }
 
+        /* 把「视频页 / 短链」解析成 BV 号：直链里带 BV 直接用；b23.tv 短链跟随跳转；再不行扫 HTML */
+        async Task<string> ResolveBvidAsync(HttpClient hc, string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            var m = Regex.Match(url, "(BV[0-9A-Za-z]{10})");
+            if (m.Success) return m.Groups[1].Value;
+            if (!Regex.IsMatch(url, "b23\\.tv|bilibili\\.com", RegexOptions.IgnoreCase)) return null;
+            try
+            {
+                using (var resp = await hc.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    var mediaType = resp.Content.Headers.ContentType != null && resp.Content.Headers.ContentType.MediaType != null
+                        ? resp.Content.Headers.ContentType.MediaType.ToLowerInvariant() : "";
+                    var finalUri = resp.RequestMessage != null && resp.RequestMessage.RequestUri != null
+                        ? resp.RequestMessage.RequestUri.ToString() : url;
+                    var m2 = Regex.Match(finalUri, "(BV[0-9A-Za-z]{10})");
+                    if (m2.Success) return m2.Groups[1].Value;
+                    if (mediaType.Contains("html"))
+                    {
+                        var html = await resp.Content.ReadAsStringAsync();
+                        if (html.Length > 262144) html = html.Substring(0, 262144);
+                        var m3 = Regex.Match(html, "(BV[0-9A-Za-z]{10})");
+                        if (m3.Success) return m3.Groups[1].Value;
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
         async Task RunMediaAsync(JsonElement req, string id)
         {
             HttpClient hc = null;
@@ -890,6 +920,15 @@ namespace SoloChatHost
                 long sizeHint = 0;
 
                 hc = MediaClient(proxy);
+
+                /* v0.2.6：不是 B 站直传的，先判断它到底是「视频页/短链」还是可下载的媒体文件 ——
+                   否则拿到的会是网页（html）或音频流，保存成 .mp4 就是假文件 */
+                if (action != "bili")
+                {
+                    var found = await ResolveBvidAsync(hc, url);
+                    if (found != null){ action = "bili"; bvid = found; }
+                }
+
                 if (action == "bili")
                 {
                     if (string.IsNullOrEmpty(bvid))
@@ -942,39 +981,72 @@ namespace SoloChatHost
 
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "SoloChat");
                 Directory.CreateDirectory(dir);
-                var baseName = SafeName(title, 70);
-                if (string.IsNullOrEmpty(baseName) || baseName == "video")
-                    baseName = SafeName(Path.GetFileNameWithoutExtension(new Uri(mediaUrl).AbsolutePath), 60);
-                var fileName = baseName + (string.IsNullOrEmpty(quality) ? "" : "_" + quality) + "_" + DateTime.Now.ToString("HHmmss") + ".mp4";
-                var path = Path.Combine(dir, fileName);
 
                 using (var resp = await hc.GetAsync(mediaUrl, HttpCompletionOption.ResponseHeadersRead))
                 {
                     if (!resp.IsSuccessStatusCode) throw new Exception("下载失败 HTTP " + (int)resp.StatusCode + "（CDN 拒绝，可能需要登录 cookie）");
+
+                    var ctype = resp.Content.Headers.ContentType != null && resp.Content.Headers.ContentType.MediaType != null
+                        ? resp.Content.Headers.ContentType.MediaType.ToLowerInvariant() : "";
+                    if (ctype.Contains("mpegurl") || Regex.IsMatch(mediaUrl, "\\.m3u8(\\?|#|$)", RegexOptions.IgnoreCase))
+                        throw new Exception("这是 HLS 分片清单（.m3u8），需要先合并成文件，暂不支持；请给 mp4 直链");
+
                     long total = resp.Content.Headers.ContentLength ?? sizeHint;
-                    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true))
+                    var buf = new byte[1 << 16];
+
                     using (var st = await resp.Content.ReadAsStreamAsync())
                     {
-                        var buf = new byte[1 << 16];
-                        long got = 0;
-                        int lastTick = 0, n;
-                        while ((n = await st.ReadAsync(buf, 0, buf.Length)) > 0)
+                        int first = await st.ReadAsync(buf, 0, buf.Length);
+                        if (first <= 0) throw new Exception("服务器返回空内容");
+
+                        /* v0.2.6：嗅探真实内容 —— 网页 / JSON 一律当失败，别把 html 存成 .mp4 */
+                        var headText = Encoding.ASCII.GetString(buf, 0, Math.Min(first, 400)).TrimStart();
+                        bool looksText = ctype.Contains("html") || ctype.Contains("json") || ctype.Contains("xml")
+                            || headText.StartsWith("<") || headText.StartsWith("{") || headText.StartsWith("[");
+                        if (looksText)
                         {
-                            await fs.WriteAsync(buf, 0, n);
-                            got += n;
-                            var now = Environment.TickCount;
-                            if (now - lastTick > 500)
-                            {
-                                lastTick = now;
-                                Post(id, "media.progress", "{\"got\":" + got + ",\"total\":" + total + "}", null, 0);
-                            }
+                            var host = ""; try { host = new Uri(mediaUrl).Host; } catch { }
+                            throw new Exception("这个地址返回的是网页/接口数据（" + host + "），不是视频文件。目前只认两种：B 站视频页/短链（自动解析），或能直接下到文件的媒体直链（.mp4/.mp3）；其它站点需要各写解析器");
                         }
-                        sizeHint = got;
+
+                        /* 扩展名跟着真实类型走：音频就给 .mp3/.m4a，别把音频存成 .mp4 */
+                        var ext = ".mp4";
+                        if (ctype.Contains("mpegurl")) ext = ".m3u8";
+                        else if (ctype.Contains("webm")) ext = ".webm";
+                        else if (ctype.Contains("flv")) ext = ".flv";
+                        else if (ctype.Contains("mpeg") || Regex.IsMatch(mediaUrl, "\\.mp3(\\?|#|$)", RegexOptions.IgnoreCase)) ext = ".mp3";
+                        else if (ctype.StartsWith("audio/")) ext = ".m4a";
+
+                        var baseName = string.IsNullOrEmpty(title)
+                            ? SafeName(Path.GetFileNameWithoutExtension(new Uri(mediaUrl).AbsolutePath), 60)
+                            : SafeName(title, 70);
+                        if (string.IsNullOrEmpty(baseName) || baseName == "video") baseName = "video";
+                        var fileName = baseName + (string.IsNullOrEmpty(quality) ? "" : "_" + quality) + "_" + DateTime.Now.ToString("HHmmss") + ext;
+                        var path = Path.Combine(dir, fileName);
+
+                        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true))
+                        {
+                            await fs.WriteAsync(buf, 0, first);
+                            long got = first;
+                            int lastTick = 0, n;
+                            while ((n = await st.ReadAsync(buf, 0, buf.Length)) > 0)
+                            {
+                                await fs.WriteAsync(buf, 0, n);
+                                got += n;
+                                var now = Environment.TickCount;
+                                if (now - lastTick > 500)
+                                {
+                                    lastTick = now;
+                                    Post(id, "media.progress", "{\"got\":" + got + ",\"total\":" + total + "}", null, 0);
+                                }
+                            }
+                            sizeHint = got;
+                        }
+                        Log("media ok: " + path + " (" + sizeHint + " B)");
+                        Post(id, "media.done", "{\"path\":" + JsonSerializer.Serialize(path) + ",\"size\":" + sizeHint +
+                             ",\"title\":" + JsonSerializer.Serialize(title) + ",\"quality\":" + JsonSerializer.Serialize(quality) + "}", null, 0);
                     }
                 }
-                Log("media ok: " + path + " (" + sizeHint + " B)");
-                Post(id, "media.done", "{\"path\":" + JsonSerializer.Serialize(path) + ",\"size\":" + sizeHint +
-                     ",\"title\":" + JsonSerializer.Serialize(title) + ",\"quality\":" + JsonSerializer.Serialize(quality) + "}", null, 0);
             }
             catch (Exception ex)
             {
