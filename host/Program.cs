@@ -602,7 +602,13 @@ namespace SoloChatHost
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
                     }
-                    else if (t == "media") /* v0.2.4：把视频下载成 mp4 落到 下载SoloChat（宿主持有 Referer/UA，页面做不到） */
+                    else if (t == "file") /* v0.2.8：通用 URL→磁盘（图片/PDF/Office/压缩包等） */
+            {
+                var idCopy3 = id;
+                var reqCopy3 = root.Clone();
+                Task.Run(() => RunFileAsync(reqCopy3, idCopy3));
+            }
+            else if (t == "media") /* v0.2.4：把视频下载成 mp4 落到 下载SoloChat（宿主持有 Referer/UA，页面做不到） */
             {
                 var idCopy2 = id;
                 var reqCopy2 = root.Clone();
@@ -1052,6 +1058,151 @@ namespace SoloChatHost
             {
                 Log("media err: " + ex.Message);
                 Post(id, "media.error", null, ex.Message, 0);
+            }
+            finally
+            {
+                if (hc != null) hc.Dispose();
+            }
+        }
+
+        /* ---- v0.2.8：通用抓取落盘（图片/PDF/Office/压缩包/音视频直链都走这里）----
+           和 media 的区别：media 走 B 站解析并只收媒体流；file 只做「URL → 磁盘」，按真实类型命名。 */
+        static string ExtFor(string mediaType, Uri uri, byte[] head)
+        {
+            var pathExt = Path.GetExtension(uri != null ? uri.AbsolutePath : "").ToLowerInvariant();
+            var ok = new[] { ".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt", ".zip", ".rar", ".7z",
+                ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".ico", ".avif",
+                ".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac", ".mp4", ".webm", ".flv", ".mov", ".mkv",
+                ".json", ".txt", ".md", ".csv", ".xml", ".html", ".htm", ".yaml", ".yml", ".rtf", ".epub", ".srt" };
+            foreach (var e in ok) if (pathExt == e) return e;
+
+            var mt = (mediaType ?? "").ToLowerInvariant();
+            if (mt.Contains("pdf")) return ".pdf";
+            if (mt.Contains("wordprocessingml")) return ".docx";
+            if (mt.Contains("spreadsheetml")) return ".xlsx";
+            if (mt.Contains("presentationml")) return ".pptx";
+            if (mt.Contains("png")) return ".png";
+            if (mt.Contains("jpeg") || mt.Contains("jpg")) return ".jpg";
+            if (mt.Contains("webp")) return ".webp";
+            if (mt.Contains("gif")) return ".gif";
+            if (mt.Contains("svg")) return ".svg";
+            if (mt.Contains("json")) return ".json";
+            if (mt.Contains("html")) return ".html";
+            if (mt.Contains("markdown")) return ".md";
+            if (mt.Contains("csv")) return ".csv";
+            if (mt.Contains("zip")) return ".zip";
+            if (mt.Contains("mpeg") && mt.Contains("audio")) return ".mp3";
+            if (mt.StartsWith("audio/")) return ".m4a";
+            if (mt.Contains("webm")) return ".webm";
+            if (mt.Contains("mp4")) return ".mp4";
+
+            /* 兜底看文件头 */
+            if (head != null && head.Length >= 5)
+            {
+                if (head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46) return ".pdf";
+                if (head[0] == 0x50 && head[1] == 0x4B) return ".zip";
+                if (head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47) return ".png";
+                if (head[0] == 0xFF && head[1] == 0xD8) return ".jpg";
+                var h5 = Encoding.ASCII.GetString(head, 0, Math.Min(head.Length, 12));
+                if (h5.StartsWith("GIF8")) return ".gif";
+                if (h5.StartsWith("RIFF") && h5.Contains("WEBP")) return ".webp";
+                if (h5.Length >= 8 && h5.Substring(4, 4) == "ftyp") return ".mp4";
+                if (h5.StartsWith("ID3")) return ".mp3";
+            }
+            return ".bin";
+        }
+
+        static string UniquePath(string dir, string name)
+        {
+            var p = Path.Combine(dir, name);
+            if (!File.Exists(p)) return p;
+            var stem = Path.GetFileNameWithoutExtension(name);
+            var ext = Path.GetExtension(name);
+            for (int i = 2; i < 1000; i++)
+            {
+                p = Path.Combine(dir, stem + "_" + i + ext);
+                if (!File.Exists(p)) return p;
+            }
+            return p;
+        }
+
+        async Task RunFileAsync(JsonElement req, string id)
+        {
+            HttpClient hc = null;
+            try
+            {
+                string url = req.TryGetProperty("url", out JsonElement uEl) && uEl.ValueKind == JsonValueKind.String ? uEl.GetString() : "";
+                string want = req.TryGetProperty("name", out JsonElement nEl) && nEl.ValueKind == JsonValueKind.String ? nEl.GetString() : "";
+                string proxy = req.TryGetProperty("proxy", out JsonElement pxEl) && pxEl.ValueKind == JsonValueKind.String ? pxEl.GetString() : "";
+                bool readBack = req.TryGetProperty("readBack", out JsonElement rbEl) && rbEl.ValueKind == JsonValueKind.True;
+                if (string.IsNullOrEmpty(url)) throw new Exception("缺少 url");
+                var uri = new Uri(url);
+
+                hc = MediaClient(proxy);
+                using (var resp = await hc.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    if (!resp.IsSuccessStatusCode) throw new Exception("下载失败 HTTP " + (int)resp.StatusCode + " " + resp.ReasonPhrase);
+                    var mediaType = resp.Content.Headers.ContentType != null && resp.Content.Headers.ContentType.MediaType != null
+                        ? resp.Content.Headers.ContentType.MediaType : "";
+                    long total = resp.Content.Headers.ContentLength ?? 0;
+                    if (total > 200L * 1024 * 1024) throw new Exception("文件太大（" + (total / 1048576) + " MB），超过 200 MB 上限");
+
+                    byte[] bytes;
+                    using (var st = await resp.Content.ReadAsStreamAsync())
+                    using (var ms = new MemoryStream())
+                    {
+                        var buf = new byte[1 << 16];
+                        int lastTick = 0, n;
+                        while ((n = await st.ReadAsync(buf, 0, buf.Length)) > 0)
+                        {
+                            ms.Write(buf, 0, n);
+                            var now = Environment.TickCount;
+                            if (now - lastTick > 500)
+                            {
+                                lastTick = now;
+                                Post(id, "media.progress", "{\"got\":" + ms.Length + ",\"total\":" + total + "}", null, 0);
+                            }
+                        }
+                        bytes = ms.ToArray();
+                    }
+                    if (bytes.Length == 0) throw new Exception("服务器返回空内容");
+                    if (bytes.Length > 200L * 1024 * 1024) throw new Exception("文件太大（超过 200 MB 上限）");
+
+                    var ext = ExtFor(mediaType, uri, bytes);
+                    /* 内容处置里的文件名优先 */
+                    string disp = resp.Content.Headers.ContentDisposition != null && resp.Content.Headers.ContentDisposition.FileName != null
+                        ? resp.Content.Headers.ContentDisposition.FileName.Trim('"') : "";
+                    var baseName = !string.IsNullOrEmpty(disp) ? disp
+                        : (!string.IsNullOrEmpty(want) ? want : Path.GetFileName(uri.AbsolutePath));
+                    baseName = SafeName(Path.GetFileNameWithoutExtension(baseName), 70);
+                    if (string.IsNullOrEmpty(baseName)) baseName = "file";
+
+                    var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "SoloChat");
+                    Directory.CreateDirectory(dir);
+                    var path = UniquePath(dir, baseName + ext);
+                    File.WriteAllBytes(path, bytes);
+                    Log("file ok: " + path + " (" + bytes.Length + " B, " + mediaType + ")");
+
+                    /* 可提取文本的类型（docx/xlsx/pptx/pdf/rtf + 纯文本）→ 回传 base64 让页面用现有解析器读 */
+                    string[] docExts = { ".pdf", ".docx", ".xlsx", ".pptx", ".rtf", ".epub", ".md", ".txt", ".json", ".csv", ".html", ".htm", ".xml", ".yml", ".yaml" };
+                    bool wantText = Array.IndexOf(docExts, ext) >= 0 && bytes.Length <= 16 * 1024 * 1024;
+                    var payload = "{\"path\":" + JsonSerializer.Serialize(path) +
+                        ",\"size\":" + bytes.Length +
+                        ",\"mime\":" + JsonSerializer.Serialize(mediaType) +
+                        ",\"ext\":" + JsonSerializer.Serialize(ext) +
+                        ",\"name\":" + JsonSerializer.Serialize(Path.GetFileName(path)) + "}";
+                    if (readBack && wantText)
+                    {
+                        payload = payload.Substring(0, payload.Length - 1) +
+                            ",\"b64\":" + JsonSerializer.Serialize(Convert.ToBase64String(bytes)) + "}";
+                    }
+                    Post(id, "file.done", payload, null, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("file err: " + ex.Message);
+                Post(id, "file.error", null, ex.Message, 0);
             }
             finally
             {

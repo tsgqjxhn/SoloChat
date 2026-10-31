@@ -1737,6 +1737,12 @@ var NET = (function(){
         var md = null; try { md = JSON.parse(d.data); } catch(e){}
         if (p.resolve) p.resolve(md || {}); else if (p.onDone) p.onDone(d.data);
       }
+      else if (d.t === 'file.done'){
+        delete bridge.pend[d.id];
+        var fd = null; try { fd = JSON.parse(d.data); } catch(e){}
+        if (p.resolve) p.resolve(fd || {}); else if (p.onDone) p.onDone(d.data);
+      }
+      else if (d.t === 'file.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '抓取失败')); else if (p.onError) p.onError(new Error(d.message || '抓取失败')); }
       else if (d.t === 'media.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '下载失败')); else if (p.onError) p.onError(new Error(d.message || '下载失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
@@ -1762,6 +1768,16 @@ var NET = (function(){
         bridge.pend[id] = { resolve: res, reject: rej, onProgress: opts.onProgress };
         bridge.send({ t: 'media', id: id, action: opts.bvid ? 'bili' : 'url', bvid: opts.bvid || '',
           url: opts.url || '', qn: opts.qn || 80, referer: opts.referer || '',
+          proxy: (typeof S !== 'undefined' && S.cfg && S.cfg.proxy) || '' });
+      });
+    },
+    file: function(opts){ // v0.2.8：通用 URL → 磁盘（图片/PDF/Office/压缩包…），需要 exe 版
+      if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能保存到磁盘'));
+      opts = opts || {};
+      var id = 'fl' + (++this.seq);
+      return new Promise(function(res, rej){
+        bridge.pend[id] = { resolve: res, reject: rej, onProgress: opts.onProgress };
+        bridge.send({ t: 'file', id: id, url: opts.url || '', name: opts.name || '', readBack: !!opts.readBack,
           proxy: (typeof S !== 'undefined' && S.cfg && S.cfg.proxy) || '' });
       });
     },
@@ -2052,6 +2068,25 @@ var NET = (function(){
   /* 单页抓取（档④）：桥 GET 优先，浏览器直连受 CORS 约束，失败返回 null（回退摘要） */
   /* v0.2.3：把外部地址交给宿主 —— mode='window' 是应用内播放窗口（同一浏览器环境，带 cookie/登录态），
      'browser' 是系统默认浏览器。纯网页版退化为 window.open。 */
+  /* v0.2.8：通用抓取 —— 宿主把 URL 存成文件（按真实类型命名），文档类回传字节让页面本地解析 */
+  function fileGet(url, name, onProgress){
+    var u = safeUrl(url);
+    if (!u) return Promise.reject(new Error('地址无效'));
+    return bridge.file({ url: u, name: name || '', readBack: true, onProgress: onProgress });
+  }
+  function fileText(entry){
+    if (!entry || !entry.b64) return Promise.resolve('');
+    var bin = atob(String(entry.b64).replace(/\s/g, ''));
+    var u8 = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    var ext = String(entry.name || entry.path || '').split('.').pop().toLowerCase();
+    if (/^(docx|xlsx|pptx|pdf|rtf|epub)$/.test(ext)){
+      try { return DOC.parse(new File([u8], entry.name || ('file.' + ext))); }
+      catch (e) { return Promise.reject(e); }
+    }
+    try { return Promise.resolve(new TextDecoder('utf-8').decode(u8)); }
+    catch (e) { return Promise.resolve(''); }
+  }
   /* v0.2.4：视频下载（宿主做，页面只收进度/结果） */
   function mediaDownload(opts){ return bridge.media(opts); }
   function revealPath(path){ bridge.reveal(path); }
@@ -2770,6 +2805,7 @@ var NET = (function(){
     searchWeb: searchWeb,
     openExternal: openExternal, // v0.2.3：Work 的 play 工具用（应用内播放窗口）
     mediaDownload: mediaDownload, // v0.2.4：Work 的 download 工具
+    fileGet: fileGet, fileText: fileText, // v0.2.8：get 工具（任意文件格式）
     isBinaryUrl: isBinaryUrl,
     revealPath: revealPath,
     safeUrl: safeUrl,          // v0.2.1：Work 的 web 工具复用
@@ -2903,7 +2939,7 @@ var MD = (function(){
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play|download)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
+        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
@@ -2988,9 +3024,9 @@ var MD = (function(){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放', download: '下载视频' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放', download: '下载视频', get: '抓取文件' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -3002,7 +3038,7 @@ var MD = (function(){
       '<div class="th" data-tc="1">' +
       '<span class="tag">' + esc(lang) + '</span><span>' + esc(title) + '</span>' +
       (meta ? '<span class="meta">' + esc(meta) + '</span>' : '') +
-      (lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
+      (lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
       '<div class="tb"><pre><code>' + code + '</code></pre></div></div>';
   }
   function fsCard(c){
@@ -5497,7 +5533,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.7', ua = navigator.userAgent || '';
+      var ver = 'v0.2.8', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -5748,7 +5784,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     updateEmpty();
   }
   /* v0.2.1：工具卡片 —— 「运行 js / 写入 x.mjs / 抓取 URL / 搜索 q」一行一条，点开才看原始输出 */
-  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', download: '下载', read: '读取' };
+  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', download: '下载', get: '抓取', read: '读取' };
   function toolEvents(m){
     if (m.tools && m.tools.length) return m.tools;
     var out = [], lines = String(m.content || '').split('\n');
@@ -5766,6 +5802,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         out.push({ op: 'web', ok: false, brief: (b[2] || b[1]).slice(0, 60) });
       else if ((b = /^\[search\]\s*(.+?)（(\d+)\s*条/.exec(l)))
         out.push({ op: 'search', q: b[1], n: +b[2], ok: true });
+      else if ((b = /^\[get\]\s*已保存：(.+?)（([^）]*)）/.exec(l)))
+        out.push({ op: 'get', path: b[1], size: b[2], ok: true });
       else if ((b = /^\[download\]\s*已保存：(.+?)（([^）]*)）/.exec(l)))
         out.push({ op: 'download', path: b[1], size: b[2], ok: true });
       else if ((b = /^\[play\]\s*已在播放窗口打开：(.+)$/.exec(l)))
@@ -8762,12 +8800,13 @@ var WORK = (function(){
     '```preview —— 首行是工作区相对路径，在右侧运行面板的内置浏览器打开该文件；写完 html/svg/md 产物后用它自检。\n' +
     '```play —— 首行是视频/网页 URL；在应用内的独立播放窗口打开（同一浏览器环境、带 Referer 与登录态）。视频站（B 站、YouTube…）的播放器禁止被第三方页面内嵌，写进本地预览的 iframe 一定会显示「已阻止此内容」；要看视频就用 play，不要在 html 产物里塞 player 的 iframe。也不要在 run 里写"下载 mp4"——那需要 DASH 分片合并与 Referer 校验，沙箱做不到，别承诺。\n' +
     '```download —— 首行是要保存的东西：B 站视频页 URL / BV 号，或能直接下到文件的媒体直链（.mp4/.mp3）。落盘到「下载/SoloChat」并回灌路径、大小与清晰度。宿主带 Referer/UA 下载，需要 exe 版。规则：① 说「爬/下载/保存视频」一律用它，不要用 web 抓视频页（那只会拿到网页 html）；② 网页地址（含 B 站以外的站点）会被判失败并回「这是网页不是视频文件」，此时如实转述，别改口说保存成功；③ HLS（.m3u8）不分片合并，不支持；④ B 站只走单文件流，通常 ≤720p，拿不到就说明原因，别承诺 4K/大会员画质。\n' +
+    '```get —— 首行是文件直链；把任意网页文件抓下来存到「下载/SoloChat」，扩展名按真实类型定（图片 / PDF / docx / xlsx / pptx / mp4 / mp3 / zip / md / json / html 都行）。可提文本的（pdf/docx/xlsx/pptx/rtf/md/txt/json/csv/html）会顺手抽前 4000 字回灌，够你直接读内容回答问题；图片和音视频只落盘、不解读。需要 exe 版。和 web 的分工：只要正文文字用 web；要文件本体（尤其二进制）用 get。\n' +
     'B 站固定套路（别在 JS 渲染的首页上浪费轮次）：找视频 → ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 （榜单 JSON，字段 data.list[].bvid）；查单个视频信息 → ```web https://api.bilibili.com/x/web-interface/view?bvid=BVxxx ；拿到 bvid 再 ```download（视频页 URL 或 BV 都行）。https://www.bilibili.com 首页是 JS 渲染的，web 只能抓到导航栏文字。\n' +
     '注意：只有用户这轮要文件/页面时，回复里的 html/svg/js/css/md 代码块才会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
     '回答方式（重要）：用户说「爬一下 / 查一下 / 是什么 / 看看」时，默认把结论直接写在回复里（表格、条目或短段落），不要把答案包装成 html / md 文件，也不要为这类问题产出「产物」；只有用户明确要文件、网页、页面、导出、保存、下载、成品时才落盘，并在文末列产物清单。\n' +
     '纪律：① 先把手头需求转成验收清单（几条）；② 需要外部事实先用 web/search 取真实内容，禁止凭记忆编造，也不要拿"沙箱无网"当交付理由；③ 代码内嵌自检（console.assert / 结果比对打印）；④ 每轮结束声明清单哪几项已验证（引用输出）、哪几项未验证；⑤ 产生了文件才列产物清单，并写已知限制；⑥ 禁止编造"已测试"。'
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -8930,7 +8969,7 @@ var WORK = (function(){
     function finish(extra){
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview|play|download)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play|download|get)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events);
     }
     (function next(){
@@ -9020,6 +9059,34 @@ var WORK = (function(){
           var lines = fs.map(function(f){ return f.path + '（' + sizeFmt(f.size || 0) + '）'; });
           add('[vfs] 工作区文件（' + fs.length + ' 项）' + (lines.length ? '\n```\n' + lines.join('\n') + '\n```' : '（空）'), { op: 'list', n: fs.length, ok: true });
         }).then(next);
+        return;
+      }
+      /* ---- v0.2.8：任意 URL → 磁盘（图片/PDF/Office/压缩包/音视频都能存；文档顺手抽文本）---- */
+      if (c.op === 'get'){
+        var gline = String(c.arg || '').trim().split('\n')[0].trim();
+        var gurl = (gline.split(/\s+/)[0] || '');
+        if (!/^https?:\/\//i.test(gurl)){
+          add('[get] 首行需要文件直链（http/https）：' + (gline || '（空）'), { op: 'get', ok: false, brief: '缺少地址' });
+          next(); return;
+        }
+        var tg0 = Date.now(), lastT = 0;
+        NET.fileGet(gurl, '', function(pr){
+          var now = Date.now(); if (now - lastT < 1200) return; lastT = now;
+          UI.toast('抓取中 ' + (pr.got / 1048576).toFixed(1) + ' / ' + (pr.total ? (pr.total / 1048576).toFixed(1) : '?') + ' MB');
+        }).then(function(r){
+          var head = '[get] 已保存：' + r.path + '（' + sizeFmt(r.size || 0) + '，' + (r.ext || '') + (r.mime ? ' / ' + r.mime : '') + '）';
+          var meta = { op: 'get', path: r.path, size: sizeFmt(r.size || 0), ms: Date.now() - tg0, ok: true };
+          if (!r.b64){ add(head, meta); next(); return; }
+          return NET.fileText(r).then(function(txt){
+            txt = String(txt || '').replace(/\r/g, '').trim();
+            add(txt ? head + '\n\n' + '```' + '\n' + txt.slice(0, 4000) + (txt.length > 4000 ? '\n…（已截断，共 ' + txt.length + ' 字）' : '') + '\n' + '```' : head + '\n（该文件没有可提取的文本层）', meta);
+          }, function(e){
+            add(head + '\n（文本提取失败：' + (e && e.message || e) + '）', meta);
+          }).then(next);
+        }, function(e){
+          add('[get] 抓取失败：' + (e && e.message || e), { op: 'get', ok: false, brief: (e && e.message || String(e)).slice(0, 60) });
+          next();
+        });
         return;
       }
       /* ---- v0.2.4：把视频下载成 mp4 落到磁盘（宿主持有 Referer/UA；网页版无此能力） ---- */
