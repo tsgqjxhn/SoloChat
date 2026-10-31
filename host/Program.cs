@@ -113,6 +113,7 @@ namespace SoloChatHost
 
         readonly string appDir;
         WebView2 wv;
+        CoreWebView2Environment env; // v0.2.3：播放窗口复用同一环境（共享 cookie/登录态）
         QuickBarForm quickBar;
         NotifyIcon tray;
         bool realExit;
@@ -186,7 +187,7 @@ namespace SoloChatHost
             var userData = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "OpenPage", "WebView2"); // 目录名沿用旧项目名：内含用户全部数据（IndexedDB/localStorage），改名即清档，故保留
-            var env = await CoreWebView2Environment.CreateAsync(null, userData,
+            env = await CoreWebView2Environment.CreateAsync(null, userData,
                 new CoreWebView2EnvironmentOptions(DebugArgs));
             await wv.EnsureCoreWebView2Async(env);
 
@@ -505,10 +506,15 @@ namespace SoloChatHost
         void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
             e.Handled = true;
+            OpenExternal(e.Uri);
+        }
+
+        /* 仅放行 http/https（防 file://、UNC、ms-msdt: 等被 Shell 直接执行），交给系统默认浏览器 */
+        void OpenExternal(string uri)
+        {
             try
             {
-                // 仅放行 http/https 外链，防 file://、UNC、ms-msdt:、search-ms: 等被 Shell 直接执行
-                if (Uri.TryCreate(e.Uri, UriKind.Absolute, out Uri u) &&
+                if (Uri.TryCreate(uri, UriKind.Absolute, out Uri u) &&
                     (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
                 {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -519,6 +525,43 @@ namespace SoloChatHost
                 }
             }
             catch { }
+        }
+
+        /* v0.2.3：播放窗口 —— 独立 WebView2 顶层窗口（同一 user data，带 cookie/登录态）。
+           为什么需要：站内「预览」是 iframe + 本地 origin，没有 Referer，视频站一律拒绝内嵌
+           （表现为「已阻止此内容，请与网站所有者联系」）。顶层窗口就是正常浏览器上下文，能直接播放。 */
+        void OpenWebWindow(string url)
+        {
+            try
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out Uri u) ||
+                    (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)) return;
+                var f = new Form
+                {
+                    Text = "SoloChat · 播放",
+                    Width = 1120, Height = 740,
+                    StartPosition = FormStartPosition.CenterScreen,
+                    BackColor = System.Drawing.Color.FromArgb(18, 18, 18),
+                    Icon = Icon
+                };
+                var w2 = new WebView2 { Dock = DockStyle.Fill };
+                f.Controls.Add(w2);
+                f.FormClosed += (a, b) => { try { w2.Dispose(); } catch { } };
+                f.Shown += async (a, b) =>
+                {
+                    try
+                    {
+                        await w2.EnsureCoreWebView2Async(env);
+                        w2.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                        w2.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                        w2.CoreWebView2.NewWindowRequested += (o, ev) => { ev.Handled = true; OpenExternal(ev.Uri); };
+                        w2.CoreWebView2.Navigate(u.AbsoluteUri);
+                    }
+                    catch (Exception ex) { Log("playwin: " + ex.Message); OpenExternal(url); }
+                };
+                f.Show(this);
+            }
+            catch (Exception ex) { Log("playwin: " + ex.Message); OpenExternal(url); }
         }
 
         /* ---- 宿主桥（§7.2）：http / http.abort → http.meta / chunk / done / error ---- */
@@ -559,7 +602,18 @@ namespace SoloChatHost
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
                     }
-                    else if (t == "hotkey")
+                    else if (t == "open") /* v0.2.3：页面请求打开外部地址；mode=window 用应用内播放窗口 */
+            {
+                string ou = root.TryGetProperty("url", out JsonElement ouEl) ? ouEl.GetString() : "";
+                string om = root.TryGetProperty("mode", out JsonElement omEl) ? omEl.GetString() : "browser";
+                if (!string.IsNullOrEmpty(ou))
+                {
+                    var ouCopy = ou;
+                    if (om == "window") BeginInvoke((Action)(() => OpenWebWindow(ouCopy)));
+                    else BeginInvoke((Action)(() => OpenExternal(ouCopy)));
+                }
+            }
+            else if (t == "hotkey")
                     {
                         string combo = root.TryGetProperty("combo", out JsonElement cEl) ? cEl.GetString() : "";
                         var f = this;

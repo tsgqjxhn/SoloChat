@@ -2032,6 +2032,17 @@ var NET = (function(){
       .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   }
   /* 单页抓取（档④）：桥 GET 优先，浏览器直连受 CORS 约束，失败返回 null（回退摘要） */
+  /* v0.2.3：把外部地址交给宿主 —— mode='window' 是应用内播放窗口（同一浏览器环境，带 cookie/登录态），
+     'browser' 是系统默认浏览器。纯网页版退化为 window.open。 */
+  function openExternal(url, mode){
+    var u = safeUrl(url);
+    if (!u) return false;
+    if (bridge.ok){
+      try { bridge.send({ t: 'open', url: u, mode: mode || 'window' }); return true; } catch (e) {}
+    }
+    try { window.open(u, '_blank', 'noopener'); return true; } catch (e) {}
+    return false;
+  }
   function fetchPageText(u){
     var href = safeUrl(u);
     if (!href) return Promise.resolve(null);
@@ -2690,6 +2701,7 @@ var NET = (function(){
     modelCaps: modelCaps,
     estimate: estimate,
     searchWeb: searchWeb,
+    openExternal: openExternal, // v0.2.3：Work 的 play 工具用（应用内播放窗口）
     safeUrl: safeUrl,          // v0.2.1：Work 的 web 工具复用
     fetchPageText: fetchPageText, // v0.2.1：Work 的 web 工具复用（桥优先 → 无 CORS 限制）
     classify: classify,
@@ -2821,7 +2833,7 @@ var MD = (function(){
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|patch|preview|web|search)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
+        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
@@ -2906,9 +2918,9 @@ var MD = (function(){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -2920,7 +2932,7 @@ var MD = (function(){
       '<div class="th" data-tc="1">' +
       '<span class="tag">' + esc(lang) + '</span><span>' + esc(title) + '</span>' +
       (meta ? '<span class="meta">' + esc(meta) + '</span>' : '') +
-      (lang === 'web' || lang === 'search' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
+      (lang === 'web' || lang === 'search' || lang === 'play' ? '' : '<span class="meta">' + nline + ' 行</span>') + '</div>' +
       '<div class="tb"><pre><code>' + code + '</code></pre></div></div>';
   }
   function fsCard(c){
@@ -5394,7 +5406,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑥ 关于 —— */
     page('about', '关于', function(p){
-      var ver = 'v0.2.2', ua = navigator.userAgent || '';
+      var ver = 'v0.2.3', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -5645,7 +5657,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     updateEmpty();
   }
   /* v0.2.1：工具卡片 —— 「运行 js / 写入 x.mjs / 抓取 URL / 搜索 q」一行一条，点开才看原始输出 */
-  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', read: '读取' };
+  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', read: '读取' };
   function toolEvents(m){
     if (m.tools && m.tools.length) return m.tools;
     var out = [], lines = String(m.content || '').split('\n');
@@ -5663,6 +5675,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         out.push({ op: 'web', ok: false, brief: (b[2] || b[1]).slice(0, 60) });
       else if ((b = /^\[search\]\s*(.+?)（(\d+)\s*条/.exec(l)))
         out.push({ op: 'search', q: b[1], n: +b[2], ok: true });
+      else if ((b = /^\[play\]\s*已在播放窗口打开：(.+)$/.exec(l)))
+        out.push({ op: 'play', url: b[1], ok: true });
       else if ((b = /^\[preview\]\s*已在运行面板打开：(.+)$/.exec(l)))
         out.push({ op: 'preview', path: b[1], ok: true });
       else if ((b = /^\[vfs\]\s*工作区文件（(\d+) 项）/.exec(l)))
@@ -8645,11 +8659,12 @@ var WORK = (function(){
     '```vfs-list —— 列出本会话虚拟工作区文件。\n' +
     '```patch —— 首行是相对路径，其余是 unified diff（@@ -a,b +c,d @@ 简版，上下文行以空格开头）；小改动比整文件重写省 token。\n' +
     '```preview —— 首行是工作区相对路径，在右侧运行面板的内置浏览器打开该文件；写完 html/svg/md 产物后用它自检。\n' +
-    '注意：回复里的 html/svg/js/css/md 代码块会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
+    '```play —— 首行是视频/网页 URL；在应用内的独立播放窗口打开（同一浏览器环境、带 Referer 与登录态）。视频站（B 站、YouTube…）的播放器禁止被第三方页面内嵌，写进本地预览的 iframe 一定会显示「已阻止此内容」；要看视频就用 play，不要在 html 产物里塞 player 的 iframe。也不要在 run 里写"下载 mp4"——那需要 DASH 分片合并与 Referer 校验，沙箱做不到，别承诺。\n' +
+    '注意：只有用户这轮要文件/页面时，回复里的 html/svg/js/css/md 代码块才会自动保存到工作区（index.html / style.css / script.js / 图-N.svg / 笔记-N.md）；多文件或需特定路径时仍用 ```vfs-write 指定。\n' +
     '回答方式（重要）：用户说「爬一下 / 查一下 / 是什么 / 看看」时，默认把结论直接写在回复里（表格、条目或短段落），不要把答案包装成 html / md 文件，也不要为这类问题产出「产物」；只有用户明确要文件、网页、页面、导出、保存、下载、成品时才落盘，并在文末列产物清单。\n' +
     '纪律：① 先把手头需求转成验收清单（几条）；② 需要外部事实先用 web/search 取真实内容，禁止凭记忆编造，也不要拿"沙箱无网"当交付理由；③ 代码内嵌自检（console.assert / 结果比对打印）；④ 每轮结束声明清单哪几项已验证（引用输出）、哪几项未验证；⑤ 产生了文件才列产物清单，并写已知限制；⑥ 禁止编造"已测试"。'
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|vfs-(?:write|list))[ \t]*\r?\n([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -8812,7 +8827,7 @@ var WORK = (function(){
     function finish(extra){
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events);
     }
     (function next(){
@@ -8898,6 +8913,14 @@ var WORK = (function(){
           add('[vfs] 工作区文件（' + fs.length + ' 项）' + (lines.length ? '\n```\n' + lines.join('\n') + '\n```' : '（空）'), { op: 'list', n: fs.length, ok: true });
         }).then(next);
         return;
+      }
+      /* ---- v0.2.3：在应用内播放窗口打开视频/网页（顶层 WebView2，带 Referer 与登录态） ---- */
+      if (c.op === 'play'){
+        var pu = NET.safeUrl(c.arg);
+        if (!pu){ add('[play] 地址无效（需 http/https 绝对地址）：' + (c.arg || '（空）'), { op: 'play', ok: false, brief: '地址无效' }); next(); return; }
+        var opened2 = NET.openExternal(pu, 'window');
+        add('[play] 已在播放窗口打开：' + pu, { op: 'play', url: pu, ok: !!opened2 });
+        next(); return;
       }
       if (c.op === 'preview'){ /* v2.6：AI 打开右侧内置侧边栏浏览器预览 VFS 文件 */
         var pp = String(c.arg || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
