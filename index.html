@@ -145,12 +145,6 @@ body.sb-collapsed #sidebar{display:none}
 .win-btn:hover{background:var(--soft);color:var(--ink)}
 .win-btn[data-win="close"]:hover{background:var(--danger);color:#fff}
 
-/* 侧栏悬浮呼出（左缘热区） */
-#sb-hover{position:fixed;left:0;top:0;bottom:0;width:calc(var(--sb-w)/2);z-index:35;display:none}
-body.sb-collapsed:not(.sb-float) #sb-hover{display:block}
-body.sb-collapsed.sb-float #sidebar{
-  display:flex;position:fixed;inset:0 auto 0 0;z-index:40;box-shadow:var(--shadow-pop);
-}
 
 /* 消息区 */
 #msg-scroll{flex:1;overflow-y:auto;position:relative;scroll-behavior:auto}
@@ -262,11 +256,28 @@ body.sb-collapsed.sb-float #sidebar{
 #runner{position:absolute;right:0;top:0;bottom:0;width:var(--side-w);z-index:45;
   display:none;flex-direction:column;background:var(--canvas);border-left:1px solid var(--hairline);
   box-shadow:-14px 0 40px rgba(0,0,0,.14);overflow:hidden}
-#subbar{display:flex;align-items:center;gap:8px;padding:6px 18px;flex:none;
-  border-bottom:1px solid var(--hairline-soft);background:var(--canvas);min-height:36px}
-#subbar .seg{background:var(--soft)}
-#subbar:empty{display:none}
-#seg-sub button{white-space:nowrap}
+.sub-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 9px;border-radius:14px;
+  background:var(--soft);font-size:12px;font-weight:600;color:var(--body);white-space:nowrap;max-width:160px}
+.sub-btn:hover{background:var(--hairline-soft);color:var(--ink)}
+#btn-sb.on{color:var(--primary)}
+.sub-btn .lv{color:var(--faint);font-weight:500}
+.caret{width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;
+  border-top:4px solid currentColor;opacity:.5;margin-left:2px}
+#sub-pop{position:fixed;z-index:80;display:flex;padding:6px;gap:6px;background:var(--canvas);
+  border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop)}
+#sub-pop[hidden]{display:none}
+.sp-list{display:flex;flex-direction:column;min-width:188px}
+.sp-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
+.sp-item:hover,.sp-item.hot{background:var(--soft);color:var(--ink)}
+.sp-item.on{background:var(--lift);color:var(--ink)}
+.sp-n{flex:1}
+.sp-h{font-size:11px;color:var(--faint);white-space:nowrap}
+.sp-lv{display:none;flex-direction:column;min-width:118px;border-left:1px solid var(--hairline-soft);padding-left:6px}
+.sp-lv.show{display:flex}
+.sp-lv-t{font-size:11px;color:var(--faint);padding:4px 9px 6px}
+.sp-lv button{padding:6px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
+.sp-lv button:hover{background:var(--soft);color:var(--ink)}
+.sp-lv button.on{background:var(--lift);color:var(--ink);font-weight:600}
 body.rn-open #runner{display:flex}
 /* 抽屉打开时正文列让出同宽右侧空间：既不盖住正文，也不至于把抽屉压得很窄 */
 body.rn-open #main{padding-right:var(--side-w);transition:padding-right .18s ease}
@@ -782,7 +793,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 </style>
 </head>
 <body>
-<div id="sb-hover" aria-hidden="true"></div>
+
 <div id="app">
   <aside id="sidebar" aria-label="会话列表">
     <div class="sb-top">
@@ -801,6 +812,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 
   <main id="main">
     <header id="topbar">
+      <button class="icon-btn" id="btn-sb" title="会话侧边栏（Ctrl+B）"><svg class="ic"><use href="#i-sb"/></svg></button>
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
         <div class="seg seg-sm" id="seg-mode" title="模式：Chat 常规对话 / Work 沙箱短任务（不写磁盘）/ Agent 真实文件工具">
@@ -819,7 +831,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
     </header>
-    <div id="subbar"><div class="seg seg-sm seg-sub" id="seg-sub" title="子模式（同一模式下更细的分工）"></div></div>
 
     <div id="msg-scroll">
       <div id="msg-list"></div>
@@ -828,6 +839,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     </div>
 
     <div id="composer">
+      <div id="sub-pop" hidden></div>
       <div class="inner">
         <div id="chips"></div>
         <div class="crow">
@@ -835,6 +847,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
           </div>
           <div class="cwrap">
             <div class="cbox"><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
@@ -903,6 +916,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
 <symbol id="i-gear" viewBox="0 0 1084 1024"><path style="fill:currentColor;stroke:none" d="M1072.147851 406.226367c-6.331285-33.456782-26.762037-55.073399-52.047135-55.073399-0.323417 0-0.651455 0.003081-0.830105 0.009241l-4.655674 0c-73.124722 0-132.618162-59.491899-132.618162-132.618162 0-23.731152 11.447443-50.336101 11.546009-50.565574 13.104573-29.498767 3.023185-65.672257-23.427755-84.127081l-1.601687-1.127342-134.400039-74.661726-1.700252-0.745401c-8.753836-3.805547-18.334698-5.735272-28.479231-5.735272-20.789593 0-41.235746 8.344174-54.683758 22.306575-14.741683 15.216028-65.622973 58.649474-104.721083 58.649474-39.450789 0-90.633935-44.286652-105.438762-59.784516-13.518857-14.247316-34.128258-22.753199-55.127302-22.753199-9.945862 0-19.354234 1.861961-27.958682 5.531982l-1.746455 0.74078-139.141957 76.431283-1.643269 1.139662c-26.537186 18.437884-36.675557 54.579032-23.584845 84.062398 0.115506 0.264895 11.579891 26.725075 11.579891 50.634877 0 73.126262-59.491899 132.618162-132.618162 132.618162l-4.581749 0c-0.318797-0.00616-0.636055-0.01078-0.951772-0.01078-25.260456 0-45.672728 21.618157-52.002472 55.0811-0.462025 2.453354-11.313456 60.622322-11.313456 106.117939 0 45.494078 10.85143 103.659965 11.314996 106.119479 6.334365 33.458322 26.758957 55.076479 52.036353 55.076479 0.320337 0 0.651455-0.00616 0.842426-0.012321l4.655674 0c73.126262 0 132.618162 59.491899 132.618162 132.616622 0 23.760413-11.444363 50.333021-11.546009 50.565574-13.093793 29.474125-3.041666 65.646075 23.395414 84.151722l1.569346 1.093459 131.838879 73.726895 1.675611 0.7377c8.750757 3.84251 18.305437 5.790715 28.397607 5.790715 21.082208 0 41.676209-8.706094 55.0888-23.290689 18.724339-20.347588 69.527086-62.362616 107.04815-62.362616 40.625872 0 92.72537 47.100385 107.759669 63.583903 13.441852 14.831008 34.176001 23.689571 55.470741 23.695731l0.00616 0c9.895039 0 19.27877-1.883523 27.893999-5.598205l1.711034-0.73924 136.659342-75.531873 1.617088-1.128882c26.492523-18.456365 36.601633-54.600594 23.538642-84.016195-0.115506-0.267974-11.595291-27.082374-11.595291-50.67646 0-73.124722 59.49344-132.616622 132.618162-132.616622l4.517066-0.00154c0.300316 0.00616 0.599092 0.009241 0.899409 0.009241 25.331299-0.00154 45.785153-21.619697 52.107197-55.054918 0.112426-0.589852 11.325776-59.507301 11.325776-106.14104C1083.464388 466.640776 1072.609877 408.67356 1072.147851 406.226367zM377.486862 945.656142l-115.32764-64.487932c5.082277-13.052211 15.437801-43.51815 15.437801-75.017486 0-109.382917-84.176364-199.816642-192.587488-208.134635-2.647404-15.427021-8.873963-54.967133-8.873963-85.667166 0-30.65691 6.223479-70.232445 8.869343-85.671786 108.415744-8.311832 192.592108-98.745557 192.592108-208.134635 0-31.416171-10.300081-61.797405-15.371577-74.854236l122.721583-67.40331c0.003081 0 0.00462 0.00154 0.007701 0.00154 4.423121 4.518606 22.121764 22.080182 46.558275 39.493911 39.929754 28.46229 77.952885 42.894416 113.014434 42.894416 34.716571 0 72.437845-14.151831 112.115025-42.06431 24.282503-17.07953 41.896442-34.302288 46.308782-38.74543 0.009241-0.00154 0.018481-0.00462 0.026182-0.00616l118.301542 65.726159c-5.077657 13.055291-15.416239 43.499669-15.416239 74.958962 0 109.389077 84.174824 199.822802 192.590568 208.134635 2.645865 15.462442 8.872423 55.107281 8.872423 85.671786 0 30.687711-6.223479 70.241685-8.869343 85.673326C890.042174 606.334084 805.86427 696.767809 805.86427 806.158426c0 31.450053 10.317022 61.851309 15.393138 74.903519l-119.783103 66.198965c-5.168521-5.490399-22.603811-23.363073-46.740005-41.288109-40.701336-30.224145-79.662378-45.549521-115.800446-45.549521-35.79155 0-74.458435 15.038919-114.927219 44.694774C400.22004 922.554885 382.666163 940.255068 377.486862 945.656142zM731.271848 511.646647c0-105.803762-86.081448-191.88059-191.888289-191.88059-105.803762 0-191.88059 86.076827-191.88059 191.88059 0 105.803762 86.076827 191.882129 191.88059 191.882129C645.19194 703.528777 731.271848 617.450409 731.271848 511.646647zM539.383558 395.903184c63.825696 0 115.751164 51.922387 115.751164 115.743463 0 63.825696-51.925468 115.751164-115.751164 115.751164-63.821076 0-115.743463-51.925468-115.743463-115.751164C423.640095 447.824031 475.562482 395.903184 539.383558 395.903184z"/></symbol>
 <symbol id="i-gear2" viewBox="0 0 1084 1024"><path style="fill:currentColor;stroke:none" d="M1072.147851 406.226367c-6.331285-33.456782-26.762037-55.073399-52.047135-55.073399-0.323417 0-0.651455 0.003081-0.830105 0.009241l-4.655674 0c-73.124722 0-132.618162-59.491899-132.618162-132.618162 0-23.731152 11.447443-50.336101 11.546009-50.565574 13.104573-29.498767 3.023185-65.672257-23.427755-84.127081l-1.601687-1.127342-134.400039-74.661726-1.700252-0.745401c-8.753836-3.805547-18.334698-5.735272-28.479231-5.735272-20.789593 0-41.235746 8.344174-54.683758 22.306575-14.741683 15.216028-65.622973 58.649474-104.721083 58.649474-39.450789 0-90.633935-44.286652-105.438762-59.784516-13.518857-14.247316-34.128258-22.753199-55.127302-22.753199-9.945862 0-19.354234 1.861961-27.958682 5.531982l-1.746455 0.74078-139.141957 76.431283-1.643269 1.139662c-26.537186 18.437884-36.675557 54.579032-23.584845 84.062398 0.115506 0.264895 11.579891 26.725075 11.579891 50.634877 0 73.126262-59.491899 132.618162-132.618162 132.618162l-4.581749 0c-0.318797-0.00616-0.636055-0.01078-0.951772-0.01078-25.260456 0-45.672728 21.618157-52.002472 55.0811-0.462025 2.453354-11.313456 60.622322-11.313456 106.117939 0 45.494078 10.85143 103.659965 11.314996 106.119479 6.334365 33.458322 26.758957 55.076479 52.036353 55.076479 0.320337 0 0.651455-0.00616 0.842426-0.012321l4.655674 0c73.126262 0 132.618162 59.491899 132.618162 132.616622 0 23.760413-11.444363 50.333021-11.546009 50.565574-13.093793 29.474125-3.041666 65.646075 23.395414 84.151722l1.569346 1.093459 131.838879 73.726895 1.675611 0.7377c8.750757 3.84251 18.305437 5.790715 28.397607 5.790715 21.082208 0 41.676209-8.706094 55.0888-23.290689 18.724339-20.347588 69.527086-62.362616 107.04815-62.362616 40.625872 0 92.72537 47.100385 107.759669 63.583903 13.441852 14.831008 34.176001 23.689571 55.470741 23.695731l0.00616 0c9.895039 0 19.27877-1.883523 27.893999-5.598205l1.711034-0.73924 136.659342-75.531873 1.617088-1.128882c26.492523-18.456365 36.601633-54.600594 23.538642-84.016195-0.115506-0.267974-11.595291-27.082374-11.595291-50.67646 0-73.124722 59.49344-132.616622 132.618162-132.616622l4.517066-0.00154c0.300316 0.00616 0.599092 0.009241 0.899409 0.009241 25.331299-0.00154 45.785153-21.619697 52.107197-55.054918 0.112426-0.589852 11.325776-59.507301 11.325776-106.14104C1083.464388 466.640776 1072.609877 408.67356 1072.147851 406.226367zM377.486862 945.656142l-115.32764-64.487932c5.082277-13.052211 15.437801-43.51815 15.437801-75.017486 0-109.382917-84.176364-199.816642-192.587488-208.134635-2.647404-15.427021-8.873963-54.967133-8.873963-85.667166 0-30.65691 6.223479-70.232445 8.869343-85.671786 108.415744-8.311832 192.592108-98.745557 192.592108-208.134635 0-31.416171-10.300081-61.797405-15.371577-74.854236l122.721583-67.40331c0.003081 0 0.00462 0.00154 0.007701 0.00154 4.423121 4.518606 22.121764 22.080182 46.558275 39.493911 39.929754 28.46229 77.952885 42.894416 113.014434 42.894416 34.716571 0 72.437845-14.151831 112.115025-42.06431 24.282503-17.07953 41.896442-34.302288 46.308782-38.74543 0.009241-0.00154 0.018481-0.00462 0.026182-0.00616l118.301542 65.726159c-5.077657 13.055291-15.416239 43.499669-15.416239 74.958962 0 109.389077 84.174824 199.822802 192.590568 208.134635 2.645865 15.462442 8.872423 55.107281 8.872423 85.671786 0 30.687711-6.223479 70.241685-8.869343 85.673326C890.042174 606.334084 805.86427 696.767809 805.86427 806.158426c0 31.450053 10.317022 61.851309 15.393138 74.903519l-119.783103 66.198965c-5.168521-5.490399-22.603811-23.363073-46.740005-41.288109-40.701336-30.224145-79.662378-45.549521-115.800446-45.549521-35.79155 0-74.458435 15.038919-114.927219 44.694774C400.22004 922.554885 382.666163 940.255068 377.486862 945.656142zM731.271848 511.646647c0-105.803762-86.081448-191.88059-191.888289-191.88059-105.803762 0-191.88059 86.076827-191.88059 191.88059 0 105.803762 86.076827 191.882129 191.88059 191.882129C645.19194 703.528777 731.271848 617.450409 731.271848 511.646647zM539.383558 395.903184c63.825696 0 115.751164 51.922387 115.751164 115.743463 0 63.825696-51.925468 115.751164-115.751164 115.751164-63.821076 0-115.743463-51.925468-115.743463-115.751164C423.640095 447.824031 475.562482 395.903184 539.383558 395.903184z"/></symbol>
+<symbol id="i-sb" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
 <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></symbol>
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
 <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></symbol>
@@ -994,7 +1008,9 @@ var DEF_CFG = {
   personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: true,
-  sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }              // v0.6.0：按输入自动选模式
+  sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
+  subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
+  sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -1010,7 +1026,7 @@ var DEF_CFG = {
   },
   temperature: 0.7, maxTokens: 0, systemPrompt: '',      // maxTokens: 0=不限制输出（不传 max_tokens）
   timeout: { connect: 15, first: 60, idle: 30 },
-  shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: '', quickbar: 'Alt+Space' },
+  shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space' },
   wsClosed: {},                 // 侧栏项目折叠状态 {工作区路径: 1}
   pinnedWs: {},                 // 置顶项目 {工作区路径: 1}
   /* v3.0 新配置项（必须登记在 DEF_CFG，否则载入时被白名单丢弃） */
@@ -1187,7 +1203,8 @@ function loadCfg(){
     cfg.mode = c.fileOps ? 'agent' : 'chat';
   delete cfg.fileOps;
   cfg.timeout = Object.assign({}, DEF_CFG.timeout, c.timeout || {});
-  cfg.ocr = Object.assign({}, DEF_CFG.ocr, c.ocr || {}); // v1.5：OCR 配置深合并，新增子字段拿默认值
+  cfg.ocr = Object.assign({}, DEF_CFG.ocr, c.ocr || {});
+  if (cfg.shortcuts && !cfg.shortcuts.sidebar) cfg.shortcuts.sidebar = 'Ctrl+B'; // v1.3：旧配置补上侧栏快捷键 // v1.5：OCR 配置深合并，新增子字段拿默认值
   /* 迁移（一次性）：旧版代理默认为空（系统代理）→ v1.5 默认本地代理 127.0.0.1:7897；
      用户自定义过代理地址的保持原值不动 */
   if (!c.proxyMigrated){
@@ -1583,6 +1600,7 @@ var NET = (function(){
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
+    var lvP = MODE.levelPrompt(); if (lvP) sys += '\n' + lvP;     // v1.2：更深一层
     if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
@@ -5736,7 +5754,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.2.0', ua = navigator.userAgent || '';
+      var ver = 'v1.3.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7177,6 +7195,72 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     });
   }
 
+  /* v1.3：子模式下拉 —— 按钮在输入框左侧，点开选小模式，悬停展开更深一档 */
+  function closeSubPop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
+  function subLevelNode(x, box, curLv){
+    if (!box) return;
+    box.textContent = '';
+    if (!x || !x.levels || !x.levels.length){ box.classList.remove('show'); return; }
+    box.classList.add('show');
+    box.appendChild(el('div', { class: 'sp-lv-t', text: x.name }));
+    var curSub = MODE.sub();
+    x.levels.forEach(function(l){
+      var b = el('button', { type: 'button', text: l.name });
+      if (curLv && curLv.id === l.id && curSub && curSub.id === x.id) b.classList.add('on');
+      b.addEventListener('click', function(){
+        MODE.setSub(x.id);
+        MODE.setLevel(l.id);
+        closeSubPop();
+        renderComposerCtl();
+      });
+      box.appendChild(b);
+    });
+  }
+  function openSubPop(){
+    var pop = $('#sub-pop'), btn = $('#btn-sub');
+    if (!pop || !btn) return;
+    if (!pop.hidden){ closeSubPop(); return; }
+    var list = MODE.subList(), cur = MODE.sub();
+    pop.textContent = '';
+    var left = el('div', { class: 'sp-list' }), right = el('div', { class: 'sp-lv' });
+    list.forEach(function(x){
+      var it = el('button', { type: 'button', class: 'sp-item' + (cur && cur.id === x.id ? ' on' : '') });
+      it.appendChild(el('span', { class: 'sp-n', text: x.name }));
+      it.appendChild(el('span', { class: 'sp-h', text: x.hint || '' }));
+      if (x.levels && x.levels.length) it.appendChild(el('span', { class: 'caret' }));
+      it.addEventListener('mouseenter', function(){ subLevelNode(x, right, MODE.level()); });
+      it.addEventListener('click', function(){
+        MODE.setSub(x.id);
+        renderComposerCtl();
+        if (x.levels && x.levels.length) subLevelNode(x, right, MODE.level());
+        else closeSubPop();
+      });
+      left.appendChild(it);
+    });
+    pop.appendChild(left); pop.appendChild(right);
+    var r = btn.getBoundingClientRect();
+    pop.style.left = Math.round(r.left) + 'px';
+    pop.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
+    pop.hidden = false;
+    subLevelNode(cur, right, MODE.level());
+  }
+  function renderSubPin(){
+    var b = $('#btn-sub'); if (!b) return;
+    var x = MODE.sub(), lv = MODE.level();
+    b.textContent = '';
+    b.appendChild(el('span', { id: 'sub-label', text: x ? x.name : '—' }));
+    if (x && lv) b.appendChild(el('span', { class: 'lv', text: '· ' + lv.name }));
+    b.appendChild(el('span', { class: 'caret' }));
+    b.title = '子模式：' + (x ? x.name + (lv ? ' · ' + lv.name : '') : '—') + '（' + ((x && x.hint) || '') + '）';
+  }
+  var _subBtn = $('#btn-sub');
+  if (_subBtn) _subBtn.addEventListener('click', function(e){ e.stopPropagation(); openSubPop(); });
+
+  document.addEventListener('click', function(e){
+    if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-sub'))) return;
+    closeSubPop();
+  });
+
   /* 输入区控件（v1.2）：模式/模型/思考 */
   function renderComposerCtl(){
     var seg = $('#seg-mode');
@@ -7185,23 +7269,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       for (var sgi = 0; sgi < seg.children.length; sgi++)
         seg.children[sgi].classList.toggle('on', seg.children[sgi].getAttribute('data-mode') === md);
     }
-    var subEl = $('#seg-sub');
-    if (subEl){
-      var subList = MODE.subList(S.cfg.mode), curSub = MODE.sub(S.cfg.mode);
-      subEl.textContent = '';
-      var bar = document.getElementById('subbar');
-      if (bar) bar.style.display = subList.length ? '' : 'none';
-      if (!subList.length) subEl.style.display = 'none';
-      else {
-        subEl.style.display = '';
-        for (var si = 0; si < subList.length; si++) (function(x){
-          var b2 = el('button', { type: 'button', 'data-sub': x.id, title: x.hint || '' });
-          b2.textContent = x.name;
-          if (curSub && curSub.id === x.id) b2.classList.add('on');
-          subEl.appendChild(b2);
-        })(subList[si]);
-      }
-    }
+    renderSubPin();
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
     if (selM && act !== selM){
       var ps = S.cfg.presets || [];
@@ -8197,10 +8265,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     }
     if (item){
       UI.selectSession(item.getAttribute('data-sid'));
-      if (document.body.classList.contains('sb-float')){
-        document.body.classList.add('sb-collapsed');
-        document.body.classList.remove('sb-float');
-      }
     }
   });
   /* 侧栏搜索：委托在 #sidebar input 事件 */
@@ -8432,13 +8496,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       for (var di = 0; di < dms.length; di++) dms[di].classList.toggle('on', dms[di].getAttribute('data-mode') === S.cfg.mode);
       MODE.mountUI();
       if (UI.updateEmpty) UI.updateEmpty();
-      return;
-    }
-    var sb = t.closest('#seg-sub [data-sub]');
-    if (sb){
-      MODE.setSub(sb.getAttribute('data-sub'));
-      renderComposerCtl();
-      toast('子模式：' + MODE.sub().name);
       return;
     }
     var mb = t.closest('#seg-mode [data-mode]');
@@ -8730,16 +8787,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     NET.bridge.send({ t: 'win', act: 'drag' });
   });
 
-  /* 侧栏悬浮：入左缘热区浮现，移出收起 */
-  window.addEventListener('mouseover', function(e){
-    if (e.target.closest && e.target.closest('#sb-hover'))
-      document.body.classList.add('sb-float');
-  });
-  window.addEventListener('mouseout', function(e){
-    if (!e.target.closest || !e.target.closest('#sidebar')) return;
-    if (!e.relatedTarget || !(e.relatedTarget.closest && e.relatedTarget.closest('#sidebar')))
-      document.body.classList.remove('sb-float');
-  });
 
   /* 快捷键（§8.1，可在设置 → 快捷键 自定义） */
   function comboOf(e){
@@ -8750,18 +8797,29 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     else if (code.indexOf('Digit') === 0) code = code.slice(5);
     return code ? mods + code : null;
   }
+  function toggleSidebar(force){
+    var hide = force === 'hide' ? true : force === 'show' ? false : !document.body.classList.contains('sb-collapsed');
+    document.body.classList.toggle('sb-collapsed', hide);
+    setCfg({ sbHidden: hide });
+    var b = $('#btn-sb'); if (b) b.classList.toggle('on', !hide);
+  }
+  window.addEventListener('DOMContentLoaded', function(){
+    var b = $('#btn-sb');
+    if (b) b.addEventListener('click', function(){ toggleSidebar(); });
+  });
+
   function runShortcut(name){
     if (name === 'newSession') UI.newDraft();
-    else if (name === 'search') $('#sb-q').focus();
+    else if (name === 'search'){
+    document.body.classList.remove('sb-collapsed');
+    setTimeout(function(){ var q = $('#sb-q'); if (q) q.focus(); }, 30);
+  }
     else if (name === 'theme'){
       var dark = document.documentElement.dataset.theme === 'dark';
       setCfg({ theme: dark ? 'light' : 'dark' });
       UI.applyTheme();
     }
-    else if (name === 'sidebar'){
-      document.body.classList.remove('sb-float');
-      document.body.classList.toggle('sb-collapsed');
-    }
+    else if (name === 'sidebar') toggleSidebar();
   }
   window.addEventListener('keydown', function(e){
     /* 录制模式：设置里正在捕获组合键 */
@@ -9324,10 +9382,21 @@ var MODE = (function(){
       { id: 'fast', name: '标准', hint: '直答，不铺陈',
         prompt: '子模式 Fast：直接给答案，结论先行，控制篇幅；不需要工具就别调。' },
       { id: 'think', name: '深度思考', hint: '长推理',
-        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。' },
+        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。',
+        levels: [
+          { id: 'low', name: '低', prompt: '思考档位：低 —— 快速过一遍，只做必要的联想。' },
+          { id: 'mid', name: '中', prompt: '思考档位：中 —— 拆步骤、验假设，够用就收。' },
+          { id: 'high', name: '高', prompt: '思考档位：高 —— 找反例、比方案，权衡后再落笔。' },
+          { id: 'max', name: 'Max', prompt: '思考档位：Max —— 穷尽解法（至少三条），逐条压测边界与失败模式，最后给推荐与理由。' }
+        ] },
       { id: 'research', name: '深度研究', hint: '多轮检索写报告', tools: ['web', 'search'],
         prompt: '子模式 Deep Research：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
-          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。' }
+          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。',
+        levels: [
+          { id: 'quick', name: '快速', prompt: '检索强度：快速 —— 至少 2 轮检索即可收敛，别过度挖。' },
+          { id: 'std', name: '标准', prompt: '检索强度：标准 —— 3 轮左右，覆盖正反两面。' },
+          { id: 'deep', name: '深入', prompt: '检索强度：深入 —— 至少 5 轮，交叉验证数据与日期，列出互相矛盾的来源。' }
+        ] }
     ],
     work: [
       { id: 'canvas', name: '画布', hint: '草稿与成品分离',
@@ -9341,12 +9410,25 @@ var MODE = (function(){
     agent: [
       { id: 'plan', name: '规划', hint: '只读推演', deny: ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'],
         prompt: '子模式 Plan：只读。用 ```fs-list / ```fs-read 摸清现状，产出分步计划（每步写清改哪个文件、怎么验），' +
-          '不要写盘、不要跑命令。等用户说「执行」再落地。' },
+          '不要写盘、不要跑命令。等用户说「执行」再落地。',
+        levels: [
+          { id: 'brief', name: '简明', prompt: '计划粒度：简明 —— 只给步骤清单，每步一行。' },
+          { id: 'detail', name: '详细', prompt: '计划粒度：详细 —— 每步写清改哪个文件、改什么、怎么验证、有什么风险。' }
+        ] },
       { id: 'build', name: '构建', hint: '落地修改',
-        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。' },
+        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。',
+        levels: [
+          { id: 'care', name: '谨慎', prompt: '落地方式：谨慎 —— 一处一改，每改完自检再往下。' },
+          { id: 'fast', name: '直接', prompt: '落地方式：直接 —— 一把改完再统一自检，减少往返。' }
+        ] },
       { id: 'team', name: '子母协作', hint: '派活给子智能体',
         prompt: '子模式 Sub-Agents：把任务拆成 2~4 块，用 ```agent explore|coder|review 派出去（explore 只读、coder 写暂存、' +
-          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。' }
+          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。',
+        levels: [
+          { id: 'two', name: '2 个', prompt: '规模：最多派 2 个子智能体。' },
+          { id: 'three', name: '3 个', prompt: '规模：最多派 3 个子智能体。' },
+          { id: 'four', name: '4 个', prompt: '规模：最多派 4 个子智能体，可并行再汇总。' }
+        ] }
     ]
   };
   function subList(mode){ return SUBS[mode || S.cfg.mode] || []; }
@@ -9361,6 +9443,19 @@ var MODE = (function(){
     setCfg({ sub: o });
   }
   function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
+  function levelKey(mode, sid){ return (mode || S.cfg.mode || 'chat') + ':' + (sid || (sub(mode) || {}).id); }
+  function level(mode){
+    var x = sub(mode); if (!x || !x.levels || !x.levels.length) return null;
+    var id = (S.cfg.subLv || {})[levelKey(mode, x.id)];
+    for (var i = 0; i < x.levels.length; i++) if (x.levels[i].id === id) return x.levels[i];
+    return x.levels[0];
+  }
+  function setLevel(id, mode){
+    var x = sub(mode); if (!x) return;
+    var o = Object.assign({}, S.cfg.subLv || {}); o[levelKey(mode, x.id)] = id;
+    setCfg({ subLv: o });
+  }
+  function levelPrompt(mode){ var l = level(mode); return l ? (l.prompt || '') : ''; }
   /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
   function denyList(){ var x = sub(); return (x && x.deny) || []; }
   function denied(op){ return denyList().indexOf(op) >= 0; }
@@ -9398,7 +9493,8 @@ var MODE = (function(){
     });
   }
   return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
-           SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied };
+           SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied,
+           level: level, setLevel: setLevel, levelPrompt: levelPrompt, levelKey: levelKey };
 })();
 
 /* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
@@ -10183,7 +10279,9 @@ try {
   }
 } catch (e) {}
 loadCfg();
-document.body.classList.add('sb-collapsed'); // 默认收起：左缘热区呼出 / ☰ 固定
+document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.3：按钮 / Ctrl+B 控制，不再悬浮呼出
+var _sbBtn = document.getElementById('btn-sb');
+if (_sbBtn) _sbBtn.classList.toggle('on', S.cfg.sbHidden === false);
 NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){ saveCfg(); }); // 迁移：把旧 localStorage 明文密钥入保险库并脱敏重写
