@@ -841,7 +841,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
-      <button class="icon-btn" id="btn-handoff" title="交接到其他模式（带上下文，生成新会话，原会话保留）"><span style="font-size:15px;line-height:1">⇄</span></button>
         <button class="icon-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
       </div>
       <div id="win-ctl">
@@ -5878,7 +5877,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.14.1', ua = navigator.userAgent || '';
+      var ver = 'v1.14.2', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7700,11 +7699,25 @@ function sendMessage(){
     }
     p.hidden = false;
   }
+  function openHandoff(){
+    var box = el('div', { style: 'padding:18px 20px;min-width:300px' });
+    box.appendChild(el('div', { style: 'font-size:14px;font-weight:600;margin-bottom:6px', text: '交接到哪个模式？' }));
+    box.appendChild(el('div', { class: 'hint', style: 'display:block;margin-bottom:12px', text: '会新建一个会话，带上最近 10 条压缩上下文与产物清单；原会话保留不动。' }));
+    var row = el('div', { class: 'f-actions', style: 'justify-content:flex-start' });
+    ['chat', 'work', 'agent'].forEach(function(m){
+      var b2 = el('button', { class: 'btn btn-sec', text: m.toUpperCase() });
+      b2.addEventListener('click', function(){ closeModal(); HANDOFF.to(m); });
+      row.appendChild(b2);
+    });
+    box.appendChild(row);
+    openModal(box, false, true);
+  }
   function popMore(){
     popMode = 'more';
     var items = [{ t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' }];
     if (S.cfg.mode === 'chat') items.push({ t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' });
     items.push({ t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' });
+    items.push({ t: '交接会话', p: '带上文切换到另一个模式', act: 'go-handoff' });
     popItems(items, '更多');
   }
   function popPrompts(filter){
@@ -7766,7 +7779,8 @@ function sendMessage(){
       toast(S.cfg.research ? '深度研究：开（会多轮检索再写报告）' : '深度研究：关');
       return;
     }
-    if (pact === 'go-prompt') return popPrompts('');
+    if (pact === 'go-handoff'){ closePop(); return openHandoff(); }
+  if (pact === 'go-prompt') return popPrompts('');
     if (pact === 'go-at') return popAt('');
     if (pact === 'at-use') return importHistory(id);
   }
@@ -8491,7 +8505,7 @@ function sendMessage(){
     autosize: autosize, doExport: doExport, doImport: doImport, reloadSessions: reloadSessions,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
-    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger,
+    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger, openHandoff: openHandoff,
     zipVfs: zipVfs, toggleTemp: toggleTemp, DUAL: DUAL,
     /* v2.9：模型池/能力表 */
     renderPool: renderPool, mmUse: mmUse, mmToggleCfg: mmToggleCfg, mmDelete: mmDelete, mmSave: mmSave,
@@ -8763,20 +8777,6 @@ function sendMessage(){
         }
         UI.toast('文件不存在（可能已删除）', true);
       });
-      return;
-    }
-    if (t.closest('#btn-handoff')){
-      var box = el('div', { style: 'padding:18px 20px;min-width:300px' });
-      box.appendChild(el('div', { style: 'font-size:14px;font-weight:600;margin-bottom:6px', text: '交接到哪个模式？' }));
-      box.appendChild(el('div', { class: 'hint', style: 'display:block;margin-bottom:12px', text: '会新建一个会话，带上最近 10 条压缩上下文与产物清单；原会话保留不动。' }));
-      var row = el('div', { class: 'f-actions', style: 'justify-content:flex-start' });
-      ['chat', 'work', 'agent'].forEach(function(m){
-        var b2 = el('button', { class: 'btn btn-sec', text: m.toUpperCase() });
-        b2.addEventListener('click', function(){ UI.closeModal(); HANDOFF.to(m); });
-        row.appendChild(b2);
-      });
-      box.appendChild(row);
-      UI.openModal(box, false, true);
       return;
     }
 
