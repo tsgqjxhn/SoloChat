@@ -32,6 +32,7 @@
 - **文档解析与 OCR** — docx / xlsx / pptx / rtf 及带文本层的 PDF 零依赖本地提取；扫描版 PDF 可选 **Mistral OCR** 或 **Azure 文档智能** 识别（自动回退、Key 进 DPAPI 保险库、附「测试识别」）
 - **代理** — 「通用设置」页内代理区块，默认 `http://127.0.0.1:7897`（Clash/mihomo 混合端口），宿主桥全通道生效，附「测试连通性」
 - **其他** — 深/浅双主题、Alt+Space 全局呼出（宿主）、侧栏分组置顶、快捷键自定义、导入导出、`mock` 离线演示
+- **v1.1.0 新增** — 母子智能体隔离：内置 `explore`（只读）/ `coder`（读写+补丁，禁命令）/ `review`（无工具）/ `general`（可再派下级）四种角色，ACL 固定并在调度器侧拦截越权调用（拦截原因回注给子智能体）；子智能体只活在自己的 messages 数组里、不写 IndexedDB，结束后只回一条 `[subagent-result: 角色]` 摘要；层级上限 2 层
 - **v1.0.1 新增** — 命令留痕：执行/拒绝/超时都追加到 `%LOCALAPPDATA%\OpenPage\logs\solo-cmd.log`（时间 / cwd / 结果 / 命令行，512KB 滚动），设置→扩展「命令记录」可回看最近 200 条
 - **v1.0.0 新增** — 插件沙箱：CSP 收回 `unsafe-eval`（页面内 `new Function` 实测被拦为 EvalError）；自定义工具改为声明式 HTTP（`type:"http"` + `url`/`method`/`headers`/`body` 模板，`{arg}` 自动 URL 编码），旧式 JS 代码工具直接拒绝并给出迁移提示；宿主对回环地址强制直连，本地服务不再被代理设置挡住
 - **v0.9.0 新增** — Agent 命令执行：`cmd` / `git` 围栏走宿主白名单（git/node/npm/npx/pnpm/python/dotnet/tsc/pytest 等），cwd 必须在已授权工作区内，60 秒超时、输出截断，每次执行前弹确认框

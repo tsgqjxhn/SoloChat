@@ -5672,7 +5672,16 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen","modes":["work"]}（声明式 HTTP，{arg} 会 URL 编码后填入；任意 JS 代码已停用）；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
       var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}' });
       p.appendChild(ta);
-      /* v1.0.1：命令审计（宿主留痕） */
+      /* v1.1.0：内置子智能体角色（ACL 固定，不可编辑） */
+    p.appendChild(el('div', { style: 'margin-top:14px;font-size:13px;font-weight:600', text: '子智能体角色（内置）' }));
+    p.appendChild(el('div', { class: 'sub', style: 'display:block;white-space:pre-wrap;margin-top:4px;line-height:1.7',
+      text: SUB.ROLES.map(function(r){
+        var a = SUB.aclOf(r);
+        return '· ' + r.name + ' — ' + (r.desc || '') + '\n  ACL：' + (a.length ? a.join(' / ') : '无工具（纯推理）');
+      }).join('\n') }));
+    p.appendChild(el('div', { class: 'sub', style: 'display:block;margin-top:6px',
+      text: '子智能体独立上下文、不落库；越权调用会被调度器拦截并回注原因；结果以 [subagent-result: 角色] 摘要回到母上下文。' }));
+    /* v1.0.1：命令审计（宿主留痕） */
     var auditBtn = el('button', { class: 'btn btn-sec', text: '命令记录', style: 'margin:10px 0 4px' });
     auditBtn.addEventListener('click', function(){
       NET.bridge.cmdAudit().then(function(lines){
@@ -5698,7 +5707,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.0.1', ua = navigator.userAgent || '';
+      var ver = 'v1.1.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8811,7 +8820,7 @@ var FS = (function(){
     '沟通：动手前用两三句说明计划（改哪些文件、为什么），有歧义先问一次再继续；不要一边猜一边大幅改动。' +
     '结束格式：改动清单（文件:行/函数）→ 验证方式与结果 → 未验证项与风险，三段写完就停，不要复述整篇代码。';;
   function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|sub|agent|suball)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -8924,6 +8933,31 @@ var FS = (function(){
               next();
             }, function(e){ parts.push('[cmd] 执行失败：' + (e && e.message || e)); next(); });
           });
+        return;
+      }
+      if (c.op === 'sub' || c.op === 'agent' || c.op === 'suball'){
+        var sRole = String(c.path || '').trim().split(/\s+/)[0];
+        if (!sRole){ parts.push('[agent] 缺少角色名'); next(); return; }
+        if (c.op === 'suball'){
+          var lines2 = (String(c.path || '').replace(sRole, '') + '\n' + (c.body || '')).split(/\r?\n/), items2 = [];
+          for (var li = 0; li < lines2.length; li++){
+            var ln2 = lines2[li].trim(); if (!ln2) continue;
+            var pm = ln2.match(/^([a-z][a-z0-9-]{1,24})\s*[|:：]\s*(.+)$/) || ln2.match(/^([a-z][a-z0-9-]{1,24})\s+(.+)$/);
+            if (pm) items2.push({ name: pm[1], task: pm[2] });
+          }
+          if (!items2.length){ parts.push('[agent] 没解析出任务（每行：角色 | 任务）'); next(); return; }
+          var t0p = Date.now();
+          SUB.runAll(items2, 0).then(function(rs){
+            parts.push('[agent] ' + rs.length + ' 个并行完成（' + (Date.now() - t0p) + 'ms）\n' +
+              rs.map(function(r){ return '【' + r.name + '】' + (r.ok ? '' : '（失败）') + '\n' + String(r.text).slice(0, 3000); }).join('\n\n'));
+          }, function(e){ parts.push('[agent] 失败：' + (e && e.message || e)); }).then(next);
+          return;
+        }
+        var sTask = (String(c.path || '').replace(sRole, '') + (c.body ? '\n' + c.body : '')).trim();
+        var t0r = Date.now();
+        SUB.run(sTask, sRole, 0).then(function(txt){
+          parts.push(String(txt).slice(0, 6000) + '\n（' + (Date.now() - t0r) + 'ms）');
+        }, function(e){ parts.push('[agent] ' + sRole + ' 失败：' + (e && e.message || e)); }).then(next);
         return;
       }
       NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, curWs()).then(
@@ -9081,7 +9115,8 @@ var EXT = (function(){
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
     { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
     { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
-    { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work'] },
+    { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work', 'agent'] },
+    { id: 'agent',      kind: 'tool', title: '派子智能体', brief: '按角色派活（explore/coder/review/general）', modes: ['work', 'agent'] },
     { id: 'cmd',        kind: 'tool', title: '执行命令',   brief: '工作区内跑 git/node/npm 等（需确认）', modes: ['agent'] },
     { id: 'git',        kind: 'tool', title: 'Git 操作',   brief: 'git status/diff/log/commit（需确认）', modes: ['agent'] }
   ];
@@ -9326,39 +9361,83 @@ var HANDOFF = (function(){
    与主对话的关系：母（当前会话）用 ```sub 名字 任务 派活；子在自己的消息数组里跑完，只把答案回灌成一条工具结果。
    子不能再派子（MAX_DEPTH=1），避免无限套娃与 token 爆炸。 */
 var SUB = (function(){
-  var MAX_DEPTH = 1;
+  /* v1.1.0：母子智能体隔离
+     设计要点：
+     1) 权限隔离（ACL）：角色固定白名单，调度器在解析围栏时拦截越权调用，并把拦截原因回注给子智能体；
+     2) 上下文隔离：子智能体只活在自己的 msgs 数组里，不挂 DOM、不写 IndexedDB，结束即回收；
+     3) 单向摘要：只把 [subagent-result: role] 摘要回填母上下文，中间探索细节不外泄；
+     4) 层级上限 2：母(0) → 子(1) → 孙(2)，只有带 agent 权限的角色能再派活。 */
+  var MAX_DEPTH = 2, MAX_TURNS_HARD = 6, TAG = '[subagent-result: ';
+
+  /* 内置角色：ACL 写死，用户自定义 agent（EXT kind:'agent'）可另加 */
+  var ROLES = [
+    { id: 'explore', name: 'explore', kind: 'agent', builtin: true, title: '探查专家',
+      desc: '只读检索：列目录/读文件/搜索，绝不改盘',
+      tools: ['fs-read', 'fs-list', 'web', 'search', 'get', 'skill'], writes: false, maxTurns: 4,
+      body: '你是探查专家「explore」。只读：可用 ```fs-list / ```fs-read / ```web / ```search / ```get / ```skill。' +
+            '禁止一切写操作与命令；需要动手时，把「改哪里、改成什么」写进结论交给母智能体。' +
+            '结论要结构化（要点列表），不要贴大段原文，不要客套。' },
+    { id: 'coder', name: 'coder', kind: 'agent', builtin: true, title: '实现专家',
+      desc: '局部实现：读 + 写（暂存）+ 补丁，禁用命令',
+      tools: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill'], writes: true, maxTurns: 5,
+      body: '你是实现专家「coder」。可以 ```fs-list / ```fs-read 看现状，用 ```write 相对路径 交完整文件，用 ```patch 交补丁。' +
+            '你写的东西不会直接进仓库：全部暂存到 _sub/coder/ 下，由母智能体审阅后再合并，所以放心写完整。' +
+            '你不能执行任何命令（ACL 禁用 cmd/git）；需要跑测试就把命令写进结论，交给母智能体。' },
+    { id: 'review', name: 'review', kind: 'agent', builtin: true, title: '审计专家',
+      desc: '纯推演审计：没有任何工具',
+      tools: [], writes: false, maxTurns: 1,
+      body: '你是审计专家「review」。没有任何工具，只能基于收到的材料推理。' +
+            '输出：问题清单（按严重度）、风险点、修改建议。信息不足就直说缺什么，不要假装读过文件。' },
+    { id: 'general', name: 'general', kind: 'agent', builtin: true, title: '通用专家',
+      desc: '默认执行角色：读写 + 补丁，并可再派子智能体',
+      tools: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill', 'agent', 'web', 'search', 'get'],
+      writes: true, maxTurns: 5,
+      body: '你是通用子智能体「general」。可读写、可用技能；需要时可以再派一个下級（```agent explore|coder|review 任务），' +
+            '但要克制——自己两三轮能解决就别派。结论落到「做了什么 / 结论是什么」。' }
+  ];
+  var SENSITIVE = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'cmd', 'git',
+                   'web', 'search', 'get', 'skill', 'write', 'agent', 'sub', 'suball'];
+
   function profiles(mode){
-    return EXT.all().filter(function(it){
-      return it.kind === 'agent' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0;
+    var out = ROLES.slice();
+    EXT.all().forEach(function(it){
+      if (it.kind === 'agent' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0) out.push(it);
     });
+    return out;
   }
   function find(name, mode){
     var l = profiles(mode || S.cfg.mode), i;
     for (i = 0; i < l.length; i++) if (l[i].name === name || l[i].id === name) return l[i];
     return null;
   }
+  function wsOf(){ var c = curSession(); return (c && c.workspace) || ''; }
+  function aclOf(p){
+    var out = [], i, t = p.tools || [];
+    for (i = 0; i < t.length; i++) if (SENSITIVE.indexOf(t[i]) >= 0) out.push(t[i]);
+    if ((p.writes || out.indexOf('fs-write') >= 0) && out.indexOf('write') < 0) out.push('write');
+    return out;
+  }
   function prompt(mode){
     var l = profiles(mode), i, out = [];
     if (!l.length) return '';
-    out.push('子智能体（你有权派活，格式 ' + '```' + 'sub 名字 任务，它会独立跑完只回最终答复，不占你的上下文）：');
-    for (i = 0; i < l.length; i++) out.push('```sub ' + l[i].name + ' —— ' + (l[i].desc || l[i].title || ''));
+    out.push('子智能体（可以派活；每个子智能体独立上下文、只回摘要，格式 ' + '```' + 'agent 角色 任务）：');
+    for (i = 0; i < l.length; i++){
+      var a = aclOf(l[i]);
+      out.push('```agent ' + l[i].name + ' —— ' + (l[i].desc || l[i].title || '') +
+        (a.length ? '（可用：' + a.join('/') + '）' : '（无工具，纯推理）'));
+    }
     return out.join('\n');
   }
-  function childTools(p){
-    var want = p.tools || [], out = [], i;
-    for (i = 0; i < want.length; i++){
-      if (want[i] === 'skill' || want[i] === 'write' || EXT.hasTool(want[i]) || EXT.isKnownBuiltin(want[i])) out.push(want[i]);
-    }
-    return out;
-  }
+  /* 扫描围栏：默认扫全部敏感操作，便于区分「允许」与「越权拦截」 */
   function scanChild(content, names){
+    var list = names && names.length ? names : SENSITIVE;
     var re = /```([a-z][a-z0-9-]{1,24})(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, m, out = [];
     while ((m = re.exec(content || ''))){
-      if (names.indexOf(m[1]) < 0) continue;
+      if (list.indexOf(m[1]) < 0) continue;
       var nl = m[2].indexOf('\n');
       var argTxt = (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim();
       var bodyTxt = nl >= 0 ? m[2].slice(nl + 1) : '';
-      if (m[1] === 'write' && !bodyTxt.trim()){
+      if ((m[1] === 'write' || m[1] === 'fs-write') && !bodyTxt.trim()){
         var rest2 = content.slice(m.index + m[0].length);
         var inner = rest2.match(/^\s*```[a-zA-Z0-9+#-]*[ \t]*\r?\n/);
         if (inner){
@@ -9373,108 +9452,8 @@ var SUB = (function(){
     }
     return out;
   }
-  /* 子侧工具：只允许纯函数型（扩展工具 / skill / web / search / get），不碰文件与下载 */
-  var CHILD_SAFE = ['web', 'search', 'get', 'skill'];
-  function runToolInChild(c){
-    if (c.op === 'skill'){
-      var n = c.arg.split(/\s+/)[0];
-      return Promise.resolve(EXT.skillText(n) || '（没有这个技能：' + n + '）');
-    }
-    if (c.op === 'badwrite') return Promise.resolve('（写盘被拒：' + c.arg + '）');
-    if (EXT.hasTool(c.op)) return EXT.runTool(c.op, c.arg).catch(function(e){ return '工具失败：' + (e && e.message || e); });
-    var u = NET.safeUrl(c.arg);
-    if (!u) return Promise.resolve('（参数不是合法 URL）');
-    if (c.op === 'web') return NET.fetchPageText(u, 4000).then(function(t){ return String(t || '').slice(0, 4000); });
-    if (c.op === 'search') return NET.searchWeb(c.arg, 5).then(function(r){
-      return (r || []).map(function(x){ return '- ' + x.title + ' ' + x.url + '\n  ' + (x.snippet || ''); }).join('\n');
-    });
-    return Promise.resolve('（子智能体不支持 ' + c.op + '）');
-  }
-  function run(task, name, depth){
-    depth = depth || 0;
-    return new Promise(function(resolve, reject){
-      if (depth >= MAX_DEPTH) return reject(new Error('子智能体不能再派子智能体'));
-      var p = find(name);
-      if (!p) return reject(new Error('没有这个子智能体：' + name + '（已有：' + (profiles(S.cfg.mode).map(function(x){ return x.name; }).join(', ') || '无') + '）'));
-      var t = String(task || '').trim();
-      if (!t) return reject(new Error('任务为空'));
-      var canWrite = !!(p.writes || (p.tools || []).indexOf('write') >= 0);
-      var names = childTools(p).filter(function(n){ return n === 'skill' || EXT.hasTool(n) || CHILD_SAFE.indexOf(n) >= 0; });
-      if (canWrite) names.push('write');
-      var sys = p.body || p.prompt || ('你是子智能体「' + name + '」。独立完成任务，只回结果，不要客套话，不要复述任务。');
-      if (names.length){
-        sys += '\n需要时可用围栏（首行是参数）：' + names.map(function(n){ return '```' + n; }).join('、');
-        if (names.indexOf('skill') >= 0) sys += '；```skill 名字 取技能全文。';
-      }
-      if (canWrite){
-        sys += '\n写文件：用 ' + '```' + 'write 相对路径（体为完整文件内容）。你写的东西不会直接进用户仓库，' +
-               '会暂存到 _sub/' + name + '/ 下，由母智能体审阅后再合并——所以放心写，写完整的文件。';
-      }
-      var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
-      var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, 6));
-      var staged = [], stagedBytes = 0, stagedNames = [];
-      function stageWrites(calls){
-        var keep = [];
-        for (var wi = 0; wi < calls.length; wi++){
-          var wc = calls[wi];
-          if (wc.op !== 'write'){ keep.push(wc); continue; }
-          var rel = String(wc.arg || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-          if (!rel || rel.indexOf('..') >= 0){ keep.push({ op: 'badwrite', arg: '非法路径：' + wc.arg }); continue; }
-          var bodyTxt = String(wc.body || '');
-          var fm = bodyTxt.match(/^[ \t]*```[a-zA-Z0-9+#-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/);
-          if (fm) bodyTxt = fm[1];
-          if (staged.length >= 6 || stagedBytes + bodyTxt.length > 300000){
-            keep.push({ op: 'badwrite', arg: '超出暂存上限（6 个文件 / 300KB）：' + rel }); continue;
-          }
-          staged.push({ rel: rel, text: bodyTxt }); stagedBytes += bodyTxt.length; stagedNames.push(rel);
-        }
-        return keep;
-      }
-      function flushStaged(){
-        if (!staged.length) return Promise.resolve('');
-        return stageFiles(name, staged);
-      }
-      (function next(){
-        turns++;
-        NET.chatOnce(msgs, { maxTokens: p.maxTokens || 1200, timeout: p.timeout || 120000, temperature: 0.2 })
-          .then(function(r){
-            var content = String((r && r.content) || '').trim();
-            if (!content) return reject(new Error('子智能体无响应（模型返回空）'));
-            msgs.push({ role: 'assistant', content: content });
-            var calls = scanChild(content, names);
-            calls = canWrite ? stageWrites(calls) : calls;
-            if (!calls.length || turns >= max){
-              return flushStaged().then(function(note){ resolve(content + (note || '')); }, function(){ resolve(content); });
-            }
-            Promise.all(calls.slice(0, 4).map(runToolInChild)).then(function(outs){
-              msgs.push({ role: 'user', content: '[工具结果]\n' + outs.join('\n---\n') + '\n（继续；任务完成就直接给结论）' });
-              next();
-            }, function(e){ reject(e); });
-          }, function(e){ reject(e); });
-      })();
-    });
-  }
-  /* 并行派活：最多同时 3 个，单个失败不影响其他 */
-  function runAll(items, depth){
-    return new Promise(function(resolve){
-      if (!items.length) return resolve([]);
-      var results = new Array(items.length), started = 0, done = 0;
-      function worker(){
-        if (started >= items.length) return;
-        var idx = started++, it = items[idx], t0 = Date.now();
-        run(it.task, it.name, depth || 0).then(function(txt){
-          results[idx] = { name: it.name, ok: true, text: String(txt), ms: Date.now() - t0 };
-        }, function(e){
-          results[idx] = { name: it.name, ok: false, text: String((e && e.message) || e), ms: Date.now() - t0 };
-        }).then(function(){
-          done++;
-          if (done === items.length) resolve(results); else worker();
-        });
-      }
-      for (var k = 0; k < Math.min(3, items.length); k++) worker();
-    });
-  }
-  /* 暂存落盘：写到 _sub/<子名>/<相对路径>，绝不覆盖用户文件；母智能体审阅后再合并 */
+
+  /* 暂存落盘：_sub/<子名>/<相对路径>，绝不覆盖用户文件 */
   function stageFiles(name, list, wsOverride){
     var cs = curSession();
     var ws = wsOverride || (cs && cs.workspace) || '';
@@ -9494,7 +9473,147 @@ var SUB = (function(){
         '\n母智能体可用 fs-read 审阅，确认后用 fs-write / fs-edit 合并到真实路径。';
     });
   }
-  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find, stageFiles: stageFiles, scanChild: scanChild };
+
+  function run(task, name, depth){
+    depth = depth || 0;
+    return new Promise(function(resolve, reject){
+      if (depth >= MAX_DEPTH) return reject(new Error('子智能体层级到上限（' + MAX_DEPTH + ' 层）'));
+      var p = find(name);
+      if (!p) return reject(new Error('没有这个子智能体：' + name + '（已有：' +
+        profiles(S.cfg.mode).map(function(x){ return x.name; }).join(', ') + '）'));
+      var t = String(task || '').trim();
+      if (!t) return reject(new Error('任务为空'));
+      var acl = aclOf(p), canWrite = acl.indexOf('write') >= 0, canSpawn = acl.indexOf('agent') >= 0;
+      var ws = wsOf();
+
+      var sys = p.body || p.prompt || ('你是子智能体「' + p.name + '」。独立完成任务，只回结论。');
+      if (acl.length){
+        sys += '\n可用围栏（首行参数，体为内容）：' + acl.map(function(n){ return '```' + n; }).join('、') + '。';
+      } else {
+        sys += '\n你没有工具，只能推理。';
+      }
+      if (canWrite){
+        sys += '\n写文件用 ```write 相对路径（体为完整文件内容）；会暂存到 _sub/' + p.name + '/，不直接改仓库。';
+      }
+      if (!canSpawn) sys += '\n不要再派子智能体（无权限）。';
+      if (!ws) sys += '\n（当前会话没有绑定工作区，fs-list/fs-read 会失败。）';
+
+      var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
+      var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, MAX_TURNS_HARD));
+      var staged = [], stagedBytes = 0, intercepts = 0;
+
+      function stageOne(c){
+        var rel = String(c.arg || '').trim().split(/\s+/)[0].replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!rel || rel.indexOf('..') >= 0) return '（非法路径：' + c.arg + '）';
+        var bodyTxt = String(c.body || '');
+        var fm = bodyTxt.match(/^[ \t]*```[a-zA-Z0-9+#-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/);
+        if (fm) bodyTxt = fm[1];
+        if (staged.length >= 6 || stagedBytes + bodyTxt.length > 300000)
+          return '（超出暂存上限 6 个文件/300KB：' + rel + '）';
+        staged.push({ rel: rel, text: bodyTxt }); stagedBytes += bodyTxt.length;
+        return '已暂存 _sub/' + p.name + '/' + rel + '（' + bodyTxt.length + ' 字符，待母智能体审阅）';
+      }
+
+      function exec(c){
+        var op = c.op;
+        if (acl.indexOf(op) < 0 && !(op === 'fs-write' && canWrite)){
+          intercepts++;
+          return Promise.resolve('[拦截] 角色「' + p.name + '」没有 ' + op + ' 权限（允许：' +
+            (acl.join('/') || '无') + '）—— 换个做法，或把需要做的事写进结论交给母智能体。');
+        }
+        if (op === 'write' || op === 'fs-write') return Promise.resolve(stageOne(c));
+        if (op === 'fs-edit') return Promise.resolve('（子智能体不做局部编辑：请用 ```write 交完整文件）');
+        if (op === 'patch'){
+          var stamp = 'patch-' + (staged.length + 1) + '.patch';
+          var body = String(c.body || c.arg || '');
+          if (staged.length >= 6 || stagedBytes + body.length > 300000) return Promise.resolve('（超出暂存上限）');
+          staged.push({ rel: 'patches/' + stamp, text: body }); stagedBytes += body.length;
+          return Promise.resolve('补丁已暂存 _sub/' + p.name + '/patches/' + stamp + '（待母智能体审阅）');
+        }
+        if (op === 'cmd' || op === 'git') return Promise.resolve('[拦截] 子智能体不能执行命令（ACL 禁用）。把命令写进结论，交给母智能体执行。');
+        if (op === 'agent' || op === 'sub'){
+          if (!canSpawn) return Promise.resolve('[拦截] 角色「' + p.name + '」不能再派子智能体。');
+          var role = String(c.arg || '').trim().split(/\s+/)[0];
+          var subTask = (String(c.arg || '').replace(role, '') + (c.body ? '\n' + c.body : '')).trim();
+          if (!role) return Promise.resolve('（缺少角色名）');
+          return run(subTask, role, depth + 1).then(function(txt){ return String(txt).slice(0, 6000); },
+            function(e){ return '（下级失败：' + (e && e.message || e) + '）'; });
+        }
+        if (op === 'skill'){
+          var sn = String(c.arg || '').trim().split(/\s+/)[0];
+          return Promise.resolve(EXT.skillText(sn) || '（没有这个技能：' + sn + '）');
+        }
+        if (op === 'fs-list'){
+          if (!ws) return Promise.resolve('（未绑定工作区）');
+          return NET.fs('list', c.arg || '', null, ws).then(function(r){
+            var es = (r && r.entries) || [];
+            return '目录 ' + (c.arg || '.') + '（' + es.length + ' 项）\n' +
+              es.slice(0, 200).map(function(e){ return (e.d ? '[目录] ' : '[文件] ') + e.n + (e.d ? '' : ' ' + sizeFmt(e.s || 0)); }).join('\n');
+          }, function(e){ return '列目录失败：' + (e && e.message || e); });
+        }
+        if (op === 'fs-read'){
+          if (!ws) return Promise.resolve('（未绑定工作区）');
+          return NET.fs('read', c.arg, null, ws).then(function(r){
+            var txt = String((r && r.text) || '');
+            if (txt.length > 4000) txt = txt.slice(0, 4000) + '\n…（截断）';
+            return '文件 ' + c.arg + '（' + ((r && r.lines) || 0) + ' 行）\n```\n' + txt + '\n```';
+          }, function(e){ return '读文件失败：' + (e && e.message || e); });
+        }
+        if (EXT.hasTool(op)) return EXT.runTool(op, String(c.arg || '')).catch(function(e){ return '工具失败：' + (e && e.message || e); });
+        var u = NET.safeUrl(c.arg);
+        if (!u) return Promise.resolve('（参数不是合法 URL）');
+        if (op === 'web') return NET.fetchPageText(u, 4000).then(function(x){ return String(x || '').slice(0, 4000); });
+        if (op === 'search') return NET.searchWeb(c.arg, 5).then(function(r){
+          return (r || []).map(function(x){ return '- ' + x.title + ' ' + x.url + '\n  ' + (x.snippet || ''); }).join('\n');
+        });
+        return Promise.resolve('（不支持的操作：' + op + '）');
+      }
+
+      (function loop(){
+        turns++;
+        NET.chatOnce(msgs, { maxTokens: p.maxTokens || 1200, timeout: p.timeout || 120000, temperature: 0.2 })
+          .then(function(r){
+            var content = String((r && r.content) || '').trim();
+            if (!content) return reject(new Error('子智能体无响应（模型返回空）'));
+            msgs.push({ role: 'assistant', content: content });
+            var calls = scanChild(content, acl.concat(['write', 'agent', 'sub', 'cmd', 'git', 'patch']).filter(function(v, i, a){ return a.indexOf(v) === i; }));
+            if (!calls.length || turns >= max){
+              return stageFiles(p.name, staged).then(function(note){
+                resolve(TAG + p.name + ']\n' + content + (note || ''));
+              }, function(){ resolve(TAG + p.name + ']\n' + content); });
+            }
+            Promise.all(calls.slice(0, 4).map(exec)).then(function(outs){
+              msgs.push({ role: 'user', content: '[工具结果]\n' + outs.join('\n---\n') + '\n（继续；完成就直接给结论）' });
+              loop();
+            }, function(e){ reject(e); });
+          }, function(e){ reject(e); });
+      })();
+    });
+  }
+
+  /* 并行派活：最多 3 个并发，单个失败不影响其他 */
+  function runAll(items, depth){
+    return new Promise(function(resolve){
+      if (!items.length) return resolve([]);
+      var results = new Array(items.length), started = 0, done = 0;
+      function worker(){
+        if (started >= items.length) return;
+        var idx = started++, it = items[idx], t0 = Date.now();
+        run(it.task, it.name, depth || 0).then(function(txt){
+          results[idx] = { name: it.name, ok: true, text: String(txt), ms: Date.now() - t0 };
+        }, function(e){
+          results[idx] = { name: it.name, ok: false, text: String((e && e.message) || e), ms: Date.now() - t0 };
+        }).then(function(){
+          done++;
+          if (done === items.length) resolve(results); else worker();
+        });
+      }
+      for (var k = 0; k < Math.min(3, items.length); k++) worker();
+    });
+  }
+
+  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find,
+           stageFiles: stageFiles, scanChild: scanChild, aclOf: aclOf, ROLES: ROLES, MAX_DEPTH: MAX_DEPTH };
 })();
 
 var WORK = (function(){
@@ -9503,7 +9622,7 @@ var WORK = (function(){
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|get|skill|suball|sub|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|skill|suball|sub|agent|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -9726,7 +9845,7 @@ var WORK = (function(){
         }).then(next);
         return;
       }
-      if (c.op === 'sub'){
+      if (c.op === 'sub' || c.op === 'agent'){
         var subName = String(c.arg || '').trim().split(/\s+/)[0];
         var subTask = (String(c.arg || '').replace(subName, '') + (c.body ? '\n' + c.body : '')).trim();
         var t0s = Date.now();
@@ -9953,7 +10072,9 @@ try {
     window.SC_WORK = WORK;
     window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE,
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
-      bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; } };
+      bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
+      cfg: function(){ return S.cfg; },
+      setCfg: function(o){ setCfg(o); } };
   }
 } catch (e) {}
 loadCfg();
