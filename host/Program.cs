@@ -1762,6 +1762,7 @@ namespace SoloChatHost
                     case "read": FsRead(req, id); break;
                     case "list": FsList(req, id); break;
                     case "write": FsWrite(req, id); break;
+                    case "delete": FsDelete(req, id); break; /* v1.13：面板里删文件（只限工作区内、非空目录不删） */
                     default:
                         PostFs(id, "fs.error", null, "未知文件操作: " + op);
                         break;
@@ -1816,6 +1817,28 @@ namespace SoloChatHost
                 entries.Add(new { n = e.Name, d = isDir, s = isDir ? 0L : ((FileInfo)e).Length });
             }
             PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, entries = entries, truncated = truncated }), null);
+        }
+
+        void FsDelete(JsonElement req, string id)
+        {
+            string rel = req.GetProperty("path").GetString() ?? "";
+            if (rel.Trim().Length == 0) { PostFs(id, "fs.error", null, "拒绝删除工作区根目录"); return; }
+            string p;
+            try { p = GuardPath(ReqRoot(req), rel); }
+            catch (Exception ex) { PostFs(id, "fs.error", null, ex.Message); return; }
+            try
+            {
+                if (File.Exists(p)) File.Delete(p);
+                else if (Directory.Exists(p))
+                {
+                    if (Directory.GetFileSystemEntries(p).Length > 0) { PostFs(id, "fs.error", null, "目录非空，拒绝删除: " + rel); return; }
+                    Directory.Delete(p);
+                }
+                else { PostFs(id, "fs.error", null, "不存在: " + rel); return; }
+                Log("fs delete ok: " + rel);
+                PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, deleted = true }), null);
+            }
+            catch (Exception ex) { PostFs(id, "fs.error", null, ex.Message); }
         }
 
         void FsWrite(JsonElement req, string id)

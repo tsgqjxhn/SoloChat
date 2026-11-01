@@ -32,6 +32,7 @@
 - **文档解析与 OCR** — docx / xlsx / pptx / rtf 及带文本层的 PDF 零依赖本地提取；扫描版 PDF 可选 **Mistral OCR** 或 **Azure 文档智能** 识别（自动回退、Key 进 DPAPI 保险库、附「测试识别」）
 - **代理** — 「通用设置」页内代理区块，默认 `http://127.0.0.1:7897`（Clash/mihomo 混合端口），宿主桥全通道生效，附「测试连通性」
 - **其他** — 深/浅双主题、Alt+Space 全局呼出（宿主）、侧栏分组置顶、快捷键自定义、导入导出、`mock` 离线演示
+- **v1.13.0 新增** — 修「选了 Work 发出去却变成 Chat」：autoRoute 默认改为关，且手动选过模式后不再被路由改掉；顶栏改成「切换按钮 + 当前模式名」；右侧面板默认不弹、只在 Work/Agent 出现，Agent 下面板列真实文件夹并可查看/删除（宿主新增 delete 操作）；长代码块默认折叠成一行摘要；完整 HTML 回复无条件存进工作区；输入框里的模式胶囊去掉边框
 - **v1.12.0 新增** — 模式切换挪进输入框内部左侧（Agent 的 Auto/Read/Write、Work 的子模式共用一枚胶囊，点开是带说明的列表）；删掉图标行右侧那个子模式胶囊；Work 的「虚拟工作区」并进「画布」——所有模式本来就共用同一个内存 VFS，单开一个子模式没有意义
 - **v1.11.0 新增** — 修复代码块/消息的「复制」按钮点了没反应：WebView2 里 navigator.clipboard.writeText 会永远 pending（卡在权限请求，既不 resolve 也不 reject），现在复制改走宿主剪贴板（postMessage → Clipboard.SetText），剪贴板 API 只作兜底并加 600ms 超时
 - **v1.10.0 新增** — 修复无法复制：宿主原来关掉了 WebView2 的浏览器快捷键，导致 Ctrl+C/V/X/A 全部失效，现已放开（并在页面里挡掉 Ctrl+P/S/U）；Agent 的只读改到输入栏最左侧的 Auto/Read/Write 三态按钮，Auto=智能体协作、Read=只读硬锁、Write=直接落地

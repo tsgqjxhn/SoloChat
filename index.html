@@ -253,13 +253,24 @@ body.sb-collapsed #sidebar{display:none}
    放进 .code-bar 后会叠在 .code-dl 上，表现为「复制按钮重叠出现」 */
 .md pre .code-bar .code-copy,.md pre .code-bar .code-run{position:static;top:auto;right:auto;padding:0}
 
+#tb-mode{display:flex;align-items:center;gap:2px;flex:none}
+#tb-mode-name{font-size:13px;font-weight:600;color:var(--ink);padding-right:4px;min-width:44px}
+.code-fold{margin:10px 0}
+.code-fold>summary{cursor:pointer;font-size:12px;color:var(--muted);padding:5px 10px;border-radius:8px;
+  background:var(--soft);list-style:none;user-select:none}
+.code-fold>summary:hover{color:var(--ink)}
+.code-fold>summary::-webkit-details-marker{display:none}
+.code-fold[open]>summary{margin-bottom:2px;border-radius:8px 8px 0 0}
+#rn-ws-view{border-top:1px solid var(--hairline-soft);max-height:45%;overflow:auto}
+.ag-pre{margin:0;padding:8px 10px;font-family:var(--font-mono);font-size:12px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;color:var(--body)}
 /* v1.12：输入框内的模式胶囊（Agent 的 Auto/Read/Write、Work 的子模式） */
-.cmode{display:none;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:8px;flex:none;
-  align-self:flex-start;margin-top:1px;background:var(--canvas);border:1px solid var(--hairline);
-  font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
-.cmode:hover{color:var(--ink);border-color:var(--ring-line)}
-.cmode.read{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 45%,var(--hairline))}
-.cmode.write{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 45%,var(--hairline))}
+.cmode{display:none;align-items:center;gap:4px;height:26px;padding:0 6px;border-radius:8px;flex:none;
+  align-self:flex-start;margin-top:1px;background:none;border:0;
+  font-size:12px;font-weight:600;color:var(--faint);white-space:nowrap}
+.cmode:hover{background:var(--lift);color:var(--ink)}
+.cmode.read{color:var(--warning)}
+.cmode.write{color:var(--primary)}
 
 /* 运行面板（右侧抽屉，v1.9）：沙箱 iframe 预览 + 控制台 / C 解释输出 */
 /* v0.2.5：右侧面板改成悬浮抽屉 —— 脱离 flex 流，覆盖在主栏之上，不再挤压正文与输入框的宽度/高度 */
@@ -283,9 +294,9 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .dl-u{background:var(--soft);border-radius:10px;padding:8px 10px;white-space:pre-wrap}
 .dl-a .md{font-size:14px}
 .dl-empty{color:var(--faint);font-size:12px;text-align:center;padding:24px 0}
-#sub-pop{position:fixed;z-index:80;display:block;padding:6px;width:214px;background:var(--canvas);
+#sub-pop,#mode-pop{position:fixed;z-index:80;display:block;padding:6px;width:214px;background:var(--canvas);
   border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop)}
-#sub-pop[hidden]{display:none}
+#sub-pop[hidden],#mode-pop[hidden]{display:none}
 .sp-list{display:flex;flex-direction:column;min-width:188px}
 .sp-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
 .sp-item:hover,.sp-item.hot{background:var(--soft);color:var(--ink)}
@@ -826,10 +837,9 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <button class="icon-btn" id="btn-sb" title="会话侧边栏（Ctrl+B）"><svg class="ic"><use href="#i-sb"/></svg></button>
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
-        <div class="seg seg-sm" id="seg-mode" title="模式：Chat 常规对话 / Work 沙箱短任务（不写磁盘）/ Agent 真实文件工具">
-          <button type="button" data-mode="chat"><svg class="ic fill seg-ic"><use href="#i-logo"/></svg>Chat</button>
-          <button type="button" data-mode="work"><svg class="ic seg-ic"><use href="#i-work"/></svg>Work</button>
-          <button type="button" data-mode="agent"><svg class="ic fill seg-ic"><use href="#i-agent"/></svg>Agent</button>
+        <div id="tb-mode">
+          <button class="icon-btn" id="btn-mode" title="切换模式（Chat / Work / Agent）"><svg class="ic"><use href="#i-swap"/></svg></button>
+          <span id="tb-mode-name">Chat</span>
         </div>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
@@ -853,6 +863,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 
     <div id="composer">
       <div id="sub-pop" hidden></div>
+      <div id="mode-pop" hidden></div>
       <div class="inner">
         <div id="chips"></div>
         <div class="crow">
@@ -893,6 +904,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     <div class="rn-body">
       <div class="rn-pane" id="pane-ws">
         <div id="rn-ws-list"></div>
+        <div id="rn-ws-view" hidden></div>
       </div>
       <div class="rn-pane rn-view" id="pane-view">
         <div class="rn-pvbar" id="rn-pvbar" hidden>
@@ -923,6 +935,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <symbol id="i-logo" viewBox="0 0 1024 1024"><path d="M64 85.312h896V768H293.376L64 968.704V85.312z m85.312 85.376v609.92l112-97.92h613.376v-512H149.312z"/></symbol>
 <symbol id="i-work" viewBox="0 0 24 24"><path d="M8 12h8"/><path d="M4 8l4 4-4 4"/><path d="M20 8l-4 4 4 4"/><path d="M8 4l4 4.5 4-4.5"/><path d="M8 20.5l4-5 4 5"/><g fill="currentColor" stroke="none"><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="4" cy="8" r="1.6"/><circle cx="4" cy="16" r="1.6"/><circle cx="20" cy="8" r="1.6"/><circle cx="20" cy="16" r="1.6"/><circle cx="8" cy="4" r="1.6"/><circle cx="16" cy="4" r="1.6"/><circle cx="8" cy="20.5" r="1.6"/><circle cx="16" cy="20.5" r="1.6"/></g></symbol>
 <symbol id="i-agent" viewBox="0 0 1024 1024"><path fill="currentColor" stroke="none" d="M0 128v768h1024V128H0z m242.816 577.536L192 654.72l154.304-154.368L192 346.048l50.816-50.816L448 500.352l-205.184 205.184z m584.32 13.248H512V640h315.072v78.72z"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 9h13l-3.5-3.5"/><path d="M20 15H7l3.5 3.5"/></symbol>
 <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
@@ -1020,7 +1033,7 @@ var DEF_CFG = {
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
   persona: '',                  // v0.6.0：当前选中的配方 id
-  autoRoute: true,
+  autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -1598,7 +1611,7 @@ var NET = (function(){
   /* 构造请求体：上下文裁剪（§4.3） */
   function buildBody(session, msgs, attsData, attsText, searchBlock){
   /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜，猜中才切（顶栏会跟着变，不会偷偷改） */
-  if (S.cfg.autoRoute && msgs && msgs.length){
+  if (S.cfg.autoRoute && !S.cfg.modePin && msgs && msgs.length){
     var lastU = '';
     for (var li = msgs.length - 1; li >= 0; li--){ if (msgs[li].role === 'user'){ lastU = String(msgs[li].content || ''); break; } }
     if (lastU){
@@ -3060,7 +3073,8 @@ var MD = (function(){
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
         if (_ln) _bc = '<span class="cl">' + c.code.split('\n').map(function(l){ return l || ' '; }).join('</span>\n<span class="cl">') + '</span>';
-        html += '<pre' + (_ln ? ' class="ln"' : '') + '>' +
+        var _fold = (c.code.length > 1200);
+      var _pre = '<pre' + (_ln ? ' class="ln"' : '') + '>' +
           '<div class="code-bar">' +
           (_rk ? '<button class="code-run" type="button" title="运行（' + (_rk === 'c' ? 'C 解释执行' : '沙箱预览') + '）" data-run="' + _rk + '"><svg class="ic"><use href="#i-play"/></svg></button>' : '') +
           '<button class="code-copy" type="button" title="复制代码"><svg class="ic"><use href="#i-copy"/></svg></button>' +
@@ -3069,7 +3083,12 @@ var MD = (function(){
           '</div>' +
           (c.lang ? '<span class="lang">' + c.lang + '</span>' : '') +
           '<code>' + _bc + '</code></pre>';
-        i++; continue;
+        html += _fold
+        ? '<details class="code-fold"><summary>' + esc(c.lang || 'code') + ' · ' +
+          (c.code.length >= 1024 ? (c.code.length / 1024).toFixed(1) + ' KB' : c.code.length + ' 字符') +
+          ' · 点开看代码</summary>' + _pre + '</details>'
+        : _pre;
+      i++; continue;
       }
       var mt = /^\uE002(\d+)\uE002$/.exec(line.trim()); /* 块级公式独占一行 */
       if (mt){ html += '<div class="math-blk">' + tex(maths[+mt[1]]) + '</div>'; i++; continue; }
@@ -3960,19 +3979,85 @@ var RUNNER = (function(){
   }
   function close(){ document.body.classList.remove('rn-open'); }
 
+  var agentPath = '';   // v1.13：Agent 文件夹浏览的当前子路径
+
   /* ---- v2.1：运行面板内的「工作区」区（Work 沙箱文件：列表 / 单文件下载 / 打包 zip）---- */
   /* v0.2.5：切会话/重开应用后恢复工作区 —— 该会话有产物就打开面板并切到「工作区」 */
   function syncForSession(sid){
     if (!sid) return;
     DB.workfsBySid(sid).then(function(fs){
       if (S.sid !== sid) return;
-      if (fs && fs.length){ open(); setTab('ws'); }
-      else renderWs();
+      renderWs();   // v1.13：不再自动弹面板，产物列表留给用户自己开
     }, function(){});
   }
+  /* v1.13：Agent 的工作区 = 用户选中的真实文件夹（列目录 / 查看 / 删除） */
+  function agentRoot(){ var cs = (typeof curSession === 'function') ? curSession() : null; return (cs && cs.workspace) || ''; }
+  function agentRel(p){ return agentPath ? (agentPath + '/' + p) : p; }
+  function renderAgentWs(){
+    var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
+    if (!list) return;
+    var root = agentRoot();
+    list.textContent = '';
+    if (cnt) cnt.textContent = '';
+    if (!root){
+      list.appendChild(el('div', { class: 'hint', text: '还没选文件夹。回主页点「选择文件夹」。' }));
+      return;
+    }
+    var head = el('div', { class: 'vfs-row', style: 'opacity:.85' }, [
+      el('span', { class: 't', text: '/' + (agentPath || ''), title: root })
+    ]);
+    if (agentPath) head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '↑ 上级', 'data-ag-up': '1' }));
+    head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '刷新', 'data-ag-refresh': '1' }));
+    list.appendChild(head);
+    fsCall('list', agentPath || '', '', root).then(function(raw){
+      var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
+      var entries = (r && r.entries) || [];
+      if (cnt) cnt.textContent = entries.length ? ('（' + entries.length + ' 项）') : '';
+      if (!entries.length) list.appendChild(el('div', { class: 'hint', text: '这个文件夹是空的。' }));
+      entries.forEach(function(e){
+        var kids = [
+          el('span', { class: 't', text: e.n + (e.d ? '/' : ''), title: e.n }),
+          el('span', { class: 'hint', text: e.d ? '' : sizeFmt(e.s || 0) })
+        ];
+        if (e.d) kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '进入', 'data-ag-dir': e.n }));
+        else {
+          kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '查看', 'data-ag-view': e.n }));
+          kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '删除', 'data-ag-del': e.n }));
+        }
+        list.appendChild(el('div', { class: 'vfs-row' }, kids));
+      });
+    }, function(err){
+      list.appendChild(el('div', { class: 'hint', text: '读取失败：' + (err && err.message || err) }));
+    });
+  }
+  function agentView(name){
+    var root = agentRoot(); if (!root) return;
+    var path = agentRel(name), box = $('#rn-ws-view');
+    if (!box) return;
+    fsCall('read', path, '', root).then(function(raw){
+      var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
+      var txt = String((r && r.text) || '');
+      box.hidden = false;
+      box.textContent = '';
+      box.appendChild(el('div', { class: 'vfs-row' }, [
+        el('span', { class: 't', text: path, title: path }),
+        el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '关闭', 'data-ag-close': '1' })
+      ]));
+      box.appendChild(el('pre', { class: 'ag-pre', text: txt.slice(0, 200000) }));
+    }, function(err){ UI.toast('读不了：' + (err && err.message || err), true); });
+  }
+  function agentDel(name){
+    var root = agentRoot(); if (!root) return;
+    var path = agentRel(name);
+    if (!confirm('删除 ' + path + ' ？不可撤销。')) return;
+    fsCall('delete', path, '', root).then(function(){
+      UI.toast('已删除 ' + path); renderWs();
+    }, function(err){ UI.toast('删除失败：' + (err && err.message || err), true); });
+  }
   function renderWs(){
-    bindOnce(); /* v2.5：首次进入即绑定（原来只有 ▶ 运行过才 bound，导致未运行时工作区/预览不可用） */
+    bindOnce();
     if (!bound) return;
+    if ((S.cfg.mode || 'chat') === 'agent') return renderAgentWs();   // v1.13：Agent 看真实文件夹
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
     var sid = (typeof S !== 'undefined' && S.sid) || null;
@@ -4243,15 +4328,34 @@ var RUNNER = (function(){
     $('#rn-close').addEventListener('click', close);
     var pbtn = $('#btn-panel');
     if (pbtn) pbtn.addEventListener('click', function(){
+      if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
       if (document.body.classList.contains('rn-open')) close(); else open();
     });
     document.addEventListener('keydown', function(e){
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'j' || e.key === 'J')){
         e.preventDefault();
+        if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
         if (document.body.classList.contains('rn-open')) close(); else open();
       }
     });
     /* v0.2.5：顶部分栏切换 */
+    var wsList = $('#rn-ws-list');
+    if (wsList) wsList.addEventListener('click', function(e){
+      var t = e.target.closest('[data-ag-dir],[data-ag-view],[data-ag-del],[data-ag-up],[data-ag-refresh],[data-ag-pick],[data-ag-close]');
+      if (!t) return;
+      if (t.hasAttribute('data-ag-pick')){ UI.pickWorkspace && UI.pickWorkspace(); return; }
+      if (t.hasAttribute('data-ag-close')){ var vb = $('#rn-ws-view'); if (vb) vb.hidden = true; return; }
+      if (t.hasAttribute('data-ag-up')){
+        var parts = agentPath.split('/'); parts.pop(); agentPath = parts.join('/'); renderWs(); return;
+      }
+      if (t.hasAttribute('data-ag-refresh')){ renderWs(); return; }
+      if (t.hasAttribute('data-ag-dir')){
+        agentPath = agentPath ? (agentPath + '/' + t.getAttribute('data-ag-dir')) : t.getAttribute('data-ag-dir');
+        renderWs(); return;
+      }
+      if (t.hasAttribute('data-ag-view')){ agentView(t.getAttribute('data-ag-view')); return; }
+      if (t.hasAttribute('data-ag-del')){ agentDel(t.getAttribute('data-ag-del')); return; }
+    });
     var rnTabs = $('#rn-tabs');
     if (rnTabs) rnTabs.addEventListener('click', function(e){
       var b = e.target.closest ? e.target.closest('.rn-tab') : null;
@@ -5771,7 +5875,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.12.0', ua = navigator.userAgent || '';
+      var ver = 'v1.13.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6569,9 +6673,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   }
   function updateEmpty(){
     var draft = !S.msgs.length;
-    var segEl = $('#seg-mode'), tbC = $('#tb-c');
-    if (segEl && tbC && !draft && segEl.parentNode !== tbC)
-      tbC.insertBefore(segEl, tbC.firstChild); /* 会话已开始：模式回到顶栏（可切换） */
     $empty.classList.toggle('show', draft);
     if (!draft) return;
     var cs = curSession();
@@ -6590,7 +6691,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    var modes = el('div', { class: 'e-modes' }); if (segEl) modes.appendChild(segEl);
+    var modes = el('div', { class: 'e-modes' });   // v1.13：模式条已挪到顶栏，这里留空占位
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
       ic.setAttribute('style', 'width:76px;height:76px;color:var(--primary)');
@@ -7367,6 +7468,41 @@ function sendMessage(){
   }
 
 
+  /* v1.13：顶栏模式切换（只在弹层里列，顶栏只显示当前模式） */
+  function setMode(md, pid){
+    setCfg({ mode: md, persona: pid || '', modePin: true });
+    MODE.mountUI(); renderComposerCtl(); updateEmpty();
+  }
+  function closeModePopTop(){ var p = $('#mode-pop'); if (p) p.hidden = true; }
+  function openModePop(){
+    var pop = $('#mode-pop'), btn = $('#btn-mode');
+    if (!pop || !btn) return;
+    if (!pop.hidden){ closeModePopTop(); return; }
+    var list = el('div', { class: 'sp-list' });
+    [ ['chat', 'Chat', '常规对话'],
+      ['work', 'Work', '沙箱短任务，产物进工作区'],
+      ['agent', 'Agent', '真实文件工具'] ].forEach(function(t){
+      var b = el('button', { type: 'button', class: 'sp-item' + ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona ? ' on' : '') });
+      b.appendChild(el('span', { class: 'sp-n', text: t[1] }));
+      b.appendChild(el('span', { class: 'sp-h', text: t[2] }));
+      b.addEventListener('click', function(){ closeModePopTop(); setMode(t[0]); });
+      list.appendChild(b);
+    });
+    MODE.personas().forEach(function(p){
+      var b = el('button', { type: 'button', class: 'sp-item' + (S.cfg.persona === p.id ? ' on' : '') });
+      b.appendChild(el('span', { class: 'sp-n', text: p.name || p.id }));
+      b.appendChild(el('span', { class: 'sp-h', text: '自定义 · ' + (p.base || 'work') }));
+      b.addEventListener('click', function(){ closeModePopTop(); setMode((p.base || 'work'), p.id); });
+      list.appendChild(b);
+    });
+    pop.textContent = ''; pop.appendChild(list);
+    var r = btn.getBoundingClientRect();
+    pop.style.left = Math.round(r.left) + 'px';
+    pop.style.top = Math.round(r.bottom + 6) + 'px';
+    pop.style.bottom = 'auto';
+    pop.hidden = false;
+  }
+
   /* v1.12：输入框左侧那枚胶囊 —— Work 选子模式，Agent 选 Auto/Read/Write */
   function closeModePop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
   function modeItems(){
@@ -7386,7 +7522,7 @@ function sendMessage(){
     }
     return out;
   }
-  function openModePop(){
+  function openChipPop(){
     var pop = $('#sub-pop'), btn = $('#btn-cmode');
     if (!pop || !btn) return;
     if (!pop.hidden){ closeModePop(); return; }
@@ -7424,21 +7560,21 @@ function sendMessage(){
       : 'Agent 行为：' + txt + '（Auto 协作 / Read 只读 / Write 直接落地）';
   }
   var _cmodeBtn = $('#btn-cmode');
-  if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openModePop(); });
+  if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
 
   document.addEventListener('click', function(e){
-    if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) return;
-    closeModePop();
+    if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) closeModePop();
+    if (e.target.closest && (e.target.closest('#mode-pop') || e.target.closest('#btn-mode'))) return;
+    closeModePopTop();
   });
 
   /* 输入区控件（v1.2）：模式/模型/思考 */
   function renderComposerCtl(){
-    var seg = $('#seg-mode');
-    if (seg){
-      var md = S.cfg.mode || 'chat';
-      for (var sgi = 0; sgi < seg.children.length; sgi++)
-        seg.children[sgi].classList.toggle('on', seg.children[sgi].getAttribute('data-mode') === md);
-    }
+    var mdName = $('#tb-mode-name');
+    if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : 'Chat');
+    var pb = $('#btn-panel');
+    if (pb) pb.style.display = ((S.cfg.mode || 'chat') === 'chat') ? 'none' : '';
+    if ((S.cfg.mode || 'chat') === 'chat' && document.body.classList.contains('rn-open')) document.body.classList.remove('rn-open');
     renderModeChip();
     var dblBtn = $('#btn-dual');
     if (dblBtn) dblBtn.style.display = (S.cfg.mode === 'chat') ? '' : 'none';
@@ -8377,7 +8513,7 @@ function sendMessage(){
     autosize: autosize, doExport: doExport, doImport: doImport, reloadSessions: reloadSessions,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
-    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger,
+    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger, openModePop: openModePop,
     zipVfs: zipVfs, toggleTemp: toggleTemp, DUAL: DUAL,
     /* v2.9：模型池/能力表 */
     renderPool: renderPool, mmUse: mmUse, mmToggleCfg: mmToggleCfg, mmDelete: mmDelete, mmSave: mmSave,
@@ -8665,27 +8801,9 @@ function sendMessage(){
       UI.openModal(box, false, true);
       return;
     }
-    var pb = t.closest('#seg-mode [data-persona]');
-    if (pb){
-      var pid = pb.getAttribute('data-persona');
-      var pp = MODE.persona(pid);
-      setCfg({ persona: pid, mode: (pp && pp.base) || 'work' });
-      var dms = document.querySelectorAll('#seg-mode [data-mode]');
-      for (var di = 0; di < dms.length; di++) dms[di].classList.toggle('on', dms[di].getAttribute('data-mode') === S.cfg.mode);
-      MODE.mountUI();
-      if (UI.updateEmpty) UI.updateEmpty();
-      return;
-    }
-    var mb = t.closest('#seg-mode [data-mode]');
-    if (mb){
-      var md = mb.getAttribute('data-mode');
-      setCfg({ mode: md, persona: '' });
-      MODE.mountUI();
-      UI.renderComposerCtl();
-      UI.updateEmpty(); // 草稿态切换模式时刷新中央提示
-      /* v2.7：切换模式不再弹 toast 提示；v2.9：Agent 的工作区选择按钮就在主页，不再自动弹系统选目录框 */
-      return;
-    }
+
+    var mb = t.closest('#btn-mode');
+    if (mb){ UI.openModePop(); return; }
     var wb = t.closest('#win-ctl [data-win]');
     if (wb){ if (NET.bridge.ok) NET.bridge.send({ t: 'win', act: wb.getAttribute('data-win') }); return; }
     if (!UI.modalOpen()) return;
@@ -9665,7 +9783,7 @@ var MODE = (function(){
   }
   function mountUI(){
     var seg = document.getElementById('seg-mode');
-    if (!seg) return;
+    if (!seg) return; // v1.13：模式条已换成顶栏的「切换按钮 + 当前模式名」
     var old = seg.querySelectorAll('[data-persona]');
     for (var i = 0; i < old.length; i++) old[i].remove();
     personas().forEach(function(p){
@@ -10128,6 +10246,8 @@ var WORK = (function(){
   }
   function autoVfs(msg){
     if (!msg || msg.status !== 'ok' || !msg.content) return;
+    /* v1.13：回复里带完整 HTML 文档时无条件落盘（用户很可能就是要个能跑的东西） */
+    if (/<!doctype html|<html[\s>]/i.test(msg.content)){ autoVfsSave(msg); return; }
     wantsArtifact(msg.sid, msg.ts).then(function(yes){ if (yes) autoVfsSave(msg); });
   }
   function autoVfsSave(msg){
@@ -10140,7 +10260,8 @@ var WORK = (function(){
       if (body.trim().length < 10) continue; /* 太短视为示例片段，不落盘 */
       /* v2.8：js/css 只在像完整产物时才落盘（≥200 字符），避免讲解用的小片段刷满工作区 */
       if ((lang === 'js' || lang === 'css') && body.trim().length < 200) continue;
-      jobs.push({ lang: lang, body: body });
+      var fullDoc = /^\s*(<!doctype html|<html)/i.test(body) || /<html[\s>]/i.test(body.slice(0, 400));
+      jobs.push({ lang: lang, body: body, full: fullDoc });
     }
     if (!jobs.length) return;
     var sid = msg.sid;
