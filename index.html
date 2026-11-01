@@ -46,7 +46,7 @@ document.documentElement.dataset.theme=__t;}catch(e){document.documentElement.da
   --font-sans:-apple-system,'SF Pro Text','Segoe UI','Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
   --font-mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
   --r-sm:6px; --r-md:8px; --r-lg:12px; --r-pill:9999px;
-  --side-w:300px; --sb-w:var(--side-w); --tb-h:52px; --content-w:780px;
+  --side-w:calc(var(--content-w) / 2); --sb-w:var(--side-w); --tb-h:52px; --content-w:780px;
 }
 /* v2.8 字号阶（对齐 Linear.md / Claude.md，只允许这 9 档，禁止 10.5/11.5/12.5/13.5 之类半像素值）
    11 微型元信息(角标/路径/计数) · 12 辅助说明(caption) · 13 界面控件(按钮/标签/检索)
@@ -67,8 +67,10 @@ input,textarea,select{font:inherit;color:inherit}
 /* 布局骨架 */
 #app{display:flex;height:100vh;position:relative}
 #sidebar{
-  width:var(--sb-w); flex:none; display:flex; flex-direction:column;
+  position:absolute; left:0; top:0; bottom:0; width:var(--sb-w); z-index:44;
+  display:flex; flex-direction:column;
   background:var(--canvas); border-right:1px solid var(--hairline);
+  box-shadow:14px 0 40px rgba(0,0,0,.14);
 }
 #main{flex:1; min-width:0; display:flex; flex-direction:column}
 body.sb-collapsed #sidebar{display:none}
@@ -263,6 +265,20 @@ body.sb-collapsed #sidebar{display:none}
 .sub-btn .lv{color:var(--faint);font-weight:500}
 .caret{width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;
   border-top:4px solid currentColor;opacity:.5;margin-left:2px}
+#dual-view{display:none;grid-template-columns:1fr 1fr;gap:12px;max-width:calc(var(--content-w) + 120px);margin:0 auto;padding:16px}
+body.dual-on #dual-view{display:grid}
+body.dual-on #msg-list,body.dual-on #empty{display:none}
+.dl-pane{display:flex;flex-direction:column;min-width:0;border:1px solid var(--hairline);border-radius:12px;background:var(--canvas);overflow:hidden}
+.dl-head{display:flex;align-items:center;gap:6px;padding:7px 9px;border-bottom:1px solid var(--hairline-soft);background:var(--soft)}
+.dl-head select{flex:1;min-width:0;height:27px;border-radius:8px;border:1px solid var(--hairline);background:var(--canvas);font-size:12px;padding:0 5px}
+.dl-head .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.dl-head .dot.on{background:var(--primary)}
+.dl-body{padding:10px 12px;overflow:auto;min-height:200px;max-height:calc(100vh - 270px)}
+.dl-msg{margin-bottom:12px;font-size:14px;line-height:1.65}
+.dl-msg .who{font-size:11px;color:var(--faint);margin-bottom:3px}
+.dl-u{background:var(--soft);border-radius:10px;padding:8px 10px;white-space:pre-wrap}
+.dl-a .md{font-size:14px}
+.dl-empty{color:var(--faint);font-size:12px;text-align:center;padding:24px 0}
 #sub-pop{position:fixed;z-index:80;display:flex;padding:6px;gap:6px;background:var(--canvas);
   border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop)}
 #sub-pop[hidden]{display:none}
@@ -279,9 +295,6 @@ body.sb-collapsed #sidebar{display:none}
 .sp-lv button:hover{background:var(--soft);color:var(--ink)}
 .sp-lv button.on{background:var(--lift);color:var(--ink);font-weight:600}
 body.rn-open #runner{display:flex}
-/* 抽屉打开时正文列让出同宽右侧空间：既不盖住正文，也不至于把抽屉压得很窄 */
-body.rn-open #main{padding-right:var(--side-w);transition:padding-right .18s ease}
-@media (max-width:1100px){ body.rn-open #main{padding-right:0} }
 /* 顶部分栏：工作区 / 运行 / 终端 */
 .rn-tabs{display:flex;gap:2px;flex:none}
 .rn-tab{position:relative;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--faint);
@@ -822,7 +835,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         </div>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
-        <button class="icon-btn" id="btn-handoff" title="交接到其他模式（带上下文，生成新会话，原会话保留）"><span style="font-size:15px;line-height:1">⇄</span></button>
+        <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
+      <button class="icon-btn" id="btn-handoff" title="交接到其他模式（带上下文，生成新会话，原会话保留）"><span style="font-size:15px;line-height:1">⇄</span></button>
         <button class="icon-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
       </div>
       <div id="win-ctl">
@@ -833,6 +847,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     </header>
 
     <div id="msg-scroll">
+      <div id="dual-view"></div>
       <div id="msg-list"></div>
       <div id="empty"></div>
       <button id="btn-bottom"><svg class="ic"><use href="#i-down"/></svg>回到底部</button>
@@ -916,6 +931,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
 <symbol id="i-gear" viewBox="0 0 1084 1024"><path style="fill:currentColor;stroke:none" d="M1072.147851 406.226367c-6.331285-33.456782-26.762037-55.073399-52.047135-55.073399-0.323417 0-0.651455 0.003081-0.830105 0.009241l-4.655674 0c-73.124722 0-132.618162-59.491899-132.618162-132.618162 0-23.731152 11.447443-50.336101 11.546009-50.565574 13.104573-29.498767 3.023185-65.672257-23.427755-84.127081l-1.601687-1.127342-134.400039-74.661726-1.700252-0.745401c-8.753836-3.805547-18.334698-5.735272-28.479231-5.735272-20.789593 0-41.235746 8.344174-54.683758 22.306575-14.741683 15.216028-65.622973 58.649474-104.721083 58.649474-39.450789 0-90.633935-44.286652-105.438762-59.784516-13.518857-14.247316-34.128258-22.753199-55.127302-22.753199-9.945862 0-19.354234 1.861961-27.958682 5.531982l-1.746455 0.74078-139.141957 76.431283-1.643269 1.139662c-26.537186 18.437884-36.675557 54.579032-23.584845 84.062398 0.115506 0.264895 11.579891 26.725075 11.579891 50.634877 0 73.126262-59.491899 132.618162-132.618162 132.618162l-4.581749 0c-0.318797-0.00616-0.636055-0.01078-0.951772-0.01078-25.260456 0-45.672728 21.618157-52.002472 55.0811-0.462025 2.453354-11.313456 60.622322-11.313456 106.117939 0 45.494078 10.85143 103.659965 11.314996 106.119479 6.334365 33.458322 26.758957 55.076479 52.036353 55.076479 0.320337 0 0.651455-0.00616 0.842426-0.012321l4.655674 0c73.126262 0 132.618162 59.491899 132.618162 132.616622 0 23.760413-11.444363 50.333021-11.546009 50.565574-13.093793 29.474125-3.041666 65.646075 23.395414 84.151722l1.569346 1.093459 131.838879 73.726895 1.675611 0.7377c8.750757 3.84251 18.305437 5.790715 28.397607 5.790715 21.082208 0 41.676209-8.706094 55.0888-23.290689 18.724339-20.347588 69.527086-62.362616 107.04815-62.362616 40.625872 0 92.72537 47.100385 107.759669 63.583903 13.441852 14.831008 34.176001 23.689571 55.470741 23.695731l0.00616 0c9.895039 0 19.27877-1.883523 27.893999-5.598205l1.711034-0.73924 136.659342-75.531873 1.617088-1.128882c26.492523-18.456365 36.601633-54.600594 23.538642-84.016195-0.115506-0.267974-11.595291-27.082374-11.595291-50.67646 0-73.124722 59.49344-132.616622 132.618162-132.616622l4.517066-0.00154c0.300316 0.00616 0.599092 0.009241 0.899409 0.009241 25.331299-0.00154 45.785153-21.619697 52.107197-55.054918 0.112426-0.589852 11.325776-59.507301 11.325776-106.14104C1083.464388 466.640776 1072.609877 408.67356 1072.147851 406.226367zM377.486862 945.656142l-115.32764-64.487932c5.082277-13.052211 15.437801-43.51815 15.437801-75.017486 0-109.382917-84.176364-199.816642-192.587488-208.134635-2.647404-15.427021-8.873963-54.967133-8.873963-85.667166 0-30.65691 6.223479-70.232445 8.869343-85.671786 108.415744-8.311832 192.592108-98.745557 192.592108-208.134635 0-31.416171-10.300081-61.797405-15.371577-74.854236l122.721583-67.40331c0.003081 0 0.00462 0.00154 0.007701 0.00154 4.423121 4.518606 22.121764 22.080182 46.558275 39.493911 39.929754 28.46229 77.952885 42.894416 113.014434 42.894416 34.716571 0 72.437845-14.151831 112.115025-42.06431 24.282503-17.07953 41.896442-34.302288 46.308782-38.74543 0.009241-0.00154 0.018481-0.00462 0.026182-0.00616l118.301542 65.726159c-5.077657 13.055291-15.416239 43.499669-15.416239 74.958962 0 109.389077 84.174824 199.822802 192.590568 208.134635 2.645865 15.462442 8.872423 55.107281 8.872423 85.671786 0 30.687711-6.223479 70.241685-8.869343 85.673326C890.042174 606.334084 805.86427 696.767809 805.86427 806.158426c0 31.450053 10.317022 61.851309 15.393138 74.903519l-119.783103 66.198965c-5.168521-5.490399-22.603811-23.363073-46.740005-41.288109-40.701336-30.224145-79.662378-45.549521-115.800446-45.549521-35.79155 0-74.458435 15.038919-114.927219 44.694774C400.22004 922.554885 382.666163 940.255068 377.486862 945.656142zM731.271848 511.646647c0-105.803762-86.081448-191.88059-191.888289-191.88059-105.803762 0-191.88059 86.076827-191.88059 191.88059 0 105.803762 86.076827 191.882129 191.88059 191.882129C645.19194 703.528777 731.271848 617.450409 731.271848 511.646647zM539.383558 395.903184c63.825696 0 115.751164 51.922387 115.751164 115.743463 0 63.825696-51.925468 115.751164-115.751164 115.751164-63.821076 0-115.743463-51.925468-115.743463-115.751164C423.640095 447.824031 475.562482 395.903184 539.383558 395.903184z"/></symbol>
 <symbol id="i-gear2" viewBox="0 0 1084 1024"><path style="fill:currentColor;stroke:none" d="M1072.147851 406.226367c-6.331285-33.456782-26.762037-55.073399-52.047135-55.073399-0.323417 0-0.651455 0.003081-0.830105 0.009241l-4.655674 0c-73.124722 0-132.618162-59.491899-132.618162-132.618162 0-23.731152 11.447443-50.336101 11.546009-50.565574 13.104573-29.498767 3.023185-65.672257-23.427755-84.127081l-1.601687-1.127342-134.400039-74.661726-1.700252-0.745401c-8.753836-3.805547-18.334698-5.735272-28.479231-5.735272-20.789593 0-41.235746 8.344174-54.683758 22.306575-14.741683 15.216028-65.622973 58.649474-104.721083 58.649474-39.450789 0-90.633935-44.286652-105.438762-59.784516-13.518857-14.247316-34.128258-22.753199-55.127302-22.753199-9.945862 0-19.354234 1.861961-27.958682 5.531982l-1.746455 0.74078-139.141957 76.431283-1.643269 1.139662c-26.537186 18.437884-36.675557 54.579032-23.584845 84.062398 0.115506 0.264895 11.579891 26.725075 11.579891 50.634877 0 73.126262-59.491899 132.618162-132.618162 132.618162l-4.581749 0c-0.318797-0.00616-0.636055-0.01078-0.951772-0.01078-25.260456 0-45.672728 21.618157-52.002472 55.0811-0.462025 2.453354-11.313456 60.622322-11.313456 106.117939 0 45.494078 10.85143 103.659965 11.314996 106.119479 6.334365 33.458322 26.758957 55.076479 52.036353 55.076479 0.320337 0 0.651455-0.00616 0.842426-0.012321l4.655674 0c73.126262 0 132.618162 59.491899 132.618162 132.616622 0 23.760413-11.444363 50.333021-11.546009 50.565574-13.093793 29.474125-3.041666 65.646075 23.395414 84.151722l1.569346 1.093459 131.838879 73.726895 1.675611 0.7377c8.750757 3.84251 18.305437 5.790715 28.397607 5.790715 21.082208 0 41.676209-8.706094 55.0888-23.290689 18.724339-20.347588 69.527086-62.362616 107.04815-62.362616 40.625872 0 92.72537 47.100385 107.759669 63.583903 13.441852 14.831008 34.176001 23.689571 55.470741 23.695731l0.00616 0c9.895039 0 19.27877-1.883523 27.893999-5.598205l1.711034-0.73924 136.659342-75.531873 1.617088-1.128882c26.492523-18.456365 36.601633-54.600594 23.538642-84.016195-0.115506-0.267974-11.595291-27.082374-11.595291-50.67646 0-73.124722 59.49344-132.616622 132.618162-132.616622l4.517066-0.00154c0.300316 0.00616 0.599092 0.009241 0.899409 0.009241 25.331299-0.00154 45.785153-21.619697 52.107197-55.054918 0.112426-0.589852 11.325776-59.507301 11.325776-106.14104C1083.464388 466.640776 1072.609877 408.67356 1072.147851 406.226367zM377.486862 945.656142l-115.32764-64.487932c5.082277-13.052211 15.437801-43.51815 15.437801-75.017486 0-109.382917-84.176364-199.816642-192.587488-208.134635-2.647404-15.427021-8.873963-54.967133-8.873963-85.667166 0-30.65691 6.223479-70.232445 8.869343-85.671786 108.415744-8.311832 192.592108-98.745557 192.592108-208.134635 0-31.416171-10.300081-61.797405-15.371577-74.854236l122.721583-67.40331c0.003081 0 0.00462 0.00154 0.007701 0.00154 4.423121 4.518606 22.121764 22.080182 46.558275 39.493911 39.929754 28.46229 77.952885 42.894416 113.014434 42.894416 34.716571 0 72.437845-14.151831 112.115025-42.06431 24.282503-17.07953 41.896442-34.302288 46.308782-38.74543 0.009241-0.00154 0.018481-0.00462 0.026182-0.00616l118.301542 65.726159c-5.077657 13.055291-15.416239 43.499669-15.416239 74.958962 0 109.389077 84.174824 199.822802 192.590568 208.134635 2.645865 15.462442 8.872423 55.107281 8.872423 85.671786 0 30.687711-6.223479 70.241685-8.869343 85.673326C890.042174 606.334084 805.86427 696.767809 805.86427 806.158426c0 31.450053 10.317022 61.851309 15.393138 74.903519l-119.783103 66.198965c-5.168521-5.490399-22.603811-23.363073-46.740005-41.288109-40.701336-30.224145-79.662378-45.549521-115.800446-45.549521-35.79155 0-74.458435 15.038919-114.927219 44.694774C400.22004 922.554885 382.666163 940.255068 377.486862 945.656142zM731.271848 511.646647c0-105.803762-86.081448-191.88059-191.888289-191.88059-105.803762 0-191.88059 86.076827-191.88059 191.88059 0 105.803762 86.076827 191.882129 191.88059 191.882129C645.19194 703.528777 731.271848 617.450409 731.271848 511.646647zM539.383558 395.903184c63.825696 0 115.751164 51.922387 115.751164 115.743463 0 63.825696-51.925468 115.751164-115.751164 115.751164-63.821076 0-115.743463-51.925468-115.743463-115.751164C423.640095 447.824031 475.562482 395.903184 539.383558 395.903184z"/></symbol>
+<symbol id="i-dual" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></symbol>
 <symbol id="i-sb" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
 <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></symbol>
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
@@ -1010,7 +1026,8 @@ var DEF_CFG = {
   autoRoute: true,
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
-  sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开              // v0.6.0：按输入自动选模式
+  sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
+  dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -4264,9 +4281,8 @@ var RUNNER = (function(){
 var _customW = null;
 try { _customW = parseInt(localStorage.getItem('sc.rn.w2'), 10) || null; } catch(e){ _customW = null; }
 function fitSide(){
-  if (_customW){ document.documentElement.style.setProperty('--side-w', _customW + 'px'); return _customW; }
-  var vw = window.innerWidth || 1280;
-  var w = Math.round(Math.min(420, Math.max(300, (vw - 780) / 3)));
+  var cw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--content-w')) || 780;
+  var w = _customW || Math.round(cw / 2);
   document.documentElement.style.setProperty('--side-w', w + 'px');
   return w;
 }
@@ -5754,7 +5770,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.3.0', ua = navigator.userAgent || '';
+      var ver = 'v1.4.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6650,7 +6666,151 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   }, 120);
 
   /* 发送 / 停止 / 重试 / 编辑 */
-  function sendMessage(){
+  /* v1.4：Chat 双开 —— 同一问题同时发给两个模型，左右并排对照 */
+var DUAL = (function(){
+  function on(){ return !!S.cfg.dual && (S.cfg.mode || 'chat') === 'chat'; }
+  function hist(){
+    var k = S.sid || 'draft';
+    S.dualHist = S.dualHist || {};
+    if (!S.dualHist[k]) S.dualHist[k] = { a: [], b: [] };
+    return S.dualHist[k];
+  }
+  function presets(){ return S.cfg.presets || []; }
+  function presetById(id){ var ps = presets(); for (var i = 0; i < ps.length; i++) if (ps[i].id === id) return ps[i]; return null; }
+  function opts(sel){
+    var out = [];
+    presets().forEach(function(p){
+      var ms = (p.models && p.models.length) ? p.models : (p.currentModel ? [p.currentModel] : []);
+      ms.forEach(function(m){ out.push({ v: p.id + '\x01' + m, t: p.name + ' · ' + m }); });
+    });
+    return out;
+  }
+  function pick(side){
+    var cur = side === 'a' ? S.cfg.dualA : S.cfg.dualB;
+    var all = opts();
+    if (!all.length) return '';
+    for (var i = 0; i < all.length; i++) if (all[i].v === cur) return cur;
+    if (all.length > 1) return all[side === 'a' ? 0 : 1].v;
+    return all[0].v;
+  }
+  function urlOf(p){
+    var u = String(p.baseURL || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+    if (!/\/v\d+$/.test(u) && !/\/v\d+\//.test(u)) u += '/v1';
+    return u + '/chat/completions';
+  }
+  function ask(ref, msgs){
+    var parts = String(ref || '').split('\x01'), p = presetById(parts[0]), model = parts[1] || (p && p.currentModel);
+    if (!p || !model) return Promise.reject(new Error('模型未配置'));
+    var hdr = { 'Content-Type': 'application/json' };
+    if (p.apiKey) hdr['Authorization'] = 'Bearer ' + p.apiKey;
+    var body = { model: model, messages: msgs, stream: false, temperature: 0.7, max_tokens: 1600 };
+    return NET.raw({ url: urlOf(p), method: 'POST', headers: hdr, body: JSON.stringify(body), timeout: 180000 })
+      .then(function(r){
+        if (!r) throw new Error('无响应');
+        if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status + ' ' + String(r.text || '').slice(0, 120));
+        var j = JSON.parse(r.text);
+        var m = j && j.choices && j.choices[0] && j.choices[0].message;
+        return (m && m.content) || '(空回复)';
+      });
+  }
+  function sysPrompt(){
+    var sys = '你是 AI 助手，直接回答问题。';
+    var sp = MODE.subPrompt(); if (sp) sys += '\n\n' + sp;
+    var lp = MODE.levelPrompt(); if (lp) sys += '\n' + lp;
+    return sys;
+  }
+  function paneNode(side){
+    var box = el('div', { class: 'dl-pane' });
+    var head = el('div', { class: 'dl-head' });
+    head.appendChild(el('span', { class: 'dot' + (S.dualBusy ? ' on' : '') }));
+    var sel = el('select', { class: 'dl-model' });
+    var cur = pick(side);
+    opts().forEach(function(o){ sel.appendChild(el('option', { value: o.v, text: o.t, selected: o.v === cur ? '' : null })); });
+    if (!cur) sel.appendChild(el('option', { value: '', text: '（先在设置里配置模型）' }));
+    sel.addEventListener('change', function(){
+      var patch = side === 'a' ? { dualA: sel.value } : { dualB: sel.value };
+      setCfg(patch);
+      var h = hist(); h[side] = [];
+      render();
+    });
+    head.appendChild(sel);
+    box.appendChild(head);
+    var body = el('div', { class: 'dl-body' });
+    var list = hist()[side];
+    if (!list.length) body.appendChild(el('div', { class: 'dl-empty', text: '输入一个问题，两边同时回答' }));
+    list.forEach(function(m){
+      if (m.role === 'user') body.appendChild(el('div', { class: 'dl-msg' }, [el('div', { class: 'dl-u', text: m.content })]));
+      else {
+        var a = el('div', { class: 'dl-msg dl-a' });
+        a.appendChild(el('div', { class: 'who', text: '回答' }));
+        var md = el('div', { class: 'md' });
+        md.innerHTML = MD.render(m.content || '');
+        a.appendChild(md);
+        body.appendChild(a);
+      }
+    });
+    if (S.dualBusy && S.dualPending && S.dualPending[side]){
+      body.appendChild(el('div', { class: 'dl-empty', text: '生成中…' }));
+    }
+    box.appendChild(body);
+    return box;
+  }
+  function render(){
+    var v = $('#dual-view'); if (!v) return;
+    v.textContent = '';
+    v.appendChild(paneNode('a'));
+    v.appendChild(paneNode('b'));
+  }
+  function apply(){
+    document.body.classList.toggle('dual-on', !!S.cfg.dual);
+    if (S.cfg.dual) render();
+    var b = $('#btn-dual'); if (b) b.classList.toggle('on', !!S.cfg.dual);
+  }
+  function toggle(){
+    if ((S.cfg.mode || 'chat') !== 'chat'){ toast('双开只用于 Chat 模式', true); return; }
+    setCfg({ dual: !S.cfg.dual });
+    apply();
+    if (S.cfg.dual) toast('双开：同一问题同时问两个模型');
+  }
+  function send(text){
+    var h = hist();
+    h.a.push({ role: 'user', content: text });
+    h.b.push({ role: 'user', content: text });
+    var ra = pick('a'), rb = pick('b');
+    if (!ra || !rb){ toast('双开需要两个模型，请先在设置里配置', true); return; }
+    S.dualBusy = true; S.dualPending = { a: true, b: true };
+    render();
+    var sys = sysPrompt();
+    function msgsOf(side){ return [{ role: 'system', content: sys }].concat(hist()[side]); }
+    function run(side, ref){
+      return ask(ref, msgsOf(side)).then(function(txt){
+        hist()[side].push({ role: 'assistant', content: txt });
+      }, function(err){
+        hist()[side].push({ role: 'assistant', content: '⚠️ ' + (err && err.message || err) });
+      }).then(function(){ S.dualPending[side] = false; render(); });
+    }
+    Promise.all([run('a', ra), run('b', rb)]).then(function(){
+      S.dualBusy = false; S.dualPending = null; render();
+    });
+  }
+  function init(){
+    var b = $('#btn-dual');
+    if (b) b.addEventListener('click', toggle);
+    apply();
+  }
+  return { on: on, apply: apply, render: render, send: send, init: init, toggle: toggle };
+})();
+
+function sendMessage(){
+    /* v1.4：双开走独立通道（非流式，两栏各自请求） */
+    if (DUAL.on()){
+      if (S.dualBusy) return;
+      var dt = $input.value.trim();
+      if (!dt) return;
+      $input.value = ''; $input.style.height = '';
+      DUAL.send(dt);
+      return;
+    }
     if (S.sending){ quickPending = false; stopGeneration(); return; }
     var text = $input.value.trim();
     if (!text && !S.pendAtts.length){ quickPending = false; return; }
@@ -7270,6 +7430,9 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         seg.children[sgi].classList.toggle('on', seg.children[sgi].getAttribute('data-mode') === md);
     }
     renderSubPin();
+    var dblBtn = $('#btn-dual');
+    if (dblBtn) dblBtn.style.display = (S.cfg.mode === 'chat') ? '' : 'none';
+    if (S.cfg.mode !== 'chat' && S.cfg.dual){ setCfg({ dual: false }); document.body.classList.remove('dual-on'); }
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
     if (selM && act !== selM){
       var ps = S.cfg.presets || [];
@@ -8200,7 +8363,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
     renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger,
-    zipVfs: zipVfs, toggleTemp: toggleTemp,
+    zipVfs: zipVfs, toggleTemp: toggleTemp, DUAL: DUAL,
     /* v2.9：模型池/能力表 */
     renderPool: renderPool, mmUse: mmUse, mmToggleCfg: mmToggleCfg, mmDelete: mmDelete, mmSave: mmSave,
     fillMetaFromCatalog: fillMetaFromCatalog, ctxDisp: ctxDisp, ctxLimitFor: ctxLimitFor, mMeta: mMeta,
@@ -8803,6 +8966,16 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     setCfg({ sbHidden: hide });
     var b = $('#btn-sb'); if (b) b.classList.toggle('on', !hide);
   }
+  /* v1.4：两侧都是浮层，点主页面空白处收起 */
+  document.addEventListener('mousedown', function(e){
+    if (!e.target.closest) return;
+    if (e.target.closest('#sidebar') || e.target.closest('#runner') || e.target.closest('#composer') || e.target.closest('#topbar')) return;
+    if (!document.body.classList.contains('sb-collapsed')) toggleSidebar('hide');
+    if (document.body.classList.contains('rn-open')){
+      var pb = $('#btn-panel'); if (pb) pb.click();
+    }
+  });
+
   window.addEventListener('DOMContentLoaded', function(){
     var b = $('#btn-sb');
     if (b) b.addEventListener('click', function(){ toggleSidebar(); });
@@ -9434,8 +9607,13 @@ var MODE = (function(){
   function subList(mode){ return SUBS[mode || S.cfg.mode] || []; }
   function sub(mode){
     var m = mode || S.cfg.mode || 'chat', list = subList(m), id = (S.cfg.sub || {})[m];
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return list[0] || null;
+    var hit = null;
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) hit = list[i];
+    hit = hit || list[0] || null;
+    if (hit && hit.id === 'think'){ /* 档位跟着模型走 */
+      hit = Object.assign({}, hit, { levels: thinkLevels() });
+    }
+    return hit;
   }
   function setSub(id, mode){
     var m = mode || S.cfg.mode || 'chat';
@@ -9443,6 +9621,20 @@ var MODE = (function(){
     setCfg({ sub: o });
   }
   function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
+  /* v1.4：思考档位取自当前模型的能力表（GET /models 的 reasoning/efforts 字段），不再写死低中高 Max */
+  var EFF_NAME = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '很高', enabled: '开', disabled: '关' };
+  function thinkLevels(){
+    var mm = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
+    var eff = (mm && mm.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || {}).efforts || null;
+    if (!eff || !eff.length) return [];
+    return eff.map(function(e){
+      var nm = EFF_NAME[e] || e;
+      var onoff = /^(enabled|disabled)$/i.test(e);
+      return { id: e, name: nm,
+        prompt: onoff ? ('深度思考：' + nm + ' —— ' + (e === 'enabled' ? '开启推理，先想再答。' : '关闭推理，直接回答。'))
+                       : ('思考档位：' + nm + ' —— 推理强度按 ' + e + ' 档。') };
+    });
+  }
   function levelKey(mode, sid){ return (mode || S.cfg.mode || 'chat') + ':' + (sid || (sub(mode) || {}).id); }
   function level(mode){
     var x = sub(mode); if (!x || !x.levels || !x.levels.length) return null;
@@ -9453,7 +9645,13 @@ var MODE = (function(){
   function setLevel(id, mode){
     var x = sub(mode); if (!x) return;
     var o = Object.assign({}, S.cfg.subLv || {}); o[levelKey(mode, x.id)] = id;
-    setCfg({ subLv: o });
+    var patch = { subLv: o };
+    /* 深度思考的档位直接写进该模型的思考字段，别再让用户在两处重复选 */
+    if (x.id === 'think' && S.cfg.currentModel){
+      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = id;
+      patch.thinkByModel = tm;
+    }
+    setCfg(patch);
   }
   function levelPrompt(mode){ var l = level(mode); return l ? (l.prompt || '') : ''; }
   /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
@@ -10287,6 +10485,7 @@ Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){ saveCfg(); }); // 迁移：把旧 localStorage 明文密钥入保险库并脱敏重写
 UI.init();
 MODE.mountUI(); // v0.6.0：自定义模式按钮
+UI.DUAL.init(); // v1.4：双开视图
 if (!Vault.avail) UI.toast('未连接宿主：API Key 将明文存于浏览器 localStorage，建议使用桌面版', true);
 DB.open()
   .then(function(){ UI.reloadSessions(true); }) // 每次启动进入新建会话（草稿态，发送首条消息才落库）；不再做任何自动删除
