@@ -279,7 +279,7 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .dl-u{background:var(--soft);border-radius:10px;padding:8px 10px;white-space:pre-wrap}
 .dl-a .md{font-size:14px}
 .dl-empty{color:var(--faint);font-size:12px;text-align:center;padding:24px 0}
-#sub-pop{position:fixed;z-index:80;display:flex;padding:6px;gap:6px;background:var(--canvas);
+#sub-pop{position:fixed;z-index:80;display:block;padding:6px;width:214px;background:var(--canvas);
   border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop)}
 #sub-pop[hidden]{display:none}
 .sp-list{display:flex;flex-direction:column;min-width:188px}
@@ -288,12 +288,18 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .sp-item.on{background:var(--lift);color:var(--ink)}
 .sp-n{flex:1}
 .sp-h{font-size:11px;color:var(--faint);white-space:nowrap}
-.sp-lv{display:none;flex-direction:column;min-width:118px;border-left:1px solid var(--hairline-soft);padding-left:6px}
-.sp-lv.show{display:flex}
+/* 更深一档：绝对定位浮在列表右侧，母级宽高不变 */
+.sp-lv{display:none;position:absolute;left:calc(100% + 6px);bottom:0;min-width:168px;
+  background:var(--canvas);border:1px solid var(--hairline);border-radius:12px;
+  box-shadow:var(--shadow-pop);padding:6px;z-index:81}
+.sp-lv.show{display:block}
 .sp-lv-t{font-size:11px;color:var(--faint);padding:4px 9px 6px}
-.sp-lv button{padding:6px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
+.sp-lv button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  padding:6px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
 .sp-lv button:hover{background:var(--soft);color:var(--ink)}
 .sp-lv button.on{background:var(--lift);color:var(--ink);font-weight:600}
+.lv-n{font-weight:600}
+.lv-h{font-size:11px;color:var(--faint);white-space:nowrap}
 body.rn-open #runner{display:flex}
 /* 顶部分栏：工作区 / 运行 / 终端 */
 .rn-tabs{display:flex;gap:2px;flex:none}
@@ -862,10 +868,10 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
-            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
           </div>
           <div class="cwrap">
             <div class="cbox"><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
@@ -5770,7 +5776,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.4.0', ua = navigator.userAgent || '';
+      var ver = 'v1.5.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7360,12 +7366,15 @@ function sendMessage(){
   function subLevelNode(x, box, curLv){
     if (!box) return;
     box.textContent = '';
-    if (!x || !x.levels || !x.levels.length){ box.classList.remove('show'); return; }
+    var lvs = (x && x.levels && x.levels.length) ? x.levels : (MODE.levelsFor ? MODE.levelsFor(x) : []);
+    if (!lvs.length){ box.classList.remove('show'); return; }
     box.classList.add('show');
     box.appendChild(el('div', { class: 'sp-lv-t', text: x.name }));
     var curSub = MODE.sub();
-    x.levels.forEach(function(l){
-      var b = el('button', { type: 'button', text: l.name });
+    lvs.forEach(function(l){
+      var b = el('button', { type: 'button' });
+      b.appendChild(el('span', { class: 'lv-n', text: l.name }));
+      if (l.hint) b.appendChild(el('span', { class: 'lv-h', text: l.hint }));
       if (curLv && curLv.id === l.id && curSub && curSub.id === x.id) b.classList.add('on');
       b.addEventListener('click', function(){
         MODE.setSub(x.id);
@@ -7387,12 +7396,12 @@ function sendMessage(){
       var it = el('button', { type: 'button', class: 'sp-item' + (cur && cur.id === x.id ? ' on' : '') });
       it.appendChild(el('span', { class: 'sp-n', text: x.name }));
       it.appendChild(el('span', { class: 'sp-h', text: x.hint || '' }));
-      if (x.levels && x.levels.length) it.appendChild(el('span', { class: 'caret' }));
+      if (MODE.levelsFor(x).length) it.appendChild(el('span', { class: 'caret' }));
       it.addEventListener('mouseenter', function(){ subLevelNode(x, right, MODE.level()); });
       it.addEventListener('click', function(){
         MODE.setSub(x.id);
         renderComposerCtl();
-        if (x.levels && x.levels.length) subLevelNode(x, right, MODE.level());
+        if (MODE.levelsFor(x).length) subLevelNode(x, right, MODE.level());
         else closeSubPop();
       });
       left.appendChild(it);
@@ -9604,15 +9613,19 @@ var MODE = (function(){
         ] }
     ]
   };
-  function subList(mode){ return SUBS[mode || S.cfg.mode] || []; }
+  function subList(mode){
+    var m = mode || S.cfg.mode || 'chat';
+    var list = (SUBS[m] || []).slice();
+    /* 模型不支持推理时，深度思考直接不出现 */
+    if (m === 'chat' && !hasReasoning()) list = list.filter(function(x){ return x.id !== 'think'; });
+    return list;
+  }
   function sub(mode){
     var m = mode || S.cfg.mode || 'chat', list = subList(m), id = (S.cfg.sub || {})[m];
     var hit = null;
     for (var i = 0; i < list.length; i++) if (list[i].id === id) hit = list[i];
     hit = hit || list[0] || null;
-    if (hit && hit.id === 'think'){ /* 档位跟着模型走 */
-      hit = Object.assign({}, hit, { levels: thinkLevels() });
-    }
+    if (hit) hit = Object.assign({}, hit, { levels: levelsFor(hit) });
     return hit;
   }
   function setSub(id, mode){
@@ -9621,19 +9634,33 @@ var MODE = (function(){
     setCfg({ sub: o });
   }
   function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
-  /* v1.4：思考档位取自当前模型的能力表（GET /models 的 reasoning/efforts 字段），不再写死低中高 Max */
-  var EFF_NAME = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '很高', enabled: '开', disabled: '关' };
-  function thinkLevels(){
+  /* v1.5：档位固定「低 / 中 / 高 / Max」；模型支持推理时映射到它的 effort 值，不支持就只剩提示词档位 */
+  var LV = [
+    { id: 'low',  name: '低',  hint: '快速过一遍',   prompt: '思考档位：低 —— 快速过一遍，只做必要联想。' },
+    { id: 'mid',  name: '中',  hint: '拆步骤验假设', prompt: '思考档位：中 —— 拆步骤、验假设，够用就收。' },
+    { id: 'high', name: '高',  hint: '找反例比方案', prompt: '思考档位：高 —— 找反例、比方案，权衡后再落笔。' },
+    { id: 'max',  name: 'Max', hint: '穷尽并压测',   prompt: '思考档位：Max —— 至少三条解法，逐条压测边界与失败模式，再给推荐。' }
+  ];
+  function effortsOf(){
     var mm = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
     var eff = (mm && mm.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || {}).efforts || null;
-    if (!eff || !eff.length) return [];
-    return eff.map(function(e){
-      var nm = EFF_NAME[e] || e;
-      var onoff = /^(enabled|disabled)$/i.test(e);
-      return { id: e, name: nm,
-        prompt: onoff ? ('深度思考：' + nm + ' —— ' + (e === 'enabled' ? '开启推理，先想再答。' : '关闭推理，直接回答。'))
-                       : ('思考档位：' + nm + ' —— 推理强度按 ' + e + ' 档。') };
-    });
+    return (eff && eff.length) ? eff : null;
+  }
+  function hasReasoning(){ return !!effortsOf(); }
+  /* 该子模式有哪些档位：标准永远有（提示词档），深度思考要模型支持，其余没有 */
+  function levelsFor(x){
+    if (!x) return [];
+    if (x.id === 'fast') return LV;
+    if (x.id === 'think') return hasReasoning() ? LV : [];
+    return [];
+  }
+  /* 低/中/高/Max → 模型真实的 effort 值（没有能力表就返回 null，只做提示词） */
+  function effortFor(id){
+    var eff = effortsOf(); if (!eff) return null;
+    if (/^(enabled|disabled)$/i.test(eff[0])) return id === 'low' ? 'disabled' : 'enabled';
+    var idx = { low: 0, mid: 1, high: 2, max: 3 }[id];
+    if (idx == null) return null;
+    return eff[Math.min(idx, eff.length - 1)];
   }
   function levelKey(mode, sid){ return (mode || S.cfg.mode || 'chat') + ':' + (sid || (sub(mode) || {}).id); }
   function level(mode){
@@ -9646,9 +9673,10 @@ var MODE = (function(){
     var x = sub(mode); if (!x) return;
     var o = Object.assign({}, S.cfg.subLv || {}); o[levelKey(mode, x.id)] = id;
     var patch = { subLv: o };
-    /* 深度思考的档位直接写进该模型的思考字段，别再让用户在两处重复选 */
-    if (x.id === 'think' && S.cfg.currentModel){
-      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = id;
+    /* 有真实 effort 的模型：档位直接写进该模型的思考字段 */
+    var eff = effortFor(id);
+    if (eff && S.cfg.currentModel){
+      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = eff;
       patch.thinkByModel = tm;
     }
     setCfg(patch);
@@ -9692,7 +9720,8 @@ var MODE = (function(){
   }
   return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
            SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied,
-           level: level, setLevel: setLevel, levelPrompt: levelPrompt, levelKey: levelKey };
+           level: level, setLevel: setLevel, levelPrompt: levelPrompt, levelKey: levelKey,
+           hasReasoning: hasReasoning, levelsFor: levelsFor };
 })();
 
 /* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
