@@ -288,18 +288,6 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .sp-item.on{background:var(--lift);color:var(--ink)}
 .sp-n{flex:1}
 .sp-h{font-size:11px;color:var(--faint);white-space:nowrap}
-/* 更深一档：绝对定位浮在列表右侧，母级宽高不变 */
-.sp-lv{display:none;position:absolute;left:calc(100% + 6px);bottom:0;min-width:168px;
-  background:var(--canvas);border:1px solid var(--hairline);border-radius:12px;
-  box-shadow:var(--shadow-pop);padding:6px;z-index:81}
-.sp-lv.show{display:block}
-.sp-lv-t{font-size:11px;color:var(--faint);padding:4px 9px 6px}
-.sp-lv button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
-  padding:6px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
-.sp-lv button:hover{background:var(--soft);color:var(--ink)}
-.sp-lv button.on{background:var(--lift);color:var(--ink);font-weight:600}
-.lv-n{font-weight:600}
-.lv-h{font-size:11px;color:var(--faint);white-space:nowrap}
 body.rn-open #runner{display:flex}
 /* 顶部分栏：工作区 / 运行 / 终端 */
 .rn-tabs{display:flex;gap:2px;flex:none}
@@ -396,7 +384,8 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .crow{display:grid;grid-template-columns:1fr minmax(300px,var(--content-w)) 1fr;align-items:end;gap:8px}
 .cwrap{display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
-.cz-l{justify-self:stretch;justify-content:flex-end}
+.cz-l{justify-self:stretch;justify-content:flex-start}
+#btn-sub{margin-left:auto}
 .cz-r2{justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 #ctx-ring.warn .ctx-num{color:var(--warning)}
@@ -1033,7 +1022,8 @@ var DEF_CFG = {
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
-  dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）              // v0.6.0：按输入自动选模式
+  dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）
+  research: false,               // v1.8：深度研究（原 Chat 子模式，现为「+」里的开关）              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -1623,7 +1613,6 @@ var NET = (function(){
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
-    var lvP = MODE.levelPrompt(); if (lvP) sys += '\n' + lvP;     // v1.2：更深一层
     if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
@@ -5779,7 +5768,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.7.0', ua = navigator.userAgent || '';
+      var ver = 'v1.8.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6725,7 +6714,6 @@ var DUAL = (function(){
   function sysPrompt(){
     var sys = '你是 AI 助手，直接回答问题。';
     var sp = MODE.subPrompt(); if (sp) sys += '\n\n' + sp;
-    var lp = MODE.levelPrompt(); if (lp) sys += '\n' + lp;
     return sys;
   }
   function paneNode(side){
@@ -7366,64 +7354,39 @@ function sendMessage(){
 
   /* v1.3：子模式下拉 —— 按钮在输入框左侧，点开选小模式，悬停展开更深一档 */
   function closeSubPop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
-  function subLevelNode(x, box, curLv){
-    if (!box) return;
-    box.textContent = '';
-    var lvs = MODE.levelsFor ? MODE.levelsFor(x) : [];
-    if (!lvs.length){ box.classList.remove('show'); return; }
-    box.classList.add('show');
-    box.appendChild(el('div', { class: 'sp-lv-t', text: x.name }));
-    var curSub = MODE.sub();
-    lvs.forEach(function(l){
-      var b = el('button', { type: 'button' });
-      b.appendChild(el('span', { class: 'lv-n', text: l.name }));
-      if (l.hint) b.appendChild(el('span', { class: 'lv-h', text: l.hint }));
-      if (curLv && curLv.id === l.id && curSub && curSub.id === x.id) b.classList.add('on');
-      b.addEventListener('click', function(){
-        MODE.setSub(x.id);
-        MODE.setLevel(l.id);
-        closeSubPop();
-        renderComposerCtl();
-      });
-      box.appendChild(b);
-    });
-  }
   function openSubPop(){
     var pop = $('#sub-pop'), btn = $('#btn-sub');
     if (!pop || !btn) return;
     if (!pop.hidden){ closeSubPop(); return; }
     var list = MODE.subList(), cur = MODE.sub();
     pop.textContent = '';
-    var left = el('div', { class: 'sp-list' }), right = el('div', { class: 'sp-lv' });
+    var left = el('div', { class: 'sp-list' });
     list.forEach(function(x){
       var it = el('button', { type: 'button', class: 'sp-item' + (cur && cur.id === x.id ? ' on' : '') });
       it.appendChild(el('span', { class: 'sp-n', text: x.name }));
       it.appendChild(el('span', { class: 'sp-h', text: x.hint || '' }));
-      if (MODE.levelsFor(x).length) it.appendChild(el('span', { class: 'caret' }));
-      it.addEventListener('mouseenter', function(){ subLevelNode(x, right, MODE.level()); });
       it.addEventListener('click', function(){
         MODE.setSub(x.id);
         renderComposerCtl();
-        if (MODE.levelsFor(x).length) subLevelNode(x, right, MODE.level());
-        else closeSubPop();
+        closeSubPop();
       });
       left.appendChild(it);
     });
-    pop.appendChild(left); pop.appendChild(right);
+    pop.appendChild(left);
     var r = btn.getBoundingClientRect();
     pop.style.left = Math.round(r.left) + 'px';
     pop.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
     pop.hidden = false;
-    subLevelNode(cur, right, MODE.level());
   }
   function renderSubPin(){
     var b = $('#btn-sub'); if (!b) return;
-    var x = MODE.sub(), lv = MODE.level();
+    var list = MODE.subList(), x = MODE.sub();
+    b.style.display = list.length ? '' : 'none';   // Chat 没有子模式，直接不显示
+    if (!list.length) return;
     b.textContent = '';
     b.appendChild(el('span', { id: 'sub-label', text: x ? x.name : '—' }));
-    if (x && lv) b.appendChild(el('span', { class: 'lv', text: '· ' + lv.name }));
     b.appendChild(el('span', { class: 'caret' }));
-    b.title = '子模式：' + (x ? x.name + (lv ? ' · ' + lv.name : '') : '—') + '（' + ((x && x.hint) || '') + '）';
+    b.title = '子模式：' + (x ? x.name : '—') + '（' + ((x && x.hint) || '') + '）';
   }
   var _subBtn = $('#btn-sub');
   if (_subBtn) _subBtn.addEventListener('click', function(e){ e.stopPropagation(); openSubPop(); });
@@ -7464,15 +7427,12 @@ function sendMessage(){
       var list = String(S.cfg.thinkList || 'Default').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
       if (list.indexOf('Default') < 0) list.unshift('Default');
       /* v0.2.5：优先用「该模型自动探测到的档位」（GPT-5 → minimal/low/medium/high；Qwen/GLM → enabled/disabled） */
-      var mmc = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-      var effL = (MODE && MODE.levelsFor) ? MODE.levelsFor({ id: 'think' }).map(function(l){ return l.id; }) : null;
-    if (!effL || !effL.length) effL = (NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts || null;
+      var effL = (MODE.efforts && MODE.efforts()) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts) || null;
       if (effL && effL.length) list = ['Default'].concat(effL);
       var cur = (S.cfg.thinkByModel && S.cfg.thinkByModel[S.cfg.currentModel]) || 'Default';
-      var LVNAME = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '极高', enabled: '开', disabled: '关' };
       selT.textContent = '';
       for (var i = 0; i < list.length; i++)
-        selT.appendChild(el('option', { value: list[i], text: (LVNAME[list[i]] || list[i]), selected: list[i] === cur ? '' : null }));
+        selT.appendChild(el('option', { value: list[i], text: list[i], selected: list[i] === cur ? '' : null }));
     }
     renderWsBtn();
     renderCtxRing();
@@ -7595,7 +7555,8 @@ function sendMessage(){
     popMode = 'more';
     popItems([
       { t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' },
-      { t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' }
+      { t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '联网检索写报告（仅 Chat）', act: 'go-research' },
+    { t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' }
     ], '更多');
   }
   function popPrompts(filter){
@@ -7650,6 +7611,12 @@ function sendMessage(){
       var p0 = (S.cfg.prompts || []).filter(function(x){ return x.name === id; })[0];
       if (p0){ $input.value = p0.text; autosize(); }
       closePop(); $input.focus(); return;
+    }
+    if (pact === 'go-research'){
+      if ((S.cfg.mode || 'chat') !== 'chat'){ toast('深度研究只在 Chat 模式下可用', true); return; }
+      S.cfg.research = !S.cfg.research; saveCfg(); popMore();
+      toast(S.cfg.research ? '深度研究：开（会多轮检索再写报告）' : '深度研究：关');
+      return;
     }
     if (pact === 'go-prompt') return popPrompts('');
     if (pact === 'go-at') return popAt('');
@@ -9564,16 +9531,11 @@ var EXT = (function(){
    配方：名字 + 一段提示词 + 底座（chat/work/agent）；选中后挂在底座上跑，提示词追加进 system。 */
 var MODE = (function(){
   /* v1.2：模式细分 —— 每种基础模式下的子模式，决定提示词与工具闸门 */
+  /* v1.8：Chat 不再分子模式（思考强度由上边栏那个下拉控制）；深度研究降级成「+ 更多」里的开关 */
+  var RESEARCH_P = '深度研究：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
+    '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。';
   var SUBS = {
-    chat: [
-      { id: 'fast', name: '标准', hint: '直答，不铺陈',
-        prompt: '子模式 Fast：直接给答案，结论先行，控制篇幅；不需要工具就别调。' },
-      { id: 'think', name: '深度思考', hint: '长推理',
-        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。' },
-      { id: 'research', name: '深度研究', hint: '多轮检索写报告', tools: ['web', 'search'],
-        prompt: '子模式 Deep Research：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
-          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。' }
-    ],
+    chat: [],
     work: [
       { id: 'canvas', name: '画布', hint: '草稿与成品分离',
         prompt: '子模式 Canvas：正文只放结论与说明，长文/代码/表格放 ```vfs-write 草稿里，便于用户单独查看与导出。' },
@@ -9586,52 +9548,32 @@ var MODE = (function(){
     agent: [
       { id: 'plan', name: '规划', hint: '只读推演', deny: ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'],
         prompt: '子模式 Plan：只读。用 ```fs-list / ```fs-read 摸清现状，产出分步计划（每步写清改哪个文件、怎么验），' +
-          '不要写盘、不要跑命令。等用户说「执行」再落地。',
-        levels: [
-          { id: 'brief', name: '简明', prompt: '计划粒度：简明 —— 只给步骤清单，每步一行。' },
-          { id: 'detail', name: '详细', prompt: '计划粒度：详细 —— 每步写清改哪个文件、改什么、怎么验证、有什么风险。' }
-        ] },
+          '不要写盘、不要跑命令。等用户说「执行」再落地。' },
       { id: 'build', name: '构建', hint: '落地修改',
-        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。',
-        levels: [
-          { id: 'care', name: '谨慎', prompt: '落地方式：谨慎 —— 一处一改，每改完自检再往下。' },
-          { id: 'fast', name: '直接', prompt: '落地方式：直接 —— 一把改完再统一自检，减少往返。' }
-        ] },
+        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。' },
       { id: 'team', name: '子母协作', hint: '派活给子智能体',
         prompt: '子模式 Sub-Agents：把任务拆成 2~4 块，用 ```agent explore|coder|review 派出去（explore 只读、coder 写暂存、' +
-          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。',
-        levels: [
-          { id: 'two', name: '2 个', prompt: '规模：最多派 2 个子智能体。' },
-          { id: 'three', name: '3 个', prompt: '规模：最多派 3 个子智能体。' },
-          { id: 'four', name: '4 个', prompt: '规模：最多派 4 个子智能体，可并行再汇总。' }
-        ] }
+          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。' }
     ]
   };
-  function subList(mode){
-    var m = mode || S.cfg.mode || 'chat';
-    var list = (SUBS[m] || []).slice();
-    /* 模型不支持推理时，深度思考直接不出现 */
-    if (m === 'chat' && !hasReasoning()) list = list.filter(function(x){ return x.id !== 'think'; });
-    return list;
-  }
+  function subList(mode){ return (SUBS[mode || S.cfg.mode || 'chat'] || []).slice(); }
   function sub(mode){
     var m = mode || S.cfg.mode || 'chat', list = subList(m), id = (S.cfg.sub || {})[m];
     var hit = null;
     for (var i = 0; i < list.length; i++) if (list[i].id === id) hit = list[i];
-    hit = hit || list[0] || null;
-    if (hit) hit = Object.assign({}, hit, { levels: levelsFor(hit) });
-    return hit;
+    return hit || list[0] || null;
   }
   function setSub(id, mode){
     var m = mode || S.cfg.mode || 'chat';
     var o = Object.assign({}, S.cfg.sub || {}); o[m] = id;
     setCfg({ sub: o });
   }
-  function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
-  /* v1.7：档位 = 模型自己声明的思考程度字段（supported_parameters / reasoning_efforts），不再写死低中高 */
-  var EFF_LABEL = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '极高', enabled: '开', disabled: '关' };
-  var EFF_HINT = { minimal: '最省', low: '快一点', medium: '平衡', high: '更深', xhigh: '很深', enabled: '开启推理', disabled: '关闭推理' };
-  /* 供应商前缀可能对不上（deepseek-ai/x vs deepseek/x），按短名兜底匹配 */
+  function subPrompt(){
+    var x = sub(); if (x) return x.prompt || '';
+    if ((S.cfg.mode || 'chat') === 'chat' && S.cfg.research) return RESEARCH_P;
+    return '';
+  }
+  /* v1.8：模型自己声明的思考强度字段（上边栏下拉直接用这些原生值） */
   function metaOf(id){
     var mm = S.cfg.modelMeta || {}, k = String(id || '');
     if (mm[k]) return mm[k];
@@ -9639,46 +9581,16 @@ var MODE = (function(){
     for (var key in mm){ if (key.split('/').pop() === short) return mm[key]; }
     return null;
   }
-  function effortsOf(){
+  function efforts(){
     var mm = metaOf(S.cfg.currentModel);
     if (mm){
       if (mm.efforts && mm.efforts.length) return mm.efforts;
-      /* 旧的 modelMeta 缓存只有字段名没有取值，这里补齐 */
       if (mm.reason === 'reasoning_effort') return ['low', 'medium', 'high'];
       if (mm.reason === 'reasoning' || mm.reason === 'thinking' || mm.reason === 'enable_thinking') return ['enabled', 'disabled'];
     }
     var p = (NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || null;
     return (p && p.efforts && p.efforts.length) ? p.efforts : null;
   }
-  function hasReasoning(){ return !!effortsOf(); }
-  /* 只有「深度思考」有档位，档位就是模型支持的字段取值；标准/深度研究/Work/Agent 都没有 */
-  function levelsFor(x){
-    if (!x || x.id !== 'think') return [];
-    var eff = effortsOf(); if (!eff) return [];
-    return eff.map(function(e){
-      var nm = EFF_LABEL[e] || e, hint = EFF_HINT[e] || '';
-      return { id: e, name: nm, hint: hint, prompt: '思考档位：' + nm + (hint ? ' —— ' + hint : '') + '。' };
-    });
-  }
-  function levelKey(mode, sid){ return (mode || S.cfg.mode || 'chat') + ':' + (sid || (sub(mode) || {}).id); }
-  function level(mode){
-    var x = sub(mode); if (!x || !x.levels || !x.levels.length) return null;
-    var id = (S.cfg.subLv || {})[levelKey(mode, x.id)];
-    for (var i = 0; i < x.levels.length; i++) if (x.levels[i].id === id) return x.levels[i];
-    return x.levels[0];
-  }
-  function setLevel(id, mode){
-    var x = sub(mode); if (!x) return;
-    var o = Object.assign({}, S.cfg.subLv || {}); o[levelKey(mode, x.id)] = id;
-    var patch = { subLv: o };
-    /* 档位 id 就是模型字段的取值，原样写进该模型的思考字段 */
-    if (x.id === 'think' && S.cfg.currentModel && hasReasoning()){
-      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = id;
-      patch.thinkByModel = tm;
-    }
-    setCfg(patch);
-  }
-  function levelPrompt(mode){ var l = level(mode); return l ? (l.prompt || '') : ''; }
   /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
   function denyList(){ var x = sub(); return (x && x.deny) || []; }
   function denied(op){ return denyList().indexOf(op) >= 0; }
@@ -9717,8 +9629,7 @@ var MODE = (function(){
   }
   return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
            SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied,
-           level: level, setLevel: setLevel, levelPrompt: levelPrompt, levelKey: levelKey,
-           hasReasoning: hasReasoning, levelsFor: levelsFor };
+           efforts: efforts };
 })();
 
 /* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
