@@ -46,7 +46,7 @@ document.documentElement.dataset.theme=__t;}catch(e){document.documentElement.da
   --font-sans:-apple-system,'SF Pro Text','Segoe UI','Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
   --font-mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
   --r-sm:6px; --r-md:8px; --r-lg:12px; --r-pill:9999px;
-  --sb-w:264px; --tb-h:52px; --content-w:780px;
+  --side-w:300px; --sb-w:var(--side-w); --tb-h:52px; --content-w:780px;
 }
 /* v2.8 字号阶（对齐 Linear.md / Claude.md，只允许这 9 档，禁止 10.5/11.5/12.5/13.5 之类半像素值）
    11 微型元信息(角标/路径/计数) · 12 辅助说明(caption) · 13 界面控件(按钮/标签/检索)
@@ -259,10 +259,18 @@ body.sb-collapsed.sb-float #sidebar{
 
 /* 运行面板（右侧抽屉，v1.9）：沙箱 iframe 预览 + 控制台 / C 解释输出 */
 /* v0.2.5：右侧面板改成悬浮抽屉 —— 脱离 flex 流，覆盖在主栏之上，不再挤压正文与输入框的宽度/高度 */
-#runner{position:absolute;right:12px;top:12px;bottom:var(--rn-b,12px);width:min(48vw,620px);z-index:45;
-  display:none;flex-direction:column;background:var(--canvas);border:1px solid var(--hairline);
-  border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.20),0 2px 8px rgba(0,0,0,.06);overflow:hidden}
+#runner{position:absolute;right:0;top:0;bottom:0;width:var(--side-w);z-index:45;
+  display:none;flex-direction:column;background:var(--canvas);border-left:1px solid var(--hairline);
+  box-shadow:-14px 0 40px rgba(0,0,0,.14);overflow:hidden}
+#subbar{display:flex;align-items:center;gap:8px;padding:6px 18px;flex:none;
+  border-bottom:1px solid var(--hairline-soft);background:var(--canvas);min-height:36px}
+#subbar .seg{background:var(--soft)}
+#subbar:empty{display:none}
+#seg-sub button{white-space:nowrap}
 body.rn-open #runner{display:flex}
+/* 抽屉打开时正文列让出同宽右侧空间：既不盖住正文，也不至于把抽屉压得很窄 */
+body.rn-open #main{padding-right:var(--side-w);transition:padding-right .18s ease}
+@media (max-width:1100px){ body.rn-open #main{padding-right:0} }
 /* 顶部分栏：工作区 / 运行 / 终端 */
 .rn-tabs{display:flex;gap:2px;flex:none}
 .rn-tab{position:relative;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--faint);
@@ -811,6 +819,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
     </header>
+    <div id="subbar"><div class="seg seg-sm seg-sub" id="seg-sub" title="子模式（同一模式下更细的分工）"></div></div>
 
     <div id="msg-scroll">
       <div id="msg-list"></div>
@@ -984,7 +993,8 @@ var DEF_CFG = {
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
   persona: '',                  // v0.6.0：当前选中的配方 id
-  autoRoute: true,              // v0.6.0：按输入自动选模式
+  autoRoute: true,
+  sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -1572,6 +1582,7 @@ var NET = (function(){
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
+    var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
     if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
@@ -4231,16 +4242,34 @@ var RUNNER = (function(){
     if (pcb) pcb.addEventListener('click', pvClose);
 
 
-    /* --- 左缘拖宽（320~2400px，双击复位，持久化）--- */
+    /* v1.2：左右两侧同宽 —— 抽屉默认宽度 = (视口 - 正文列)/3，夹在 300~420；拖过就记住自定义宽度 */
+var _customW = null;
+try { _customW = parseInt(localStorage.getItem('sc.rn.w2'), 10) || null; } catch(e){ _customW = null; }
+function fitSide(){
+  if (_customW){ document.documentElement.style.setProperty('--side-w', _customW + 'px'); return _customW; }
+  var vw = window.innerWidth || 1280;
+  var w = Math.round(Math.min(420, Math.max(300, (vw - 780) / 3)));
+  document.documentElement.style.setProperty('--side-w', w + 'px');
+  return w;
+}
+
+/* --- 左缘拖宽（300~2400px，双击复位，持久化；拖动时左侧栏一起同步宽度）--- */
     var rz = $('#rn-resize'), runner = $('#runner'), drag = null;
-    var W_MIN = 320, W_MAX = 2400;
+    var W_MIN = 300, W_MAX = 2400;
     function clampW(w){ return Math.max(W_MIN, Math.min(W_MAX, Math.round(w))); }
-    function setW(w){ runner.style.width = clampW(w) + 'px'; }
-    function resetW(){ runner.style.width = ''; try { localStorage.removeItem('sc.rn.w'); } catch(e){} }
-    try {
-      var sw = parseInt(localStorage.getItem('sc.rn.w'), 10);
-      if (sw) setW(sw);
-    } catch(e){}
+    function setW(w){
+  var n = clampW(w);
+  runner.style.width = n + 'px';
+  document.documentElement.style.setProperty('--side-w', n + 'px');
+  return n;
+}
+    function resetW(){
+  _customW = null; runner.style.width = '';
+  try { localStorage.removeItem('sc.rn.w2'); } catch(e){}
+  fitSide();
+}
+    if (_customW){ setW(_customW); } else fitSide();
+    window.addEventListener('resize', function(){ if (!_customW) fitSide(); });
     if (rz){
       rz.addEventListener('mousedown', function(e){
         if (e.button !== 0) return;
@@ -4258,7 +4287,7 @@ var RUNNER = (function(){
       if (!drag) return;
       drag = null;
       document.body.classList.remove('rn-dragging');
-      try { localStorage.setItem('sc.rn.w', String(Math.round(runner.getBoundingClientRect().width))); } catch(e){}
+      try { _customW = setW(runner.getBoundingClientRect().width); localStorage.setItem('sc.rn.w2', String(_customW)); } catch(e){}
     });
   }
 
@@ -5707,7 +5736,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.1.0', ua = navigator.userAgent || '';
+      var ver = 'v1.2.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7156,6 +7185,23 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       for (var sgi = 0; sgi < seg.children.length; sgi++)
         seg.children[sgi].classList.toggle('on', seg.children[sgi].getAttribute('data-mode') === md);
     }
+    var subEl = $('#seg-sub');
+    if (subEl){
+      var subList = MODE.subList(S.cfg.mode), curSub = MODE.sub(S.cfg.mode);
+      subEl.textContent = '';
+      var bar = document.getElementById('subbar');
+      if (bar) bar.style.display = subList.length ? '' : 'none';
+      if (!subList.length) subEl.style.display = 'none';
+      else {
+        subEl.style.display = '';
+        for (var si = 0; si < subList.length; si++) (function(x){
+          var b2 = el('button', { type: 'button', 'data-sub': x.id, title: x.hint || '' });
+          b2.textContent = x.name;
+          if (curSub && curSub.id === x.id) b2.classList.add('on');
+          subEl.appendChild(b2);
+        })(subList[si]);
+      }
+    }
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
     if (selM && act !== selM){
       var ps = S.cfg.presets || [];
@@ -8388,6 +8434,13 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       if (UI.updateEmpty) UI.updateEmpty();
       return;
     }
+    var sb = t.closest('#seg-sub [data-sub]');
+    if (sb){
+      MODE.setSub(sb.getAttribute('data-sub'));
+      renderComposerCtl();
+      toast('子模式：' + MODE.sub().name);
+      return;
+    }
     var mb = t.closest('#seg-mode [data-mode]');
     if (mb){
       var md = mb.getAttribute('data-mode');
@@ -8910,6 +8963,10 @@ var FS = (function(){
         next(); return;
       }
       if (EXT.isKnownBuiltin(c.op) && !EXT.isOn(c.op)){ parts.push('[fs-result] ' + c.op + ' 已在扩展里关闭'); next(); return; }
+      if (MODE.denied(c.op)){ /* v1.2：Plan 子模式只读锁 */
+        parts.push('[拦截] 当前是 Plan（规划）子模式：只读，不允许 ' + c.op + '。先把方案写清楚，等用户确认后再切到 Build 落地。');
+        next(); return;
+      }
       if (c.op === 'cmd' || c.op === 'git'){
         var raw = String(c.path || '').trim();
         if (!raw){ parts.push('[cmd] 命令为空'); next(); return; }
@@ -9261,6 +9318,53 @@ var EXT = (function(){
    路由：按本轮输入猜该用哪个模式（只在 autoRoute 开时生效，切了就看得见）。
    配方：名字 + 一段提示词 + 底座（chat/work/agent）；选中后挂在底座上跑，提示词追加进 system。 */
 var MODE = (function(){
+  /* v1.2：模式细分 —— 每种基础模式下的子模式，决定提示词与工具闸门 */
+  var SUBS = {
+    chat: [
+      { id: 'fast', name: '标准', hint: '直答，不铺陈',
+        prompt: '子模式 Fast：直接给答案，结论先行，控制篇幅；不需要工具就别调。' },
+      { id: 'think', name: '深度思考', hint: '长推理',
+        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。' },
+      { id: 'research', name: '深度研究', hint: '多轮检索写报告', tools: ['web', 'search'],
+        prompt: '子模式 Deep Research：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
+          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。' }
+    ],
+    work: [
+      { id: 'canvas', name: '画布', hint: '草稿与成品分离',
+        prompt: '子模式 Canvas：正文只放结论与说明，长文/代码/表格放 ```vfs-write 草稿里，便于用户单独查看与导出。' },
+      { id: 'ptc', name: '沙箱脚本', hint: '写脚本一次跑完',
+        prompt: '子模式 PTC：把批处理写成一段脚本用 ```run 执行（html/js 沙箱），读它的输出作为结果；' +
+          '不要在正文里手算大量数据。' },
+      { id: 'vfs', name: '虚拟工作区', hint: '内存多文件',
+        prompt: '子模式 VFS：多文件成果都放 ```vfs-write（内存虚拟工作区，不碰真实磁盘），最后提示用户可打包导出。' }
+    ],
+    agent: [
+      { id: 'plan', name: '规划', hint: '只读推演', deny: ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'],
+        prompt: '子模式 Plan：只读。用 ```fs-list / ```fs-read 摸清现状，产出分步计划（每步写清改哪个文件、怎么验），' +
+          '不要写盘、不要跑命令。等用户说「执行」再落地。' },
+      { id: 'build', name: '构建', hint: '落地修改',
+        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。' },
+      { id: 'team', name: '子母协作', hint: '派活给子智能体',
+        prompt: '子模式 Sub-Agents：把任务拆成 2~4 块，用 ```agent explore|coder|review 派出去（explore 只读、coder 写暂存、' +
+          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。' }
+    ]
+  };
+  function subList(mode){ return SUBS[mode || S.cfg.mode] || []; }
+  function sub(mode){
+    var m = mode || S.cfg.mode || 'chat', list = subList(m), id = (S.cfg.sub || {})[m];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return list[0] || null;
+  }
+  function setSub(id, mode){
+    var m = mode || S.cfg.mode || 'chat';
+    var o = Object.assign({}, S.cfg.sub || {}); o[m] = id;
+    setCfg({ sub: o });
+  }
+  function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
+  /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
+  function denyList(){ var x = sub(); return (x && x.deny) || []; }
+  function denied(op){ return denyList().indexOf(op) >= 0; }
+
   var RULES = [
     ['agent', /(工作区|仓库|改代码|重构|单元测试|跑测试|读一下|目录结构|\bgit\b|\bdiff\b|补丁|\.(js|ts|tsx|py|java|go|rs|md|json|html)\b)/i],
     ['work',  /(抓|爬|下载|检索|搜索|查一下|网页|链接|视频|图片|截图|表格|\bpdf\b|docx|excel|接口|\bapi\b|脚本|生成.*(html|图表|报告))/i]
@@ -9293,7 +9397,8 @@ var MODE = (function(){
       seg.appendChild(b);
     });
   }
-  return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI };
+  return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
+           SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied };
 })();
 
 /* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
