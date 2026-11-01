@@ -273,6 +273,7 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .dl-head select{flex:1;min-width:0;height:27px;border-radius:8px;border:1px solid var(--hairline);background:var(--canvas);font-size:12px;padding:0 5px}
 .dl-head .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
 .dl-head .dot.on{background:var(--primary)}
+.dl-tag{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--lift);color:var(--muted);flex:none}
 .dl-body{padding:10px 12px;overflow:auto;min-height:200px;max-height:calc(100vh - 270px)}
 .dl-msg{margin-bottom:12px;font-size:14px;line-height:1.65}
 .dl-msg .who{font-size:11px;color:var(--faint);margin-bottom:3px}
@@ -1023,7 +1024,8 @@ var DEF_CFG = {
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
   dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）
-  research: false,               // v1.8：深度研究（原 Chat 子模式，现为「+」里的开关）              // v0.6.0：按输入自动选模式
+  research: false,               // v1.8：深度研究（原 Chat 子模式，现为「+」里的开关）
+  readonly: false,               // v1.9：Agent 只读（原「规划」子模式的硬锁，现在是一个开关）              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -5768,7 +5770,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.8.0', ua = navigator.userAgent || '';
+      var ver = 'v1.9.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6720,6 +6722,7 @@ var DUAL = (function(){
     var box = el('div', { class: 'dl-pane' });
     var head = el('div', { class: 'dl-head' });
     head.appendChild(el('span', { class: 'dot' + (S.dualBusy ? ' on' : '') }));
+    if (S.cfg.research) head.appendChild(el('span', { class: 'dl-tag', text: '深度研究' }));
     var sel = el('select', { class: 'dl-model' });
     var cur = pick(side);
     opts().forEach(function(o){ sel.appendChild(el('option', { value: o.v, text: o.t, selected: o.v === cur ? '' : null })); });
@@ -7553,11 +7556,11 @@ function sendMessage(){
   }
   function popMore(){
     popMode = 'more';
-    popItems([
-      { t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' },
-      { t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '联网检索写报告（仅 Chat）', act: 'go-research' },
-    { t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' }
-    ], '更多');
+    var items = [{ t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' }];
+    if (S.cfg.mode === 'chat') items.push({ t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' });
+    if (S.cfg.mode === 'agent') items.push({ t: (S.cfg.readonly ? '✓ 只读（不改盘）' : '只读（不改盘）'), p: '本轮不改文件、不跑命令', act: 'go-readonly' });
+    items.push({ t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' });
+    popItems(items, '更多');
   }
   function popPrompts(filter){
     popMode = 'prompt';
@@ -7616,6 +7619,12 @@ function sendMessage(){
       if ((S.cfg.mode || 'chat') !== 'chat'){ toast('深度研究只在 Chat 模式下可用', true); return; }
       S.cfg.research = !S.cfg.research; saveCfg(); popMore();
       toast(S.cfg.research ? '深度研究：开（会多轮检索再写报告）' : '深度研究：关');
+      return;
+    }
+    if (pact === 'go-readonly'){
+      if ((S.cfg.mode || 'chat') !== 'agent'){ toast('只读锁只在 Agent 模式下有意义', true); return; }
+      S.cfg.readonly = !S.cfg.readonly; saveCfg(); popMore();
+      toast(S.cfg.readonly ? '只读：开（本轮不写盘、不跑命令）' : '只读：关');
       return;
     }
     if (pact === 'go-prompt') return popPrompts('');
@@ -9534,6 +9543,12 @@ var MODE = (function(){
   /* v1.8：Chat 不再分子模式（思考强度由上边栏那个下拉控制）；深度研究降级成「+ 更多」里的开关 */
   var RESEARCH_P = '深度研究：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
     '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。';
+  /* v1.9：Agent 合并成一个模式 —— 只读探查 → 计划 → 落地 → 需要并行才派子智能体 */
+  var AGENT_P = '子智能体（Agent）：先只读探查（```fs-list / ```fs-read / ```git diff），再给分步计划；' +
+    '要改的才动手，改前先读原文，改动用最小 diff；' +
+    '只有当任务能拆成互不依赖的几块（≥2 处并行检索或修改）时才用 ```agent explore|coder|review 派出去，' +
+    '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。';
+  var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
   var SUBS = {
     chat: [],
     work: [
@@ -9545,16 +9560,7 @@ var MODE = (function(){
       { id: 'vfs', name: '虚拟工作区', hint: '内存多文件',
         prompt: '子模式 VFS：多文件成果都放 ```vfs-write（内存虚拟工作区，不碰真实磁盘），最后提示用户可打包导出。' }
     ],
-    agent: [
-      { id: 'plan', name: '规划', hint: '只读推演', deny: ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'],
-        prompt: '子模式 Plan：只读。用 ```fs-list / ```fs-read 摸清现状，产出分步计划（每步写清改哪个文件、怎么验），' +
-          '不要写盘、不要跑命令。等用户说「执行」再落地。' },
-      { id: 'build', name: '构建', hint: '落地修改',
-        prompt: '子模式 Build：直接落地。改前先读，改动用最小 diff，改完说清改了哪些文件、怎么验证。' },
-      { id: 'team', name: '子母协作', hint: '派活给子智能体',
-        prompt: '子模式 Sub-Agents：把任务拆成 2~4 块，用 ```agent explore|coder|review 派出去（explore 只读、coder 写暂存、' +
-          'review 纯推理），拿到摘要后自己合并、落盘、验证。子智能体不占你的上下文，别自己重复它们的活。' }
-    ]
+    agent: []
   };
   function subList(mode){ return (SUBS[mode || S.cfg.mode || 'chat'] || []).slice(); }
   function sub(mode){
@@ -9570,8 +9576,14 @@ var MODE = (function(){
   }
   function subPrompt(){
     var x = sub(); if (x) return x.prompt || '';
-    if ((S.cfg.mode || 'chat') === 'chat' && S.cfg.research) return RESEARCH_P;
-    return '';
+    var m = S.cfg.mode || 'chat';
+    var out = [];
+    if (m === 'chat' && S.cfg.research) out.push(RESEARCH_P);
+    if (m === 'agent'){
+      out.push(AGENT_P);
+      if (S.cfg.readonly) out.push('本轮只读：不要写盘、不要打补丁、不要跑改动型命令。');
+    }
+    return out.join('\n\n');
   }
   /* v1.8：模型自己声明的思考强度字段（上边栏下拉直接用这些原生值） */
   function metaOf(id){
@@ -9592,7 +9604,11 @@ var MODE = (function(){
     return (p && p.efforts && p.efforts.length) ? p.efforts : null;
   }
   /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
-  function denyList(){ var x = sub(); return (x && x.deny) || []; }
+  function denyList(){
+    var x = sub(), list = (x && x.deny) ? x.deny.slice() : [];
+    if ((S.cfg.mode || 'chat') === 'agent' && S.cfg.readonly) list = list.concat(READONLY_OPS);
+    return list;
+  }
   function denied(op){ return denyList().indexOf(op) >= 0; }
 
   var RULES = [
