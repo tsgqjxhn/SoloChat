@@ -387,6 +387,11 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
 .cz-l{justify-self:stretch;justify-content:flex-start}
 #btn-sub{margin-left:auto}
+.ag-btn{display:none;align-items:center;height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--hairline);
+  background:var(--canvas);font-size:12px;color:var(--muted);flex:none}
+.ag-btn:hover{color:var(--ink);border-color:var(--ring-line)}
+.ag-btn.read{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,var(--hairline))}
+.ag-btn.write{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 40%,var(--hairline))}
 .cz-r2{justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 #ctx-ring.warn .ctx-num{color:var(--warning)}
@@ -855,6 +860,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <div id="chips"></div>
         <div class="crow">
           <div class="czone cz-l">
+            <button id="btn-agmode" class="ag-btn" title="Agent 行为：Auto 智能体协作 · Read 只读 · Write 直接写盘">Auto</button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
@@ -1025,7 +1031,7 @@ var DEF_CFG = {
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
   dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）
   research: false,               // v1.8：深度研究（原 Chat 子模式，现为「+」里的开关）
-  readonly: false,               // v1.9：Agent 只读（原「规划」子模式的硬锁，现在是一个开关）              // v0.6.0：按输入自动选模式
+  agentMode: 'auto',             // v1.10：Agent 行为 auto（智能体协作）/ read（只读）/ write（直接写）              // v0.6.0：按输入自动选模式
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa
   searchKey: '', searchCount: 5,
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
@@ -5770,7 +5776,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.9.0', ua = navigator.userAgent || '';
+      var ver = 'v1.10.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7391,6 +7397,15 @@ function sendMessage(){
     b.appendChild(el('span', { class: 'caret' }));
     b.title = '子模式：' + (x ? x.name : '—') + '（' + ((x && x.hint) || '') + '）';
   }
+  var _agBtn = $('#btn-agmode');
+  if (_agBtn) _agBtn.addEventListener('click', function(){
+    var order = ['auto', 'read', 'write'];
+    var cur = S.cfg.agentMode || 'auto';
+    var next = order[(order.indexOf(cur) + 1) % order.length];
+    setCfg({ agentMode: next });
+    renderComposerCtl();
+    toast(next === 'read' ? 'Read：只读，不改盘' : (next === 'write' ? 'Write：直接落地' : 'Auto：智能体协作'));
+  });
   var _subBtn = $('#btn-sub');
   if (_subBtn) _subBtn.addEventListener('click', function(e){ e.stopPropagation(); openSubPop(); });
 
@@ -7410,6 +7425,16 @@ function sendMessage(){
     renderSubPin();
     var dblBtn = $('#btn-dual');
     if (dblBtn) dblBtn.style.display = (S.cfg.mode === 'chat') ? '' : 'none';
+    var agBtn = $('#btn-agmode');
+    if (agBtn){
+      var am = S.cfg.agentMode || 'auto';
+      agBtn.style.display = (S.cfg.mode === 'agent') ? 'inline-flex' : 'none';
+      agBtn.textContent = am === 'read' ? 'Read' : (am === 'write' ? 'Write' : 'Auto');
+      agBtn.className = 'ag-btn' + (am === 'read' ? ' read' : (am === 'write' ? ' write' : ''));
+      agBtn.title = am === 'read' ? 'Read：只读，写盘/补丁/命令全部被拦'
+        : (am === 'write' ? 'Write：直接落地，最小 diff，先改再说'
+        : 'Auto：智能体协作，先探查再计划再落地，必要时派子智能体');
+    }
     if (S.cfg.mode !== 'chat' && S.cfg.dual){ setCfg({ dual: false }); document.body.classList.remove('dual-on'); }
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
     if (selM && act !== selM){
@@ -7558,7 +7583,6 @@ function sendMessage(){
     popMode = 'more';
     var items = [{ t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' }];
     if (S.cfg.mode === 'chat') items.push({ t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' });
-    if (S.cfg.mode === 'agent') items.push({ t: (S.cfg.readonly ? '✓ 只读（不改盘）' : '只读（不改盘）'), p: '本轮不改文件、不跑命令', act: 'go-readonly' });
     items.push({ t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' });
     popItems(items, '更多');
   }
@@ -7619,12 +7643,6 @@ function sendMessage(){
       if ((S.cfg.mode || 'chat') !== 'chat'){ toast('深度研究只在 Chat 模式下可用', true); return; }
       S.cfg.research = !S.cfg.research; saveCfg(); popMore();
       toast(S.cfg.research ? '深度研究：开（会多轮检索再写报告）' : '深度研究：关');
-      return;
-    }
-    if (pact === 'go-readonly'){
-      if ((S.cfg.mode || 'chat') !== 'agent'){ toast('只读锁只在 Agent 模式下有意义', true); return; }
-      S.cfg.readonly = !S.cfg.readonly; saveCfg(); popMore();
-      toast(S.cfg.readonly ? '只读：开（本轮不写盘、不跑命令）' : '只读：关');
       return;
     }
     if (pact === 'go-prompt') return popPrompts('');
@@ -9003,7 +9021,10 @@ function sendMessage(){
       UI.openSettings(); // 重建以刷新显示
       return;
     }
-    /* v3.0：命令面板 / 会话内查找优先接管键盘 */
+    /* v1.10：浏览器快捷键已放行（Ctrl+C 才能复制），把打印/保存/看源码挡掉 */
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && /^(p|s|u)$/i.test(e.key || '')){ e.preventDefault(); return; }
+
+  /* v3.0：命令面板 / 会话内查找优先接管键盘 */
     if (UI.PAL.isOpen()){ if (UI.PAL.key(e)) { e.preventDefault(); return; } }
     if (UI.FIND.isOpen() && UI.FIND.key(e)){ e.preventDefault(); return; }
     var isMod = e.ctrlKey || e.metaKey;
@@ -9580,8 +9601,13 @@ var MODE = (function(){
     var out = [];
     if (m === 'chat' && S.cfg.research) out.push(RESEARCH_P);
     if (m === 'agent'){
-      out.push(AGENT_P);
-      if (S.cfg.readonly) out.push('本轮只读：不要写盘、不要打补丁、不要跑改动型命令。');
+      var am = S.cfg.agentMode || 'auto';
+      if (am === 'write'){
+        out.push('直接落地：先读要改的文件，然后用最小 diff 改完，改完说清改了哪些文件、怎么验证；不需要先出计划。');
+      } else {
+        out.push(AGENT_P);
+        if (am === 'read') out.push('本轮只读：不要写盘、不要打补丁、不要跑改动型命令。');
+      }
     }
     return out.join('\n\n');
   }
@@ -9606,7 +9632,7 @@ var MODE = (function(){
   /* 该子模式禁用的操作（目前只用于 Plan 的只读锁） */
   function denyList(){
     var x = sub(), list = (x && x.deny) ? x.deny.slice() : [];
-    if ((S.cfg.mode || 'chat') === 'agent' && S.cfg.readonly) list = list.concat(READONLY_OPS);
+    if ((S.cfg.mode || 'chat') === 'agent' && (S.cfg.agentMode || 'auto') === 'read') list = list.concat(READONLY_OPS);
     return list;
   }
   function denied(op){ return denyList().indexOf(op) >= 0; }

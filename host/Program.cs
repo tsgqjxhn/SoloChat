@@ -248,7 +248,7 @@ namespace SoloChatHost
             s.IsGeneralAutofillEnabled = false;
             s.IsPasswordAutosaveEnabled = false;
             s.AreDevToolsEnabled = DevMode;
-            s.AreBrowserAcceleratorKeysEnabled = false; // 浏览器内置快捷键（Ctrl+N 等）交给页面处理
+            s.AreBrowserAcceleratorKeysEnabled = true;  // 必须开：关掉会连 Ctrl+C/V/X/A 一起失效（回答复制不了）
 
             var core = wv.CoreWebView2;
             /* 关键：虚拟主机映射 → origin 为 https://app.local（安全上下文，IDB/crypto.subtle 可用） */
