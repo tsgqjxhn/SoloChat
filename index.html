@@ -253,16 +253,19 @@ body.sb-collapsed #sidebar{display:none}
    放进 .code-bar 后会叠在 .code-dl 上，表现为「复制按钮重叠出现」 */
 .md pre .code-bar .code-copy,.md pre .code-bar .code-run{position:static;top:auto;right:auto;padding:0}
 
+/* v1.12：输入框内的模式胶囊（Agent 的 Auto/Read/Write、Work 的子模式） */
+.cmode{display:none;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:8px;flex:none;
+  align-self:flex-start;margin-top:1px;background:var(--canvas);border:1px solid var(--hairline);
+  font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+.cmode:hover{color:var(--ink);border-color:var(--ring-line)}
+.cmode.read{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 45%,var(--hairline))}
+.cmode.write{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 45%,var(--hairline))}
+
 /* 运行面板（右侧抽屉，v1.9）：沙箱 iframe 预览 + 控制台 / C 解释输出 */
 /* v0.2.5：右侧面板改成悬浮抽屉 —— 脱离 flex 流，覆盖在主栏之上，不再挤压正文与输入框的宽度/高度 */
 #runner{position:absolute;right:0;top:0;bottom:0;width:var(--side-w);z-index:45;
   display:none;flex-direction:column;background:var(--canvas);border-left:1px solid var(--hairline);
   box-shadow:-14px 0 40px rgba(0,0,0,.14);overflow:hidden}
-.sub-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 9px;border-radius:14px;
-  background:var(--soft);font-size:12px;font-weight:600;color:var(--body);white-space:nowrap;max-width:160px}
-.sub-btn:hover{background:var(--hairline-soft);color:var(--ink)}
-#btn-sb.on{color:var(--primary)}
-.sub-btn .lv{color:var(--faint);font-weight:500}
 .caret{width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;
   border-top:4px solid currentColor;opacity:.5;margin-left:2px}
 #dual-view{display:none;grid-template-columns:1fr 1fr;gap:12px;max-width:calc(var(--content-w) + 120px);margin:0 auto;padding:16px}
@@ -386,12 +389,6 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .cwrap{display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
 .cz-l{justify-self:stretch;justify-content:flex-start}
-#btn-sub{margin-left:auto}
-.ag-btn{display:none;align-items:center;height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--hairline);
-  background:var(--canvas);font-size:12px;color:var(--muted);flex:none}
-.ag-btn:hover{color:var(--ink);border-color:var(--ring-line)}
-.ag-btn.read{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,var(--hairline))}
-.ag-btn.write{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 40%,var(--hairline))}
 .cz-r2{justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 #ctx-ring.warn .ctx-num{color:var(--warning)}
@@ -860,14 +857,12 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <div id="chips"></div>
         <div class="crow">
           <div class="czone cz-l">
-            <button id="btn-agmode" class="ag-btn" title="Agent 行为：Auto 智能体协作 · Read 只读 · Write 直接写盘">Auto</button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
-            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
           </div>
           <div class="cwrap">
-            <div class="cbox"><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
@@ -5776,7 +5771,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.11.0', ua = navigator.userAgent || '';
+      var ver = 'v1.12.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7371,57 +7366,69 @@ function sendMessage(){
     });
   }
 
-  /* v1.3：子模式下拉 —— 按钮在输入框左侧，点开选小模式，悬停展开更深一档 */
-  function closeSubPop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
-  function openSubPop(){
-    var pop = $('#sub-pop'), btn = $('#btn-sub');
-    if (!pop || !btn) return;
-    if (!pop.hidden){ closeSubPop(); return; }
-    var list = MODE.subList(), cur = MODE.sub();
-    pop.textContent = '';
-    var left = el('div', { class: 'sp-list' });
-    list.forEach(function(x){
-      var it = el('button', { type: 'button', class: 'sp-item' + (cur && cur.id === x.id ? ' on' : '') });
-      it.appendChild(el('span', { class: 'sp-n', text: x.name }));
-      it.appendChild(el('span', { class: 'sp-h', text: x.hint || '' }));
-      it.addEventListener('click', function(){
-        MODE.setSub(x.id);
-        renderComposerCtl();
-        closeSubPop();
+
+  /* v1.12：输入框左侧那枚胶囊 —— Work 选子模式，Agent 选 Auto/Read/Write */
+  function closeModePop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
+  function modeItems(){
+    var out = [];
+    if ((S.cfg.mode || 'chat') === 'work'){
+      var cur = MODE.sub();
+      MODE.subList().forEach(function(x){
+        out.push({ name: x.name, hint: x.hint || '', on: !!(cur && cur.id === x.id),
+          run: function(){ MODE.setSub(x.id); } });
       });
-      left.appendChild(it);
+    } else if ((S.cfg.mode || 'chat') === 'agent'){
+      var am = S.cfg.agentMode || 'auto';
+      [ ['auto', 'Auto', '智能体协作'], ['read', 'Read', '只读不改盘'], ['write', 'Write', '直接落地'] ]
+        .forEach(function(t){
+          out.push({ name: t[1], hint: t[2], on: am === t[0], run: function(){ setCfg({ agentMode: t[0] }); } });
+        });
+    }
+    return out;
+  }
+  function openModePop(){
+    var pop = $('#sub-pop'), btn = $('#btn-cmode');
+    if (!pop || !btn) return;
+    if (!pop.hidden){ closeModePop(); return; }
+    var list = el('div', { class: 'sp-list' });
+    modeItems().forEach(function(it){
+      var b = el('button', { type: 'button', class: 'sp-item' + (it.on ? ' on' : '') });
+      b.appendChild(el('span', { class: 'sp-n', text: it.name }));
+      b.appendChild(el('span', { class: 'sp-h', text: it.hint }));
+      b.addEventListener('click', function(){ it.run(); closeModePop(); renderComposerCtl(); });
+      list.appendChild(b);
     });
-    pop.appendChild(left);
+    pop.textContent = ''; pop.appendChild(list);
     var r = btn.getBoundingClientRect();
     pop.style.left = Math.round(r.left) + 'px';
     pop.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
     pop.hidden = false;
   }
-  function renderSubPin(){
-    var b = $('#btn-sub'); if (!b) return;
-    var list = MODE.subList(), x = MODE.sub();
-    b.style.display = list.length ? '' : 'none';   // Chat 没有子模式，直接不显示
-    if (!list.length) return;
+  function renderModeChip(){
+    var b = $('#btn-cmode'); if (!b) return;
+    var md = S.cfg.mode || 'chat';
+    var txt = '', cls = 'cmode';
+    if (md === 'work'){ var x = MODE.sub(); txt = x ? x.name : ''; }
+    else if (md === 'agent'){
+      var am = S.cfg.agentMode || 'auto';
+      txt = am === 'read' ? 'Read' : (am === 'write' ? 'Write' : 'Auto');
+      if (am !== 'auto') cls += ' ' + am;
+    }
+    b.style.display = txt ? 'flex' : 'none';
+    b.className = cls;
     b.textContent = '';
-    b.appendChild(el('span', { id: 'sub-label', text: x ? x.name : '—' }));
+    if (!txt) return;
+    b.appendChild(el('span', { text: txt }));
     b.appendChild(el('span', { class: 'caret' }));
-    b.title = '子模式：' + (x ? x.name : '—') + '（' + ((x && x.hint) || '') + '）';
+    b.title = md === 'work' ? 'Work 子模式：' + txt + '（点开切换）'
+      : 'Agent 行为：' + txt + '（Auto 协作 / Read 只读 / Write 直接落地）';
   }
-  var _agBtn = $('#btn-agmode');
-  if (_agBtn) _agBtn.addEventListener('click', function(){
-    var order = ['auto', 'read', 'write'];
-    var cur = S.cfg.agentMode || 'auto';
-    var next = order[(order.indexOf(cur) + 1) % order.length];
-    setCfg({ agentMode: next });
-    renderComposerCtl();
-    toast(next === 'read' ? 'Read：只读，不改盘' : (next === 'write' ? 'Write：直接落地' : 'Auto：智能体协作'));
-  });
-  var _subBtn = $('#btn-sub');
-  if (_subBtn) _subBtn.addEventListener('click', function(e){ e.stopPropagation(); openSubPop(); });
+  var _cmodeBtn = $('#btn-cmode');
+  if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openModePop(); });
 
   document.addEventListener('click', function(e){
-    if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-sub'))) return;
-    closeSubPop();
+    if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) return;
+    closeModePop();
   });
 
   /* 输入区控件（v1.2）：模式/模型/思考 */
@@ -7432,19 +7439,9 @@ function sendMessage(){
       for (var sgi = 0; sgi < seg.children.length; sgi++)
         seg.children[sgi].classList.toggle('on', seg.children[sgi].getAttribute('data-mode') === md);
     }
-    renderSubPin();
+    renderModeChip();
     var dblBtn = $('#btn-dual');
     if (dblBtn) dblBtn.style.display = (S.cfg.mode === 'chat') ? '' : 'none';
-    var agBtn = $('#btn-agmode');
-    if (agBtn){
-      var am = S.cfg.agentMode || 'auto';
-      agBtn.style.display = (S.cfg.mode === 'agent') ? 'inline-flex' : 'none';
-      agBtn.textContent = am === 'read' ? 'Read' : (am === 'write' ? 'Write' : 'Auto');
-      agBtn.className = 'ag-btn' + (am === 'read' ? ' read' : (am === 'write' ? ' write' : ''));
-      agBtn.title = am === 'read' ? 'Read：只读，写盘/补丁/命令全部被拦'
-        : (am === 'write' ? 'Write：直接落地，最小 diff，先改再说'
-        : 'Auto：智能体协作，先探查再计划再落地，必要时派子智能体');
-    }
     if (S.cfg.mode !== 'chat' && S.cfg.dual){ setCfg({ dual: false }); document.body.classList.remove('dual-on'); }
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
     if (selM && act !== selM){
@@ -9583,13 +9580,12 @@ var MODE = (function(){
   var SUBS = {
     chat: [],
     work: [
-      { id: 'canvas', name: '画布', hint: '草稿与成品分离',
-        prompt: '子模式 Canvas：正文只放结论与说明，长文/代码/表格放 ```vfs-write 草稿里，便于用户单独查看与导出。' },
+      { id: 'canvas', name: '画布', hint: '成品进工作区',
+        prompt: '子模式 Canvas：正文只放结论与说明；成果（长文/表格/代码，单文件或 html+css+js 多文件工程）都写进 ```vfs-write 的内存工作区，' +
+          '不碰真实磁盘；最后告诉用户可以在右侧「工作区」逐个预览、下载或整包导出。' },
       { id: 'ptc', name: '沙箱脚本', hint: '写脚本一次跑完',
         prompt: '子模式 PTC：把批处理写成一段脚本用 ```run 执行（html/js 沙箱），读它的输出作为结果；' +
-          '不要在正文里手算大量数据。' },
-      { id: 'vfs', name: '虚拟工作区', hint: '内存多文件',
-        prompt: '子模式 VFS：多文件成果都放 ```vfs-write（内存虚拟工作区，不碰真实磁盘），最后提示用户可打包导出。' }
+          '不要在正文里手算大量数据。' }
     ],
     agent: []
   };
