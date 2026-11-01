@@ -569,9 +569,18 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 }
 #modal .sub{font-size:13px;color:var(--muted);margin-bottom:16px}
 /* 设置分屏：左目录 / 右内容 */
-#modal .panel.wide{width:min(760px,94vw);padding:0;display:flex;flex-direction:column;overflow:hidden}
-.set-main{display:flex;flex:1;min-height:0}
-.set-nav{width:148px;flex:none;border-right:1px solid var(--hairline);padding:14px 10px}
+#modal .panel.wide{width:min(1060px,95vw);max-height:88vh;padding:0;display:flex;flex-direction:column;overflow:hidden}
+.set-main{display:flex;flex-direction:column;flex:1;min-height:0}
+.set-cols{display:flex;flex:1;min-height:0}
+.set-nav{width:168px;flex:none;border-right:1px solid var(--hairline);padding:14px 10px}
+.set-top{display:flex;align-items:center;gap:2px;padding:0 14px;border-bottom:1px solid var(--hairline);flex:none;
+  background:var(--soft)}
+.set-top .st-name{font-size:13px;font-weight:600;color:var(--ink);padding:0 12px 0 2px;margin-right:6px;
+  border-right:1px solid var(--hairline);line-height:34px}
+.set-top button{border:0;background:none;font:inherit;font-size:13px;color:var(--muted);padding:9px 12px;
+  border-bottom:2px solid transparent;cursor:pointer}
+.set-top button:hover{color:var(--ink)}
+.set-top button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--primary)}
 .set-title{
   font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--ink);
   letter-spacing:var(--tracking-display);padding:2px 10px 12px;
@@ -579,7 +588,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .set-nav button{display:block;width:100%;text-align:left;padding:8px 12px;margin:2px 0;border-radius:var(--r-md);color:var(--muted);font-size:14px}
 .set-nav button:hover{background:var(--soft);color:var(--ink)}
 .set-nav button.on{background:var(--soft);color:var(--ink);font-weight:500}
-.set-body{flex:1;min-width:0;overflow-y:auto;padding:18px 20px;max-height:72vh}
+.set-body{flex:1;min-width:0;overflow-y:auto;padding:18px 22px;max-height:76vh}
 .set-page{display:none}
 .set-page.on{display:block}
 .set-page h2{margin-bottom:14px}
@@ -4011,7 +4020,7 @@ var RUNNER = (function(){
     if (agentPath) head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '↑ 上级', 'data-ag-up': '1' }));
     head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '刷新', 'data-ag-refresh': '1' }));
     list.appendChild(head);
-    fsCall('list', agentPath || '', '', root).then(function(raw){
+    NET.fs('list', agentPath || '', '', root).then(function(raw){
       var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
       var entries = (r && r.entries) || [];
       if (cnt) cnt.textContent = entries.length ? ('（' + entries.length + ' 项）') : '';
@@ -4036,7 +4045,7 @@ var RUNNER = (function(){
     var root = agentRoot(); if (!root) return;
     var path = agentRel(name), box = $('#rn-ws-view');
     if (!box) return;
-    fsCall('read', path, '', root).then(function(raw){
+    NET.fs('read', path, '', root).then(function(raw){
       var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
       var txt = String((r && r.text) || '');
       box.hidden = false;
@@ -4052,7 +4061,7 @@ var RUNNER = (function(){
     var root = agentRoot(); if (!root) return;
     var path = agentRel(name);
     if (!confirm('删除 ' + path + ' ？不可撤销。')) return;
-    fsCall('delete', path, '', root).then(function(){
+    NET.fs('delete', path, '', root).then(function(){
       UI.toast('已删除 ' + path); renderWs();
     }, function(err){ UI.toast('删除失败：' + (err && err.message || err), true); });
   }
@@ -5404,9 +5413,12 @@ var UI = (function(){
     var c = S.cfg;
     var main = el('div', { class: 'set-main' });
     var wrap = el('div', {}, [main]);
+    var top = el('div', { class: 'set-top' });   /* v1.15：扩展设置的上边栏 */
+    var cols = el('div', { class: 'set-cols' });
     var nav = el('div', { class: 'set-nav' });
     var body = el('div', { class: 'set-body' });
-    main.appendChild(nav); main.appendChild(body);
+    cols.appendChild(nav); cols.appendChild(body);
+    main.appendChild(top); main.appendChild(cols);
     nav.appendChild(el('div', { class: 'set-title', text: '设置' }));
     /* v3.0 #1：设置搜索（按文字过滤当前页的字段行；有输入时跨页命中） */
     (function(){
@@ -5433,7 +5445,28 @@ var UI = (function(){
       });
     })();
 
-    function page(id, label, buildFn){
+    /* v1.15：扩展相关页统统收到上边栏里，左目录仍可按页切换 */
+  var TOP_TABS = [ ['agents', '智能体'], ['tools', '工具'], ['prompt', '提示词'], ['skills', '技能'], ['plugins', '插件'] ];
+  var topBtns = {};
+  top.appendChild(el('span', { class: 'st-name', text: '扩展' }));
+  TOP_TABS.forEach(function(t){
+    var b = el('button', { type: 'button', 'data-top': t[0], text: t[1] });
+    topBtns[t[0]] = b; top.appendChild(b);
+  });
+  function topGo(key){
+    var pg = (key === 'prompt') ? 'prompt' : 'ext';
+    var pages = document.querySelectorAll('#modal .set-page');
+    for (var i = 0; i < pages.length; i++) pages[i].classList.toggle('on', pages[i].getAttribute('data-page') === pg);
+    for (var j = 0; j < nav.children.length; j++) nav.children[j].classList.toggle('on', nav.children[j].getAttribute('data-sp') === pg);
+    for (var k in topBtns) topBtns[k].classList.toggle('on', k === key);
+    var ext = document.querySelector('#modal .set-page[data-page="ext"]');
+    if (ext && ext._setFilter && key !== 'prompt') ext._setFilter(key);
+    var bd = document.querySelector('#modal .set-body'); if (bd) bd.scrollTop = 0;
+  }
+  top.addEventListener('click', function(e){
+    var b = e.target.closest('[data-top]'); if (b) topGo(b.getAttribute('data-top'));
+  });
+  function page(id, label, buildFn){
       var p = el('div', { class: id === 'conn' ? 'set-page on' : 'set-page', 'data-page': id });
       p.appendChild(el('h2', { text: label }));
       buildFn(p);
@@ -5787,71 +5820,48 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     /* —— 页⑥ 关于 —— */
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
-      p.appendChild(el('div', { class: 'sub', text: '内置功能默认全部开启；关掉后模型调用会被直接拒绝。下面可添加自己的工具（一段 JS，围栏名=工具名）或技能（一段说明，模型需要时才加载全文，平时只占一行）。' }));
-      var modeBox = el('div', { class: 'sub' });
-      p.appendChild(modeBox);
-      function renderModeBox(){
-        function cnt(mode){
-          var on = 0, all = EXT.all();
-          for (var i = 0; i < all.length; i++){
-            var it = all[i];
-            if ((it.modes || []).indexOf(mode) < 0) continue;
-            if (it.on !== false) on++;
-          }
-          return on;
+    var filter = 'tools';
+    var intro = el('div', { class: 'sub' });
+    p.appendChild(intro);
+    var modeBox = el('div', { class: 'sub' });
+    p.appendChild(modeBox);
+    function renderModeBox2(){
+      function cnt(mode){
+        var on = 0, all = EXT.all();
+        for (var i = 0; i < all.length; i++){
+          var it = all[i];
+          if ((it.modes || []).indexOf(mode) < 0) continue;
+          if (it.on !== false) on++;
         }
-        modeBox.textContent = '模式 = 提示词档位 + 工具集 + 限额。Chat：' + cnt('chat') + ' 项能力（默认无工具）；Work：' + cnt('work') + ' 项；Agent：' + cnt('agent') + ' 项。' +
-          ' 子智能体：' + SUB.profiles('work').length + ' 个（Work）/ ' + SUB.profiles('agent').length + ' 个（Agent）。';
+        return on;
       }
-      renderModeBox();
+      modeBox.textContent = '模式 = 提示词档位 + 工具集 + 限额。Chat：' + cnt('chat') + ' 项能力（默认无工具）；Work：' + cnt('work') + ' 项；Agent：' + cnt('agent') + ' 项。' +
+        ' 子智能体：' + SUB.profiles('work').length + ' 个（Work）/ ' + SUB.profiles('agent').length + ' 个（Agent）。';
+    }
+    renderModeBox2();
+
+    /* 工具页：自动选模式开关 */
+    var arRow = el('div', { class: 'f-row' });
+    (function(){
       var arCk = el('input', { type: 'checkbox' }); arCk.checked = !!S.cfg.autoRoute;
       arCk.addEventListener('change', function(){ setCfg({ autoRoute: arCk.checked }); });
-      p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [arCk, ' 自动选模式（按本轮输入猜该用 Chat / Work / Agent，顶栏会跟着变）'])]));
-      var list = el('div', { class: 'f-grid' });
-      p.appendChild(list);
-      function renderExt(){
-        list.innerHTML = '';
-        EXT.all().forEach(function(it){
-          var ck = el('input', { type: 'checkbox' }); ck.checked = it.on;
-          ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox(); });
-          var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : (it.kind === 'agent' ? '子智能体' : '工具'));
-          var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
-          var row = el('div', { class: 'f-row' }, [
-            el('label', {}, [ck, ' ' + (it.title || it.name)]),
-            el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + (it.kind === 'agent' && it.writes ? ' · 可写(暂存)' : '') + ' · ' + (it.brief || it.desc || '') + (it.kind === 'builtin' ? '' : ' · ' + it.name) })
-          ]);
-          if (it.kind !== 'builtin'){
-            var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-            delBtn.addEventListener('click', function(){ EXT.del(it.id); renderExt(); });
-            row.appendChild(delBtn);
-          }
-          list.appendChild(row);
-        });
-        MODE.personas().forEach(function(pp){
-          var delBtn2 = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-          delBtn2.addEventListener('click', function(){ delPersona(pp.id); renderExt(); });
-          var prow = el('div', { class: 'f-row' }, [
-            el('label', {}, [' ' + (pp.name || pp.id)]),
-            el('span', { class: 'hint', text: '自定义模式 · 底座 ' + pp.base + ' · ' + String(pp.prompt || '').slice(0, 40) })
-          ]);
-          prow.appendChild(delBtn2);
-          list.appendChild(prow);
-        });
-      }
-      renderExt();
-      p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen","modes":["work"]}（声明式 HTTP，{arg} 会 URL 编码后填入；任意 JS 代码已停用）；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
-      var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}' });
-      p.appendChild(ta);
-      /* v1.1.0：内置子智能体角色（ACL 固定，不可编辑） */
-    p.appendChild(el('div', { style: 'margin-top:14px;font-size:13px;font-weight:600', text: '子智能体角色（内置）' }));
-    p.appendChild(el('div', { class: 'sub', style: 'display:block;white-space:pre-wrap;margin-top:4px;line-height:1.7',
+      arRow.appendChild(el('label', {}, [arCk, ' 自动选模式（按本轮输入猜该用 Chat / Work / Agent）']));
+    })();
+    p.appendChild(arRow);
+
+    var list = el('div', { class: 'f-grid' });
+    p.appendChild(list);
+
+    /* 智能体页 */
+    var agentBox = el('div');
+    agentBox.appendChild(el('div', { style: 'margin:2px 0 8px;font-size:13px;font-weight:600', text: '子智能体角色（内置）' }));
+    agentBox.appendChild(el('div', { class: 'sub', style: 'display:block;white-space:pre-wrap;margin-top:4px;line-height:1.7',
       text: SUB.ROLES.map(function(r){
         var a = SUB.aclOf(r);
         return '· ' + r.name + ' — ' + (r.desc || '') + '\n  ACL：' + (a.length ? a.join(' / ') : '无工具（纯推理）');
       }).join('\n') }));
-    p.appendChild(el('div', { class: 'sub', style: 'display:block;margin-top:6px',
+    agentBox.appendChild(el('div', { class: 'sub', style: 'display:block;margin-top:6px',
       text: '子智能体独立上下文、不落库；越权调用会被调度器拦截并回注原因；结果以 [subagent-result: 角色] 摘要回到母上下文。' }));
-    /* v1.0.1：命令审计（宿主留痕） */
     var auditBtn = el('button', { class: 'btn btn-sec', text: '命令记录', style: 'margin:10px 0 4px' });
     auditBtn.addEventListener('click', function(){
       NET.bridge.cmdAudit().then(function(lines){
@@ -5863,21 +5873,85 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         openModal(box, false);
       }, function(e){ toast('读取失败：' + (e && e.message || e), true); });
     });
-    p.appendChild(auditBtn);
+    agentBox.appendChild(auditBtn);
+    p.appendChild(agentBox);
+
+    /* 添加区（工具 / 插件） */
+    var addBox = el('div');
+    addBox.appendChild(el('div', { class: 'sub', text: '粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}；技能形如 {"kind":"skill","name":"my-style","desc":"写作风格","body":"…"}；插件形如 {"plugin":"x","tools":[…],"skills":[…]}；只给 name + prompt 的会被当成自定义模式。' }));
+    var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen",…}' });
+    addBox.appendChild(ta);
     var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
-      addBtn.addEventListener('click', function(){
-        try {
-          var j = JSON.parse(ta.value);
-          if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
-          else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
-          else { EXT.add(j); UI.toast('已添加：' + j.name); }
-          ta.value = ''; renderExt();
-        } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
-      });
-      p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
+    addBtn.addEventListener('click', function(){
+      try {
+        var j = JSON.parse(ta.value);
+        if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
+        else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
+        else { EXT.add(j); UI.toast('已添加：' + j.name); }
+        ta.value = ''; renderList(filter);
+      } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
     });
-    page('about', '关于', function(p){
-      var ver = 'v1.14.2', ua = navigator.userAgent || '';
+    addBox.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
+    p.appendChild(addBox);
+
+    var INTRO = {
+      agents: '智能体 = 子智能体角色 + 自定义模式。勾选状态决定模型能不能派它出去干活。',
+      tools: '工具 = 内置能力（默认全开，关掉后模型调用会被直接拒绝）+ 你加的自定义工具（声明式 http）。',
+      skills: '技能 = 一段说明文字，平时只占一行，模型需要时才用 \u0060\u0060\u0060skill 取全文。',
+      plugins: '插件 = 一次导入多个工具/技能，导入后分别落在「工具」「技能」两页里，这里只负责导入。'
+    };
+    function renderList(kind){
+      list.textContent = '';
+      var all = EXT.all(), shown = 0;
+      all.forEach(function(it){
+        var k = (it.kind === 'builtin' || it.kind === 'tool') ? 'tools' : (it.kind === 'skill' ? 'skills' : (it.kind === 'agent' ? 'agents' : 'tools'));
+        if (k !== kind) return;
+        shown++;
+        var ck = el('input', { type: 'checkbox' }); ck.checked = it.on;
+        ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox2(); });
+        var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : (it.kind === 'agent' ? '子智能体' : '工具'));
+        var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
+        var row = el('div', { class: 'f-row' }, [
+          el('label', {}, [ck, ' ' + (it.title || it.name)]),
+          el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + (it.kind === 'agent' && it.writes ? ' · 可写(暂存)' : '') + ' · ' + (it.brief || it.desc || '') })
+        ]);
+        if (it.kind !== 'builtin'){
+          var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+          delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); });
+          row.appendChild(delBtn);
+        }
+        list.appendChild(row);
+      });
+      if (kind === 'agents'){
+        MODE.personas().forEach(function(pp){
+          shown++;
+          var delBtn2 = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+          delBtn2.addEventListener('click', function(){ delPersona(pp.id); renderList(filter); });
+          var prow = el('div', { class: 'f-row' }, [
+            el('label', {}, [' ' + (pp.name || pp.id)]),
+            el('span', { class: 'hint', text: '自定义模式 · 底座 ' + pp.base + ' · ' + String(pp.prompt || '').slice(0, 40) })
+          ]);
+          prow.appendChild(delBtn2);
+          list.appendChild(prow);
+        });
+      }
+      if (!shown) list.appendChild(el('div', { class: 'sub', text: '这一类还没有内容。' }));
+    }
+    function setFilter(k){
+      filter = k;
+      intro.textContent = INTRO[k] || '';
+      modeBox.style.display = (k === 'agents') ? '' : 'none';
+      arRow.style.display = (k === 'tools') ? '' : 'none';
+      agentBox.style.display = (k === 'agents') ? '' : 'none';
+      addBox.style.display = (k === 'tools' || k === 'plugins') ? '' : 'none';
+      list.style.display = (k === 'agents') ? 'none' : '';
+      renderList(k);
+    }
+    p._setFilter = setFilter;
+    setFilter('tools');
+  });
+  page('about', '关于', function(p){
+      var ver = 'v1.15.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
