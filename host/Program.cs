@@ -134,7 +134,41 @@ namespace SoloChatHost
         /* v3.0：直连客户端（忽略系统与显式代理），供「直连例外」域名使用 */
         static readonly HttpClient DirectHttp = new HttpClient(new HttpClientHandler { UseProxy = false })
         { Timeout = Timeout.InfiniteTimeSpan };
-        /* v1.0.0：回环/内网域名走直连，别被用户代理设置挡掉 */
+        /* v1.0.1：命令审计 —— 每次执行（含拒绝/超时）落一行，限长滚动 */
+    static readonly object AuditLock = new object();
+    static string AuditPath
+    {
+        get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage", "logs", "solo-cmd.log"); }
+    }
+    static void Audit(string cwd, string cmdline, string result)
+    {
+        try
+        {
+            lock (AuditLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(AuditPath));
+                if (File.Exists(AuditPath) && new FileInfo(AuditPath).Length > 512 * 1024) File.Delete(AuditPath);
+                File.AppendAllText(AuditPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\tcwd=" + cwd + "\t" + result + "\t" + cmdline + "\n", Encoding.UTF8);
+            }
+        }
+        catch { }
+    }
+    static string[] ReadAudit(int max)
+    {
+        try
+        {
+            if (!File.Exists(AuditPath)) return new string[0];
+            string[] all;
+            lock (AuditLock) all = File.ReadAllLines(AuditPath, Encoding.UTF8);
+            if (all.Length <= max) return all;
+            var tail = new string[max];
+            Array.Copy(all, all.Length - max, tail, 0, max);
+            return tail;
+        }
+        catch { return new string[0]; }
+    }
+
+    /* v1.0.0：回环/内网域名走直连，别被用户代理设置挡掉 */
     static bool IsLoopbackHost(string url)
     {
         try
@@ -618,6 +652,15 @@ namespace SoloChatHost
                         var idCopy = id;
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
+                    }
+                    else if (t == "cmd.audit") /* v1.0.1：命令审计回读 */
+                    {
+                        var auditId = id;
+                        Task.Run(() =>
+                        {
+                            try { Post(auditId, "cmd.audit.done", JsonSerializer.Serialize(ReadAudit(200)), null, 200); }
+                            catch (Exception ex) { Post(auditId, "cmd.audit.done", null, ex.Message, 400); }
+                        });
                     }
                     else if (t == "cmd") /* v0.9.0：命令执行（白名单 + 授权 cwd + 超时） */
                     {
@@ -1514,6 +1557,7 @@ namespace SoloChatHost
             string exeName = Path.GetFileNameWithoutExtension(cmd.Trim());
             if (!CmdAllow.Contains(exeName))
             {
+                Audit("", cmd + " " + string.Join(" ", args.ToArray()), "denied(白名单)");
                 Post(id, "cmd.done", null, "不在命令白名单：" + cmd + "（允许：" + string.Join("/", CmdAllow) + "）", 403);
                 return;
             }
@@ -1524,6 +1568,7 @@ namespace SoloChatHost
             }
             catch (Exception ex)
             {
+                Audit("", cmd + " " + string.Join(" ", args.ToArray()), "denied(cwd)");
                 Post(id, "cmd.done", null, ex.Message, 403);
                 return;
             }
@@ -1566,12 +1611,14 @@ namespace SoloChatHost
                 bool exited = p.WaitForExit(timeoutMs);
                 if (!exited)
                 {
+                    Audit(cwdFull, cmd + " " + string.Join(" ", args.ToArray()), "timeout>" + timeoutMs + "ms");
                     try { p.Kill(); } catch { }
                     string tout = "";
                     lock (sbOut) tout = sbOut.ToString();
                     Post(id, "cmd.done", JsonSerializer.Serialize(new { code = -1, stdout = tout, stderr = "", timeout = true }), "超时（>" + timeoutMs + "ms）", 408);
                     return;
                 }
+                Audit(cwdFull, cmd + " " + string.Join(" ", args.ToArray()), "exit=" + p.ExitCode);
                 string so, se;
                 lock (sbOut) so = sbOut.ToString();
                 lock (sbErr) se = sbErr.ToString();

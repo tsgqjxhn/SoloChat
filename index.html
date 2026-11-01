@@ -1787,6 +1787,11 @@ var NET = (function(){
         if (p.resolve) p.resolve(cd ? cd : { code: -1, stdout: '', stderr: d.message || '' });
         else if (p.onDone) p.onDone(d.data);
       }
+      else if (d.t === 'cmd.audit.done'){
+        delete bridge.pend[d.id];
+        var al = []; try { al = JSON.parse(d.data) || []; } catch(e){}
+        if (p.resolve) p.resolve(al); else if (p.onDone) p.onDone(al);
+      }
       else if (d.t === 'cmd.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '命令执行失败')); else if (p.onError) p.onError(new Error(d.message || '命令执行失败')); }
       else if (d.t === 'secret.done' || d.t === 'secret.error'){
         var pv = bridge.pend[d.id];
@@ -1803,6 +1808,15 @@ var NET = (function(){
     },
     abort: function(id){ this.send({ t: 'http.abort', id: id }); },
     /* v0.9.0：宿主执行命令（白名单 + 授权 cwd + 超时）；仅 exe 宿主可用 */
+    /* v1.0.1：读命令审计（宿主留痕） */
+    cmdAudit: function(){
+      if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版'));
+      return new Promise(function(resolve, reject){
+        var id = 'a' + (++bridge.seq);
+        bridge.pend[id] = { resolve: resolve, onDone: resolve, reject: reject, onError: reject };
+        bridge.send({ t: 'cmd.audit', id: id });
+      });
+    },
     cmd: function(exe, args, cwd, timeoutMs){
       if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能执行命令'));
       return new Promise(function(resolve, reject){
@@ -5658,7 +5672,20 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'sub', text: '添加：粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen","modes":["work"]}（声明式 HTTP，{arg} 会 URL 编码后填入；任意 JS 代码已停用）；技能形如 {"kind":"skill","name":"审稿","desc":"中文润色流程","body":"步骤…","modes":["work","agent"]}；自定义模式形如 {"name":"审稿","base":"work","prompt":"你是审稿人，只挑硬伤…"}；子智能体形如 {"kind":"agent","name":"researcher","desc":"拆要点给结论","body":"你是研究型子智能体…","tools":["web","skill"],"maxTurns":3,"modes":["work"]}；插件形如 {"name":"包","tools":[…],"skills":[…]}。' }));
       var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}' });
       p.appendChild(ta);
-      var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
+      /* v1.0.1：命令审计（宿主留痕） */
+    var auditBtn = el('button', { class: 'btn btn-sec', text: '命令记录', style: 'margin:10px 0 4px' });
+    auditBtn.addEventListener('click', function(){
+      NET.bridge.cmdAudit().then(function(lines){
+        var txt = (lines && lines.length) ? lines.slice().reverse().join('\n') : '（还没有执行过命令）';
+        var box = el('div', { style: 'padding:16px 18px;max-width:780px' }, [
+          el('div', { style: 'font-weight:600;margin-bottom:8px', text: '命令审计（最近 ' + (lines ? lines.length : 0) + ' 条，新的在上）' }),
+          el('pre', { style: 'max-height:420px;overflow:auto;font-size:12px;line-height:1.55;background:var(--soft);padding:10px;border-radius:8px;white-space:pre-wrap', text: txt })
+        ]);
+        openModal(box, false);
+      }, function(e){ toast('读取失败：' + (e && e.message || e), true); });
+    });
+    p.appendChild(auditBtn);
+    var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
       addBtn.addEventListener('click', function(){
         try {
           var j = JSON.parse(ta.value);
@@ -5671,7 +5698,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.0.0', ua = navigator.userAgent || '';
+      var ver = 'v1.0.1', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
