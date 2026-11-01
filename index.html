@@ -868,10 +868,10 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
           </div>
           <div class="cwrap">
             <div class="cbox"><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
-            <button id="btn-sub" class="sub-btn" title="子模式：点开选小模式，悬停看更深一档"><span id="sub-label">标准</span><span class="caret"></span></button>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
@@ -2545,6 +2545,7 @@ var NET = (function(){
       if (ins.length) rec.in = ins;
     }
     if (m.attachment === true && !rec.in) rec.in = ['text', 'image'];
+    if (m.reasoning === false || m.supports_reasoning === false) rec.noReason = true;
     /* 思考能力：布尔字段 → true；supported_parameters 里带什么就记什么字段名 */
     var sp = m.supported_parameters || m.supportedParams;
     var reason = '';
@@ -5776,7 +5777,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.5.0', ua = navigator.userAgent || '';
+      var ver = 'v1.6.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7366,7 +7367,7 @@ function sendMessage(){
   function subLevelNode(x, box, curLv){
     if (!box) return;
     box.textContent = '';
-    var lvs = (x && x.levels && x.levels.length) ? x.levels : (MODE.levelsFor ? MODE.levelsFor(x) : []);
+    var lvs = MODE.levelsFor ? MODE.levelsFor(x) : [];
     if (!lvs.length){ box.classList.remove('show'); return; }
     box.classList.add('show');
     box.appendChild(el('div', { class: 'sp-lv-t', text: x.name }));
@@ -9564,21 +9565,10 @@ var MODE = (function(){
       { id: 'fast', name: '标准', hint: '直答，不铺陈',
         prompt: '子模式 Fast：直接给答案，结论先行，控制篇幅；不需要工具就别调。' },
       { id: 'think', name: '深度思考', hint: '长推理',
-        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。',
-        levels: [
-          { id: 'low', name: '低', prompt: '思考档位：低 —— 快速过一遍，只做必要的联想。' },
-          { id: 'mid', name: '中', prompt: '思考档位：中 —— 拆步骤、验假设，够用就收。' },
-          { id: 'high', name: '高', prompt: '思考档位：高 —— 找反例、比方案，权衡后再落笔。' },
-          { id: 'max', name: 'Max', prompt: '思考档位：Max —— 穷尽解法（至少三条），逐条压测边界与失败模式，最后给推荐与理由。' }
-        ] },
+        prompt: '子模式 Thinking：先在内部把问题拆成几步推理，再给答案；答案里只保留关键推理链，不要暴露草稿。' },
       { id: 'research', name: '深度研究', hint: '多轮检索写报告', tools: ['web', 'search'],
         prompt: '子模式 Deep Research：先用 ```search 找线索，再用 ```web 读原文，至少两轮交叉验证；' +
-          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。',
-        levels: [
-          { id: 'quick', name: '快速', prompt: '检索强度：快速 —— 至少 2 轮检索即可收敛，别过度挖。' },
-          { id: 'std', name: '标准', prompt: '检索强度：标准 —— 3 轮左右，覆盖正反两面。' },
-          { id: 'deep', name: '深入', prompt: '检索强度：深入 —— 至少 5 轮，交叉验证数据与日期，列出互相矛盾的来源。' }
-        ] }
+          '结论按「结论 / 证据 / 不确定点」三段写，引用要给 URL。信息不足就写清楚缺什么，不许编。' }
     ],
     work: [
       { id: 'canvas', name: '画布', hint: '草稿与成品分离',
@@ -9646,7 +9636,16 @@ var MODE = (function(){
     var eff = (mm && mm.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || {}).efforts || null;
     return (eff && eff.length) ? eff : null;
   }
-  function hasReasoning(){ return !!effortsOf(); }
+  /* v1.6：默认认为可以深度思考（提示词档位对任何模型都有效）；只有「明确判定不支持」才隐藏这项 */
+  function hasReasoning(){
+    if (effortsOf()) return true;
+    var mm = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
+    if (mm && (mm.reason === false || mm.noReason)) return false;
+    var id = String(S.cfg.currentModel || '').toLowerCase();
+    /* 明确不是对话/推理的模型家族 */
+    if (/(embed|rerank|whisper|tts|ocr|guard|moderation|transcri|clip|vision-ocr)/.test(id)) return false;
+    return true;
+  }
   /* 该子模式有哪些档位：标准永远有（提示词档），深度思考要模型支持，其余没有 */
   function levelsFor(x){
     if (!x) return [];
