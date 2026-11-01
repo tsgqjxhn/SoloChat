@@ -5776,7 +5776,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.10.0', ua = navigator.userAgent || '';
+      var ver = 'v1.11.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7176,9 +7176,19 @@ function sendMessage(){
     if (i < 0) return;
     copyText(S.msgs[i].content).then(function(){ toast('已复制'); });
   }
+  /* v1.11：优先走宿主剪贴板 —— WebView2 的 navigator.clipboard.writeText 会卡在权限请求上
+     一直 pending（既不 resolve 也不 reject），代码块复制按钮就永远没反应 */
+  function hostBridge(){ try{ return window.chrome && window.chrome.webview && window.chrome.webview.postMessage ? window.chrome.webview : null; }catch(e){ return null; } }
   function copyText(t){
-    if (navigator.clipboard && navigator.clipboard.writeText)
-      return navigator.clipboard.writeText(t).catch(function(){ return legacyCopy(t); });
+    t = String(t == null ? '' : t);
+    var h = hostBridge();
+    if (h){ try { h.postMessage({ t: 'copy', text: t }); return Promise.resolve(true); } catch (e) {} }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      return Promise.race([
+        navigator.clipboard.writeText(t).then(function(){ return true; }).catch(function(){ return legacyCopy(t); }),
+        new Promise(function(res){ setTimeout(function(){ res(legacyCopy(t)); }, 600); })
+      ]);
+    }
     return Promise.resolve(legacyCopy(t));
   }
   function legacyCopy(t){

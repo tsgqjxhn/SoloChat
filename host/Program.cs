@@ -642,7 +642,12 @@ namespace SoloChatHost
                         var reqCopy = root.Clone(); // 独立副本，脱离 using 作用域；避免二次 Parse 的 ArrayPool 泄漏
                         Task.Run(() => RunHttpAsync(reqCopy, idCopy));
                     }
-                    else if (t == "http.abort")
+                    else if (t == "copy") /* v1.11：页面复制走宿主剪贴板（WebView2 的 clipboard API 会卡死） */
+            {
+                var txt = root.TryGetProperty("text", out JsonElement tx) ? tx.GetString() : null;
+                if (!string.IsNullOrEmpty(txt)) CopyToClipboard(txt);
+            }
+            else if (t == "http.abort")
                     {
                         CancellationTokenSource cts;
                         if (inflight.TryRemove(id, out cts)) cts.Cancel();
@@ -782,6 +787,17 @@ namespace SoloChatHost
         }
 
         /* F1：Release 构建日志整体禁用（宏剥离）；DEBUG 构建脱敏 + 限长。旧版曾明文写入，启动即删除。 */
+        /* v1.11：剪贴板写入必须在 UI 线程（Clipboard 是 STA 组件） */
+        public void CopyToClipboard(string text)
+        {
+            try
+            {
+                if (InvokeRequired) BeginInvoke(new Action(() => { try { Clipboard.SetText(text); } catch { } }));
+                else { try { Clipboard.SetText(text); } catch { } }
+            }
+            catch { }
+        }
+
         public static void Log(string s)
         {
 #if DEBUG
