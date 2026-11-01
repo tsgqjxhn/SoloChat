@@ -396,7 +396,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .crow{display:grid;grid-template-columns:1fr minmax(300px,var(--content-w)) 1fr;align-items:end;gap:8px}
 .cwrap{display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
-.cz-l{justify-self:start}
+.cz-l{justify-self:stretch;justify-content:flex-end}
 .cz-r2{justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 #ctx-ring.warn .ctx-num{color:var(--warning)}
@@ -2548,14 +2548,14 @@ var NET = (function(){
     if (m.reasoning === false || m.supports_reasoning === false) rec.noReason = true;
     /* 思考能力：布尔字段 → true；supported_parameters 里带什么就记什么字段名 */
     var sp = m.supported_parameters || m.supportedParams;
-    var reason = '';
+    var reason = '', effFromSp = null;
     if (sp && sp.length){
       for (var j = 0; j < sp.length; j++){
         var p = String(sp[j]);
-        if (p === 'reasoning_effort'){ reason = 'reasoning_effort'; break; }
-        if (p === 'reasoning'){ reason = 'reasoning'; }
-        else if (p === 'thinking'){ reason = 'thinking'; }
-        else if (p === 'enable_thinking'){ reason = 'enable_thinking'; }
+        if (p === 'reasoning_effort'){ reason = 'reasoning_effort'; effFromSp = ['low', 'medium', 'high']; break; }
+        if (p === 'reasoning'){ reason = 'reasoning'; if (!effFromSp) effFromSp = ['enabled', 'disabled']; }
+        else if (p === 'thinking'){ reason = 'thinking'; if (!effFromSp) effFromSp = ['enabled', 'disabled']; }
+        else if (p === 'enable_thinking'){ reason = 'enable_thinking'; if (!effFromSp) effFromSp = ['enabled', 'disabled']; }
       }
     }
     if (!reason && (m.reasoning === true || m.supports_reasoning === true ||
@@ -2565,6 +2565,7 @@ var NET = (function(){
     var prof = reasonProfile(m.id || m.name || m.model || '');
     var eff = null;
     if (Array.isArray(m.reasoning_efforts) && m.reasoning_efforts.length) eff = m.reasoning_efforts.slice();
+    else if (effFromSp) eff = effFromSp.slice();
     else if (prof && (!reason || prof.field === reason || reason === 'reasoning_effort')) eff = prof.efforts.slice();
     if (eff) rec.efforts = eff;
     if (!rec.reason && prof) rec.reason = prof.field;
@@ -2935,6 +2936,7 @@ var NET = (function(){
     normBase: normBase,
     isMock: isMock,
     chatOnce: chatOnce,       // v0.5.0：子智能体单次调用
+    modelCaps: modelCaps,     // v1.7：调试/测试用
   bridge: bridge,
     fs: fsCall
   };
@@ -5777,7 +5779,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.6.0', ua = navigator.userAgent || '';
+      var ver = 'v1.7.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7463,12 +7465,14 @@ function sendMessage(){
       if (list.indexOf('Default') < 0) list.unshift('Default');
       /* v0.2.5：优先用「该模型自动探测到的档位」（GPT-5 → minimal/low/medium/high；Qwen/GLM → enabled/disabled） */
       var mmc = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-      var effL = (mmc && mmc.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts) || null;
+      var effL = (MODE && MODE.levelsFor) ? MODE.levelsFor({ id: 'think' }).map(function(l){ return l.id; }) : null;
+    if (!effL || !effL.length) effL = (NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts || null;
       if (effL && effL.length) list = ['Default'].concat(effL);
       var cur = (S.cfg.thinkByModel && S.cfg.thinkByModel[S.cfg.currentModel]) || 'Default';
+      var LVNAME = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '极高', enabled: '开', disabled: '关' };
       selT.textContent = '';
       for (var i = 0; i < list.length; i++)
-        selT.appendChild(el('option', { value: list[i], text: list[i], selected: list[i] === cur ? '' : null }));
+        selT.appendChild(el('option', { value: list[i], text: (LVNAME[list[i]] || list[i]), selected: list[i] === cur ? '' : null }));
     }
     renderWsBtn();
     renderCtxRing();
@@ -9624,42 +9628,37 @@ var MODE = (function(){
     setCfg({ sub: o });
   }
   function subPrompt(){ var x = sub(); return x ? (x.prompt || '') : ''; }
-  /* v1.5：档位固定「低 / 中 / 高 / Max」；模型支持推理时映射到它的 effort 值，不支持就只剩提示词档位 */
-  var LV = [
-    { id: 'low',  name: '低',  hint: '快速过一遍',   prompt: '思考档位：低 —— 快速过一遍，只做必要联想。' },
-    { id: 'mid',  name: '中',  hint: '拆步骤验假设', prompt: '思考档位：中 —— 拆步骤、验假设，够用就收。' },
-    { id: 'high', name: '高',  hint: '找反例比方案', prompt: '思考档位：高 —— 找反例、比方案，权衡后再落笔。' },
-    { id: 'max',  name: 'Max', hint: '穷尽并压测',   prompt: '思考档位：Max —— 至少三条解法，逐条压测边界与失败模式，再给推荐。' }
-  ];
+  /* v1.7：档位 = 模型自己声明的思考程度字段（supported_parameters / reasoning_efforts），不再写死低中高 */
+  var EFF_LABEL = { minimal: '极简', low: '低', medium: '中', high: '高', xhigh: '极高', enabled: '开', disabled: '关' };
+  var EFF_HINT = { minimal: '最省', low: '快一点', medium: '平衡', high: '更深', xhigh: '很深', enabled: '开启推理', disabled: '关闭推理' };
+  /* 供应商前缀可能对不上（deepseek-ai/x vs deepseek/x），按短名兜底匹配 */
+  function metaOf(id){
+    var mm = S.cfg.modelMeta || {}, k = String(id || '');
+    if (mm[k]) return mm[k];
+    var short = k.split('/').pop();
+    for (var key in mm){ if (key.split('/').pop() === short) return mm[key]; }
+    return null;
+  }
   function effortsOf(){
-    var mm = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-    var eff = (mm && mm.efforts) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || {}).efforts || null;
-    return (eff && eff.length) ? eff : null;
+    var mm = metaOf(S.cfg.currentModel);
+    if (mm){
+      if (mm.efforts && mm.efforts.length) return mm.efforts;
+      /* 旧的 modelMeta 缓存只有字段名没有取值，这里补齐 */
+      if (mm.reason === 'reasoning_effort') return ['low', 'medium', 'high'];
+      if (mm.reason === 'reasoning' || mm.reason === 'thinking' || mm.reason === 'enable_thinking') return ['enabled', 'disabled'];
+    }
+    var p = (NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel)) || null;
+    return (p && p.efforts && p.efforts.length) ? p.efforts : null;
   }
-  /* v1.6：默认认为可以深度思考（提示词档位对任何模型都有效）；只有「明确判定不支持」才隐藏这项 */
-  function hasReasoning(){
-    if (effortsOf()) return true;
-    var mm = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-    if (mm && (mm.reason === false || mm.noReason)) return false;
-    var id = String(S.cfg.currentModel || '').toLowerCase();
-    /* 明确不是对话/推理的模型家族 */
-    if (/(embed|rerank|whisper|tts|ocr|guard|moderation|transcri|clip|vision-ocr)/.test(id)) return false;
-    return true;
-  }
-  /* 该子模式有哪些档位：标准永远有（提示词档），深度思考要模型支持，其余没有 */
+  function hasReasoning(){ return !!effortsOf(); }
+  /* 只有「深度思考」有档位，档位就是模型支持的字段取值；标准/深度研究/Work/Agent 都没有 */
   function levelsFor(x){
-    if (!x) return [];
-    if (x.id === 'fast') return LV;
-    if (x.id === 'think') return hasReasoning() ? LV : [];
-    return [];
-  }
-  /* 低/中/高/Max → 模型真实的 effort 值（没有能力表就返回 null，只做提示词） */
-  function effortFor(id){
-    var eff = effortsOf(); if (!eff) return null;
-    if (/^(enabled|disabled)$/i.test(eff[0])) return id === 'low' ? 'disabled' : 'enabled';
-    var idx = { low: 0, mid: 1, high: 2, max: 3 }[id];
-    if (idx == null) return null;
-    return eff[Math.min(idx, eff.length - 1)];
+    if (!x || x.id !== 'think') return [];
+    var eff = effortsOf(); if (!eff) return [];
+    return eff.map(function(e){
+      var nm = EFF_LABEL[e] || e, hint = EFF_HINT[e] || '';
+      return { id: e, name: nm, hint: hint, prompt: '思考档位：' + nm + (hint ? ' —— ' + hint : '') + '。' };
+    });
   }
   function levelKey(mode, sid){ return (mode || S.cfg.mode || 'chat') + ':' + (sid || (sub(mode) || {}).id); }
   function level(mode){
@@ -9672,10 +9671,9 @@ var MODE = (function(){
     var x = sub(mode); if (!x) return;
     var o = Object.assign({}, S.cfg.subLv || {}); o[levelKey(mode, x.id)] = id;
     var patch = { subLv: o };
-    /* 有真实 effort 的模型：档位直接写进该模型的思考字段 */
-    var eff = effortFor(id);
-    if (eff && S.cfg.currentModel){
-      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = eff;
+    /* 档位 id 就是模型字段的取值，原样写进该模型的思考字段 */
+    if (x.id === 'think' && S.cfg.currentModel && hasReasoning()){
+      var tm = Object.assign({}, S.cfg.thinkByModel || {}); tm[S.cfg.currentModel] = id;
       patch.thinkByModel = tm;
     }
     setCfg(patch);
@@ -10497,7 +10495,7 @@ var WORK = (function(){
 try {
   if (localStorage.getItem('sc.debug') === '1'){
     window.SC_WORK = WORK;
-    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE,
+    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps,
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
       bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
       cfg: function(){ return S.cfg; },
