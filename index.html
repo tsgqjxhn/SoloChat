@@ -294,9 +294,9 @@ body.dual-on #msg-list,body.dual-on #empty{display:none}
 .dl-u{background:var(--soft);border-radius:10px;padding:8px 10px;white-space:pre-wrap}
 .dl-a .md{font-size:14px}
 .dl-empty{color:var(--faint);font-size:12px;text-align:center;padding:24px 0}
-#sub-pop,#mode-pop{position:fixed;z-index:80;display:block;padding:6px;width:214px;background:var(--canvas);
+#sub-pop{position:fixed;z-index:80;display:block;padding:6px;width:214px;background:var(--canvas);
   border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop)}
-#sub-pop[hidden],#mode-pop[hidden]{display:none}
+#sub-pop[hidden]{display:none}
 .sp-list{display:flex;flex-direction:column;min-width:188px}
 .sp-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;text-align:left;font-size:13px;color:var(--body)}
 .sp-item:hover,.sp-item.hot{background:var(--soft);color:var(--ink)}
@@ -837,10 +837,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <button class="icon-btn" id="btn-sb" title="会话侧边栏（Ctrl+B）"><svg class="ic"><use href="#i-sb"/></svg></button>
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
-        <div id="tb-mode">
-          <button class="icon-btn" id="btn-mode" title="切换模式（Chat / Work / Agent）"><svg class="ic"><use href="#i-swap"/></svg></button>
-          <span id="tb-mode-name">Chat</span>
-        </div>
+        <div id="tb-mode"><span id="tb-mode-name">Chat</span></div>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
@@ -863,7 +860,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 
     <div id="composer">
       <div id="sub-pop" hidden></div>
-      <div id="mode-pop" hidden></div>
       <div class="inner">
         <div id="chips"></div>
         <div class="crow">
@@ -5882,7 +5878,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.14.0', ua = navigator.userAgent || '';
+      var ver = 'v1.14.1', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6680,8 +6676,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   }
   function updateEmpty(){
     var draft = !S.msgs.length;
-    var _bm = $('#btn-mode');
-    if (_bm) _bm.style.display = draft ? '' : 'none';   /* v1.14：开聊后不再给切换入口 */
     $empty.classList.toggle('show', draft);
     if (!draft) return;
     var cs = curSession();
@@ -6700,7 +6694,19 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    var modes = el('div', { class: 'e-modes' });   // v1.13：模式条已挪到顶栏，这里留空占位
+    var modes = el('div', { class: 'e-modes' });
+    /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
+    var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
+      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具' });
+    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1]].forEach(function(t){
+      var b = el('button', { type: 'button', 'data-mode': t[0] });
+      b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
+      b.appendChild(document.createTextNode(t[1]));
+      if ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona) b.classList.add('on');
+      seg.appendChild(b);
+    });
+    modes.appendChild(seg);
+    if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
       ic.setAttribute('style', 'width:76px;height:76px;color:var(--primary)');
@@ -7477,41 +7483,6 @@ function sendMessage(){
   }
 
 
-  /* v1.13：顶栏模式切换（只在弹层里列，顶栏只显示当前模式） */
-  function setMode(md, pid){
-    setCfg({ mode: md, persona: pid || '', modePin: true });
-    MODE.mountUI(); renderComposerCtl(); updateEmpty();
-  }
-  function closeModePopTop(){ var p = $('#mode-pop'); if (p) p.hidden = true; }
-  function openModePop(){
-    var pop = $('#mode-pop'), btn = $('#btn-mode');
-    if (!pop || !btn) return;
-    if (!pop.hidden){ closeModePopTop(); return; }
-    var list = el('div', { class: 'sp-list' });
-    [ ['chat', 'Chat', '常规对话'],
-      ['work', 'Work', '沙箱短任务，产物进工作区'],
-      ['agent', 'Agent', '真实文件工具'] ].forEach(function(t){
-      var b = el('button', { type: 'button', class: 'sp-item' + ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona ? ' on' : '') });
-      b.appendChild(el('span', { class: 'sp-n', text: t[1] }));
-      b.appendChild(el('span', { class: 'sp-h', text: t[2] }));
-      b.addEventListener('click', function(){ closeModePopTop(); setMode(t[0]); });
-      list.appendChild(b);
-    });
-    MODE.personas().forEach(function(p){
-      var b = el('button', { type: 'button', class: 'sp-item' + (S.cfg.persona === p.id ? ' on' : '') });
-      b.appendChild(el('span', { class: 'sp-n', text: p.name || p.id }));
-      b.appendChild(el('span', { class: 'sp-h', text: '自定义 · ' + (p.base || 'work') }));
-      b.addEventListener('click', function(){ closeModePopTop(); setMode((p.base || 'work'), p.id); });
-      list.appendChild(b);
-    });
-    pop.textContent = ''; pop.appendChild(list);
-    var r = btn.getBoundingClientRect();
-    pop.style.left = Math.round(r.left) + 'px';
-    pop.style.top = Math.round(r.bottom + 6) + 'px';
-    pop.style.bottom = 'auto';
-    pop.hidden = false;
-  }
-
   /* v1.12：输入框左侧那枚胶囊 —— Work 选子模式，Agent 选 Auto/Read/Write */
   function closeModePop(){ var p = $('#sub-pop'); if (p) p.hidden = true; }
   function modeItems(){
@@ -7573,17 +7544,12 @@ function sendMessage(){
 
   document.addEventListener('click', function(e){
     if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) closeModePop();
-    if (e.target.closest && (e.target.closest('#mode-pop') || e.target.closest('#btn-mode'))) return;
-    closeModePopTop();
   });
 
   /* 输入区控件（v1.2）：模式/模型/思考 */
   function renderComposerCtl(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : 'Chat');
-    /* v1.14：会话一旦开聊就不再给切换入口（中途换模式最容易出岔子），只显示当前模式名 */
-    var bm = $('#btn-mode');
-    if (bm) bm.style.display = (S.msgs && S.msgs.length) ? 'none' : '';
     var pb = $('#btn-panel');
     if (pb) pb.style.display = ((S.cfg.mode || 'chat') === 'chat') ? 'none' : '';
     if ((S.cfg.mode || 'chat') === 'chat' && document.body.classList.contains('rn-open')) document.body.classList.remove('rn-open');
@@ -8525,7 +8491,7 @@ function sendMessage(){
     autosize: autosize, doExport: doExport, doImport: doImport, reloadSessions: reloadSessions,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
-    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger, openModePop: openModePop,
+    renderComposerCtl: renderComposerCtl, pickWorkspace: pickWorkspace, cmpTrigger: cmpTrigger,
     zipVfs: zipVfs, toggleTemp: toggleTemp, DUAL: DUAL,
     /* v2.9：模型池/能力表 */
     renderPool: renderPool, mmUse: mmUse, mmToggleCfg: mmToggleCfg, mmDelete: mmDelete, mmSave: mmSave,
@@ -8814,8 +8780,24 @@ function sendMessage(){
       return;
     }
 
-    var mb = t.closest('#btn-mode');
-    if (mb){ UI.openModePop(); return; }
+    var mb = t.closest('#seg-mode [data-mode]');
+    if (mb){
+      setCfg({ mode: mb.getAttribute('data-mode'), persona: '', modePin: true });
+      MODE.mountUI();
+      UI.renderComposerCtl();
+      UI.updateEmpty();
+      return;
+    }
+    var pb = t.closest('#seg-mode [data-persona]');
+    if (pb){
+      var pid = pb.getAttribute('data-persona');
+      var pp = MODE.persona(pid);
+      setCfg({ persona: pid, mode: (pp && pp.base) || 'work', modePin: true });
+      MODE.mountUI();
+      UI.renderComposerCtl();
+      UI.updateEmpty();
+      return;
+    }
     var wb = t.closest('#win-ctl [data-win]');
     if (wb){ if (NET.bridge.ok) NET.bridge.send({ t: 'win', act: wb.getAttribute('data-win') }); return; }
     if (!UI.modalOpen()) return;
