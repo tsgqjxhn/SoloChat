@@ -3003,8 +3003,13 @@ var MD = (function(){
 
     /* 1. 抽出围栏代码块；占位符用私用区哨兵 */
     var codes = [];
-    src = src.replace(/```([A-Za-z0-9+#-]*)[ \t]*\n([\s\S]*?)```/g, function(m, lang, code){
-      codes.push({ lang: lang, code: code.replace(/\n+$/, '') });
+    /* v1.14：围栏首行可以带参数（```vfs-write index.html / ```fs-read src/a.js / ```run js）。
+       以前正则只认「```lang + 换行」，带参数的围栏整块漏判，原文连 ``` 一起糊在正文里。 */
+    var TOOL_LANG = /^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get|skill|agent|sub|suball|fs-[a-z-]+)$/i;
+    src = src.replace(/```([A-Za-z0-9+#-]*)[ \t]*([^\n]*)\n([\s\S]*?)```/g, function(m, lang, arg, code){
+      var a = String(arg || '').trim(), body = code.replace(/\n+$/, '');
+      if (a && TOOL_LANG.test(lang)) body = a + '\n' + body;   /* 参数并进体首行，工具卡片照旧读首行 */
+      codes.push({ lang: lang, code: body });
       return '\uE000' + (codes.length - 1) + '\uE000';
     });
 
@@ -3073,7 +3078,9 @@ var MD = (function(){
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
         if (_ln) _bc = '<span class="cl">' + c.code.split('\n').map(function(l){ return l || ' '; }).join('</span>\n<span class="cl">') + '</span>';
-        var _fold = (c.code.length > 1200);
+        var _artLang = /^(html|svg|css|js|json|md|markdown|xml|txt|csv)$/i.test(c.lang || '');
+      var _isWork = (typeof S !== 'undefined' && S.cfg && S.cfg.mode === 'work');
+      var _fold = c.code.length > ((_isWork && _artLang) ? 400 : 1200);
       var _pre = '<pre' + (_ln ? ' class="ln"' : '') + '>' +
           '<div class="code-bar">' +
           (_rk ? '<button class="code-run" type="button" title="运行（' + (_rk === 'c' ? 'C 解释执行' : '沙箱预览') + '）" data-run="' + _rk + '"><svg class="ic"><use href="#i-play"/></svg></button>' : '') +
@@ -3086,7 +3093,7 @@ var MD = (function(){
         html += _fold
         ? '<details class="code-fold"><summary>' + esc(c.lang || 'code') + ' · ' +
           (c.code.length >= 1024 ? (c.code.length / 1024).toFixed(1) + ' KB' : c.code.length + ' 字符') +
-          ' · 点开看代码</summary>' + _pre + '</details>'
+          (_isWork && _artLang ? ' · 已存入右侧工作区' : ' · 点开看代码') + '</summary>' + _pre + '</details>'
         : _pre;
       i++; continue;
       }
@@ -5875,7 +5882,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     });
     page('about', '关于', function(p){
-      var ver = 'v1.13.0', ua = navigator.userAgent || '';
+      var ver = 'v1.14.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6673,6 +6680,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   }
   function updateEmpty(){
     var draft = !S.msgs.length;
+    var _bm = $('#btn-mode');
+    if (_bm) _bm.style.display = draft ? '' : 'none';   /* v1.14：开聊后不再给切换入口 */
     $empty.classList.toggle('show', draft);
     if (!draft) return;
     var cs = curSession();
@@ -7572,6 +7581,9 @@ function sendMessage(){
   function renderComposerCtl(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : 'Chat');
+    /* v1.14：会话一旦开聊就不再给切换入口（中途换模式最容易出岔子），只显示当前模式名 */
+    var bm = $('#btn-mode');
+    if (bm) bm.style.display = (S.msgs && S.msgs.length) ? 'none' : '';
     var pb = $('#btn-panel');
     if (pb) pb.style.display = ((S.cfg.mode || 'chat') === 'chat') ? 'none' : '';
     if ((S.cfg.mode || 'chat') === 'chat' && document.body.classList.contains('rn-open')) document.body.classList.remove('rn-open');
@@ -9694,17 +9706,17 @@ var MODE = (function(){
     '要改的才动手，改前先读原文，改动用最小 diff；' +
     '只有当任务能拆成互不依赖的几块（≥2 处并行检索或修改）时才用 ```agent explore|coder|review 派出去，' +
     '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。';
+  /* v1.14：Work = 画布 + 沙箱脚本合并。核心约定：成品进工作区，正文只给结论 */
+  var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
+    '1) 用户要文件、文档、网页、页面、脚本、表格、图、报告——一律用 ```vfs-write 写进会话的内存工作区（可多文件：index.html + style.css + script.js），' +
+    '不碰真实磁盘，也不要在正文里贴整段代码或整篇文档。\n' +
+    '2) 需要算数、批处理、跑一遍验证，就用 ```run 在沙箱里执行脚本、读它的输出，别在正文里手算。\n' +
+    '3) 正文只写结论与说明：做了什么、文件叫什么、怎么用，2-5 行说完；文件列表交给右侧「工作区」面板展示。\n' +
+    '4) 只有用户明确说「贴出来看看」时才在正文里展开代码。';
   var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
   var SUBS = {
     chat: [],
-    work: [
-      { id: 'canvas', name: '画布', hint: '成品进工作区',
-        prompt: '子模式 Canvas：正文只放结论与说明；成果（长文/表格/代码，单文件或 html+css+js 多文件工程）都写进 ```vfs-write 的内存工作区，' +
-          '不碰真实磁盘；最后告诉用户可以在右侧「工作区」逐个预览、下载或整包导出。' },
-      { id: 'ptc', name: '沙箱脚本', hint: '写脚本一次跑完',
-        prompt: '子模式 PTC：把批处理写成一段脚本用 ```run 执行（html/js 沙箱），读它的输出作为结果；' +
-          '不要在正文里手算大量数据。' }
-    ],
+    work: [],   // v1.14：画布 + 沙箱脚本合并成一个 Work（提示词见 WORK_P）
     agent: []
   };
   function subList(mode){ return (SUBS[mode || S.cfg.mode || 'chat'] || []).slice(); }
@@ -9723,6 +9735,7 @@ var MODE = (function(){
     var x = sub(); if (x) return x.prompt || '';
     var m = S.cfg.mode || 'chat';
     var out = [];
+    if (m === 'work') out.push(WORK_P);
     if (m === 'chat' && S.cfg.research) out.push(RESEARCH_P);
     if (m === 'agent'){
       var am = S.cfg.agentMode || 'auto';
