@@ -9579,7 +9579,7 @@ function sendMessage(){
     if (side) L.push('最近错误: ' + side);
     L.push('—— 以下为配置键（不含值）——');
     L.push(Object.keys(S.cfg).join(', '));
-    download('solochat-diag-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '') + '.txt', L.join('\n'));
+    UI.download('solochat-diag-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '') + '.txt', L.join('\n'));
     toast('诊断包已导出');
   }
 
@@ -12581,6 +12581,7 @@ try {
    hideHint: function(){ UI.hideRouteHint(); },
    fs: NET.fs,
    snaps: function(){ return SC_SNAPS; },
+  ver: (function(){ try { return String(ver || ''); } catch (e) { return ''; } })(), // v0.3.14：诊断包要能报出版本
    diag: function(){ return DIAG; },
    FS: FS, DB: DB,
    search: function(q){ return NET.searchWeb(q, null, true); },
