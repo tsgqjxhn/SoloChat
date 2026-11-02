@@ -891,7 +891,25 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .orch-line.bad{color:var(--danger)}
 .orch-line.ok{color:var(--success)}
 .det-host{grid-column:1 / -1}
+/* v1.29.3：模型反问用户的卡片 */
+.ask-card{border:1px solid var(--primary-weak,var(--hairline));border-left:3px solid var(--primary);border-radius:10px;
+  padding:10px 12px;margin:10px 0;background:var(--canvas)}
+.ask-h{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.ask-badge{flex:none;font-size:11px;font-weight:600;color:var(--primary);border:1px solid var(--primary);border-radius:5px;padding:1px 6px}
+.ask-q{font-size:13px;color:var(--ink);font-weight:600;line-height:1.5}
+.ask-note{font-size:12px;color:var(--muted);margin:0 0 8px}
+.ask-opts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.ask-opt{cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink);background:var(--soft);border:1px solid var(--hairline);
+  border-radius:999px;padding:4px 12px}
+.ask-opt:hover{border-color:var(--primary);color:var(--primary)}
+.ask-free{display:flex;gap:6px;align-items:center}
+.ask-in{flex:1;min-width:0;font:inherit;font-size:12.5px;color:var(--ink);background:var(--canvas);border:1px solid var(--hairline);
+  border-radius:8px;padding:6px 9px}
+.ask-done{font-size:12.5px;color:var(--muted)}
+.ask-card.done{opacity:.75}
 /* v1.29.2：扩展条目右侧的展开箭头（替代「查看」按钮） */
+.sub-card.has-chev{position:relative;padding-right:38px}
+.sub-card.has-chev .exp-chev{position:absolute;right:9px;top:50%;transform:translateY(-50%);margin:0}
 .exp-chev{flex:none;margin-left:auto;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;
   border:0;background:none;border-radius:6px;color:var(--faint);cursor:pointer}
 .exp-chev:hover{background:var(--hover);color:var(--ink)}
@@ -1112,6 +1130,12 @@ var LIMITS = {
   VFS_FILES_MAX: 200            // VFS：单会话文件数上限
 };
 /* v2.3：媒体语法提示（每次请求附注）。回答里可直接内嵌 https 图片/视频直链。 */
+/* v1.29.3：反问协议 —— 该问就问，别猜着做 */
+var ASK_PROTOCOL = '提问（不确定就问，别猜）：需求模糊、缺关键信息（对象/范围/格式/口径）、有多种合理方案要用户选，' +
+  '或即将执行破坏性、不可逆、要花钱、要提交推送的操作前，用下面这个围栏提问，然后停下等回答：\n' +
+  '```ask\n一句话问题（必要时第二行补一句背景）\n- 选项一\n- 选项二\n```\n' +
+  '规则：① 一次最多 3 个问题，每个问题给 2–4 个选项，也可以只写问题不给选项；② 能自己查证或按默认合理值往下做的，不要问；' +
+  '③ 问了就停，等用户回答再继续，不要自问自答、不要同一轮里先猜后问；④ 别把问题写成正文段落，那样用户没法一键回答。';
 var CHAT_ID = '你是 SoloChat，中文直接作答：先给结论，再给必要依据；不确定就明说，别编。'; // v0.3.0：Chat 最轻提示词
 var MEDIA_HINT = '展示图片用 Markdown 语法 ![说明](https://图片直链)；`.mp4/.webm/.mov` 等视频直链会内嵌播放；引用网页用 [说明](链接)。' +
   '只在确有必要时插图/视频，链接必须真实存在，不要编造 URL。';
@@ -1769,6 +1793,7 @@ var NET = (function(){
     if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
+sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     if (S.cfg.mode === 'work' || S.cfg.mode === 'agent') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
@@ -3240,7 +3265,8 @@ var MD = (function(){
 
       var cm = /^\uE000(\d+)\uE000$/.exec(line.trim()); /* 代码块占位符独占一行 */
       if (cm){ var c = codes[+cm[1]];
-        if (c.lang && typeof MODE !== 'undefined' && MODE.toolAllowed && !MODE.toolAllowed(c.lang)){ html += deadCard(c); i++; continue; } /* v1.28.1：本轮没有的工具 */
+        if (c.lang === 'ask'){ html += askCard(c); i++; continue; } /* v1.29.3：反问卡片（各模式都有） */
+      if (c.lang && typeof MODE !== 'undefined' && MODE.toolAllowed && !MODE.toolAllowed(c.lang)){ html += deadCard(c); i++; continue; } /* v1.28.1：本轮没有的工具 */
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
@@ -3381,7 +3407,67 @@ var MD = (function(){
     }
     return h + '</div>';
   }
-  function diff(oldT, newT){ /* 行级简易 diff：公共前后缀+中段替换（卡片预览） */
+  
+/* v1.29.3：```ask 围栏 → 提问卡片（问题 + 可选项 + 自由回答） */
+function askCard(c){
+  var body = String(c.code || '');
+  var lines = body.split('\n'), q = (lines[0] || '').trim(), note = '', opts = [];
+  for (var i = 1; i < lines.length; i++){
+    var t = lines[i].trim();
+    if (!t) continue;
+    if (/^[-*•]\s+/.test(t)) opts.push(t.replace(/^[-*•]\s+/, ''));
+    else if (!note) note = t;
+  }
+  var key = (q.slice(0, 60) + '|' + opts.join(',')).replace(/"/g, '&quot;');
+  var done = (typeof S !== 'undefined' && S._asked && S._asked[key]) || '';
+  var h = '<div class="ask-card' + (done ? ' done' : '') + '" data-askkey="' + key + '">' +
+    '<div class="ask-h"><span class="ask-badge">提问</span><span class="ask-q">' + q + '</span></div>';
+  if (done) return h + '<div class="ask-body"><div class="ask-done">已回答：' + done + '</div></div></div>';
+  if (note) h += '<div class="ask-note">' + note + '</div>';
+  if (opts.length){
+    h += '<div class="ask-opts">';
+    opts.forEach(function(o){ h += '<button type="button" class="ask-opt" data-ask-opt="' + o + '">' + o + '</button>'; });
+    h += '</div>';
+  }
+  h += '<div class="ask-free"><input class="ask-in" type="text" placeholder="或者直接写一句回答，回车提交">' +
+    '<button type="button" class="btn btn-primary" data-ask-sub="1">回答</button></div>';
+  return h + '<div class="ask-body"></div></div>';
+}
+/* 回答提交：写进对话 → 触发新一轮（用户消息，模型接着做） */
+function askAnswer(card, text){
+  if (!card || !text) return;
+  var key = card.getAttribute('data-askkey') || '';
+  S._asked = S._asked || {}; S._asked[key] = text;
+  card.classList.add('done');
+  var body = card.querySelector('.ask-body');
+  if (body){ body.textContent = ''; var d = document.createElement('div'); d.className = 'ask-done'; d.textContent = '已回答：' + text; body.appendChild(d); }
+  var free = card.querySelector('.ask-free'); if (free) free.parentNode.removeChild(free);
+  var opts = card.querySelector('.ask-opts'); if (opts) opts.parentNode.removeChild(opts);
+  try {
+    var inp = document.getElementById('input');
+    if (!inp) return;
+    inp.value = '【回答】' + text;
+    if (typeof sendMessage === 'function') sendMessage();
+  } catch (e) {}
+}
+document.addEventListener('click', function(ev){
+  var t = ev.target; if (!t || !t.closest) return;
+  var sub = t.closest('[data-ask-sub]'), opt = t.closest('[data-ask-opt]');
+  if (!sub && !opt) return;
+  var card = (sub || opt).closest('.ask-card'); if (!card) return;
+  ev.preventDefault(); ev.stopPropagation();
+  var text = opt ? (opt.getAttribute('data-ask-opt') || '') : ((card.querySelector('.ask-in') || {}).value || '');
+  askAnswer(card, String(text).trim());
+}, true);
+/* 回车即提交 */
+document.addEventListener('keydown', function(ev){
+  if (ev.key !== 'Enter') return;
+  var t = ev.target; if (!t || !t.classList || !t.classList.contains('ask-in')) return;
+  var card = t.closest('.ask-card'); if (!card) return;
+  ev.preventDefault(); askAnswer(card, String(t.value || '').trim());
+}, true);
+
+function diff(oldT, newT){ /* 行级简易 diff：公共前后缀+中段替换（卡片预览） */
     var a = String(oldT || '').split('\n'), b = String(newT || '').split('\n'), s = 0, e = 0, i, out = [];
     while (s < a.length && s < b.length && a[s] === b[s]) s++;
     while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
@@ -5719,6 +5805,7 @@ function toggleDetail(host, build){
 function chevBtn(host, build){
   var b = el('button', { class: 'exp-chev', type: 'button', title: '展开', 'aria-label': '展开', 'aria-expanded': 'false' });
   b.appendChild(icon('chev-r'));
+  setTimeout(function(){ try { var card = b.closest('.sub-card'); if (card) card.classList.add('has-chev'); } catch (e) {} }, 0);
   b.addEventListener('click', function(ev){
     ev.preventDefault(); ev.stopPropagation();
     toggleDetail(host, build);
@@ -6718,7 +6805,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.2', ua = navigator.userAgent || '';
+      var ver = 'v1.29.3', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
