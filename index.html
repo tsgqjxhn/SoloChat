@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.37';
+var APP_VER = 'v0.3.38';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -2147,7 +2147,14 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
       opt.onError(e);
     }
     bridge.pend[id] = {
-      onChunk: function(text){ parser.feed(text); },
+      onChunk: function(text){
+        if (parser.feed(text) === true){ // v0.3.38：桥通道也在收到 [DONE] 时收尾
+          if (finished) return; finished = true;
+          delete bridge.pend[id];
+          try { bridge.abort(id); } catch (e) {}
+          parser.end(); opt.onDone(null);
+        }
+      },
       onDone: function(status){
         if (finished) return; finished = true;
         delete bridge.pend[id];
@@ -8041,9 +8048,11 @@ function sendMessage(){
       return;
     }
   if (S.sending){
+    if (/^\/[a-z]/i.test(String($input.value || '').trim())){ /* v0.3.38：只读命令不该被当成「再按一次=停止」 */ } else {
     var _mine = isSending(S.sid) || ((S.pendBy || {})[S.sid] > 0);
     if (!_mine){ S.pend = 0; setSending(false); } // v0.3.18：别的会话把状态卡住了，这里自愈
     else { quickPending = false; stopGeneration(); return; }
+    }
   }
     var text = $input.value.trim();
     if (!text && !S.pendAtts.length){ quickPending = false; return; }
@@ -8055,6 +8064,7 @@ function sendMessage(){
       $input.value = ''; $input.style.height = '';
       var cs0 = curSession();
       if (!cs0 || !S.msgs.length){ UI.toast('当前会话没有可压缩的内容', true); return; }
+      if (S.compacting){ UI.toast('已有压缩在进行中，等它结束', true); return; } // v0.3.38
       S.compacting = true; S.compactTried = Date.now(); // v0.3.34：避免同时再触发一次自动压缩
       UI.toast('正在压缩上下文…');
       compactCtx(cs0, S.msgs.slice(), function(ok){ S.compacting = false; UI.toast(ok ? '已压缩（不再发送历史全文）' : '压缩失败，保持原样', !ok); });
@@ -8328,7 +8338,7 @@ function sendMessage(){
     var node = $listNode(m.id), body = node ? node.querySelector('.msg-body') : null;
     if (!node || !body){ renderMsgs(); node = $listNode(m.id); body = node && node.querySelector('.msg-body'); }
     if (!node || !body) return;
-    var q = ['.msg-err', '.msg-acts', '.msg-fold', '.reason'];
+    var q = ['.msg-err', '.msg-acts', '.msg-fold', '.reason', '.msg-srcs'];
     for (var qi = 0; qi < q.length; qi++){ var qe = node.querySelector(q[qi]); if (qe) qe.remove(); }
     node.classList.remove('collapsed');
     body.textContent = '';
