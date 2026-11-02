@@ -3457,6 +3457,7 @@ function askCard(c){
 /* 回答提交：写进对话 → 触发新一轮（用户消息，模型接着做） */
 function askAnswer(card, text){
   if (!card || !text) return;
+  if (S.sending){ UI.toast('等这轮回复结束再回答，或先点停止', true); return; } // v0.3.2：发不出去还会掐断生成
   var key = card.getAttribute('data-askkey') || '';
   S._asked = S._asked || {};
   if (Object.keys(S._asked).length > 200) S._asked = {};
@@ -5460,7 +5461,11 @@ var UI = (function(){
     $panel.appendChild(build);
     $modal.classList.add('show');
   }
-  function closeModal(){ $modal.classList.remove('show'); $panel.textContent = ''; }
+  function closeModal(){
+  $modal.classList.remove('show'); $panel.textContent = '';
+  var r = S._confirmRes; S._confirmRes = null;
+  if (r){ try { r(false); } catch (e) {} } // v0.3.2：放弃的确认要先落定，不然调用方永远等下去
+}
   function modalOpen(){ return $modal.classList.contains('show'); }
   function confirmBox(opt){
     return new Promise(function(res){
@@ -6115,7 +6120,7 @@ function buildSettings(){
         b.appendChild(field('思考程度档位', cfgInput('thinkList', 'text', 'Default,enabled,disabled'),
           '逗号分隔，输入区「思考」下拉按模型选。Default 不传；enabled/disabled→thinking.type，其余→reasoning_effort。'));
         b.appendChild(el('div', { class: 'hint', text: 'AI 仅在授权目录内相对路径读写，写入逐次确认；每会话绑定一个文件夹，开始后锁定。' }));
-        refreshFsRoots();
+        setTimeout(refreshFsRoots, 0); // v0.3.2：此处 #fs-roots 还没进 DOM
       }, false));
     });
 
@@ -6873,7 +6878,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.1', ua = navigator.userAgent || '';
+      var ver = 'v0.3.2', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7387,10 +7392,11 @@ p.appendChild(addBox);
   /* 自动压缩：usage≥80% 触发，9 段摘要+工具输出裁剪 */
   var COMPACT_PROMPT = '把以下对话历史压缩为结构化摘要供后续接续。严格按 9 段 Markdown 输出，标题固定：1.主要请求 2.关键发现 3.读取或修改的文件 4.问题解决 5.待办任务 6.当前工作 7.可选下一步 8.重要上下文 9.明确约束。空段写"无"。只输出摘要，2000 字内。';
   function lastUsage(msgs){ for (var i = msgs.length - 1; i >= 0; i--) if (msgs[i].usage && msgs[i].usage.p) return msgs[i].usage; return null; }
-  function compactCtx(s, cb){
+  function compactCtx(s, msgsIn, cb){
     var KEEP = 6, cut = [], lastTs = 0;
-    for (var i = 0; i < S.msgs.length - KEEP; i++){
-      var m = S.msgs[i];
+    var src = (Array.isArray(msgsIn) && msgsIn.length) ? msgsIn : S.msgs; // v0.3.2：后台会话压缩不许拿别人的消息
+    for (var i = 0; i < src.length - KEEP; i++){
+      var m = src[i];
       if (m.status !== 'ok' || !m.content) continue;
       var t = m.content.slice(0, 3000);
       if (m.role !== 'user' && t.length > 600) t = t.slice(0, 400) + '\n[工具输出已裁剪]'; // 早期工具输出裁剪
@@ -8058,7 +8064,7 @@ function sendMessage(){
     if (lu && lu.p >= lim * 0.8 && msgs.length >= 9 && !S.compacting && (!S.compactTried || Date.now() - S.compactTried > 120000)){
       S.compacting = true; S.compactTried = Date.now();
       if (!bg) toast('上下文 80%+，自动压缩中…');
-      compactCtx(s, function(ok){
+      compactCtx(s, msgs, function(ok){
         S.compacting = false;
         if (ok && !bg) toast('摘要完成，继续发送');
         runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, bg); // 失败回退原上下文继续
@@ -8292,6 +8298,7 @@ function sendMessage(){
     renderMsgs();
   }
   function editSave(id){
+    if (S.sending){ UI.toast('回复生成中，先停止再编辑重发', true); return; } // v0.3.2：否则先删尾部再被 isSending 挡回
     var i = findMsg(id);
     if (i < 0) return;
     var node = $listNode(id);
@@ -11942,9 +11949,12 @@ var SENSITIVE = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'cmd', 'g
         var u = NET.safeUrl(c.arg);
         if (!u) return Promise.resolve('（参数不是合法 URL）');
         if (op === 'web') return NET.fetchPageText(u, 4000).then(function(x){ return String(x || '').slice(0, 4000); });
-        if (op === 'search') return NET.searchWeb(c.arg, 5).then(function(r){
-          return (r || []).map(function(x){ return '- ' + x.title + ' ' + x.url + '\n  ' + (x.snippet || ''); }).join('\n');
-        });
+        if (op === 'search') return NET.searchWeb(c.arg, null, true).then(function(r){
+      /* v0.3.2：searchWeb 返回 {block,n,items:[{t,u}]}，原来当数组用会 TypeError */
+      if (!r || !r.block) return '（没有搜到结果；检查 设置 → 连接与模型 → 联网搜索）';
+      var items = (r.items || []).slice(0, 8);
+      return (items.length ? items.map(function(x){ return '- ' + (x.t || '') + ' ' + (x.u || ''); }).join('\n') + '\n\n' : '') + String(r.block).slice(0, 4000);
+    });
         return Promise.resolve('（不支持的操作：' + op + '）');
       }
 
