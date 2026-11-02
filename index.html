@@ -539,6 +539,24 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 /* 输入区 */
 #composer{flex:none;border-top:1px solid var(--hairline);padding:10px 16px 12px;position:relative;z-index:36}
 #chips{display:flex;gap:8px;flex-wrap:wrap;max-width:var(--content-w);margin:0 auto 8px}
+#route-hint{max-width:var(--content-w);margin:0 auto 8px;display:flex;align-items:center;gap:10px;
+  padding:7px 10px;border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--soft);font-size:12.5px;color:var(--text-2)}
+.tool-warn{display:flex;gap:6px;align-items:flex-start;margin:6px 0 2px;padding:6px 9px;
+  border:1px dashed color-mix(in srgb,var(--warning) 45%,transparent);border-radius:8px;
+  background:color-mix(in srgb,var(--warning) 8%,transparent);font-size:12px;color:var(--text-2);line-height:1.5}
+.tool-warn .tw-i{color:var(--warning);flex:none}
+.ev-strip{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 2px;font-size:12px;color:var(--text-2)}
+.ev-strip .ev-h{color:var(--faint);letter-spacing:.02em}
+.ev-strip .ev-i{padding:1px 7px;border:1px solid var(--hairline);border-radius:999px;background:var(--soft)}
+.ev-strip .ev-i.ok{color:var(--success);border-color:color-mix(in srgb,var(--success) 35%,transparent)}
+.ev-strip .ev-i.warn{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,transparent)}
+.ev-strip .ev-i.bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.tool-warn .tw-t{word-break:break-word}
+#route-hint .rh-t{flex:1;min-width:0}
+#route-hint b{color:var(--text-1);font-weight:600}
+#route-hint button{flex:none;background:none;border:1px solid var(--hairline);border-radius:6px;
+  padding:3px 9px;font-size:12px;color:var(--text-1);cursor:pointer}
+#route-hint button:hover{background:var(--hover)}
 #chips:empty{display:none}
 .chip{
   position:relative;width:52px;height:52px;border-radius:var(--r-md);
@@ -922,6 +940,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <div id="sub-pop" hidden></div>
       <div class="inner">
         <div id="chips"></div>
+        <div id="route-hint" hidden></div>
         <div class="crow">
           <div class="czone cz-l">
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
@@ -1692,7 +1711,12 @@ var NET = (function(){
     for (var li = msgs.length - 1; li >= 0; li--){ if (msgs[li].role === 'user'){ lastU = String(msgs[li].content || ''); break; } }
     if (lastU){
       var wantMode = MODE.route(lastU);
-      if (wantMode !== S.cfg.mode){ setCfg({ mode: wantMode, persona: '' }); }
+      if (wantMode !== S.cfg.mode){
+        /* v1.28.4：自动路由不再静默 —— 切完立刻在输入框上方明示，并给一键切回 */
+        var fromMode = S.cfg.mode;
+        setCfg({ mode: wantMode, persona: '' });
+        try { if (UI.routeHint) UI.routeHint(fromMode, wantMode); } catch (e) {}
+      }
     }
   }
     var sys = (session.systemPrompt || S.cfg.systemPrompt) || '';
@@ -3036,6 +3060,11 @@ var NET = (function(){
   };
 })();
 /*  */
+/* v1.28.4：写入快照表（path → snap id），跨刷新保留，用于「撤销这次写入」 */
+var SC_SNAPS = {};
+try { SC_SNAPS = JSON.parse(localStorage.getItem('sc.snaps') || '{}') || {}; } catch (e) { SC_SNAPS = {}; }
+function saveSnaps(){ try { localStorage.setItem('sc.snaps', JSON.stringify(SC_SNAPS)); } catch (e) {} }
+
 var MD = (function(){
   /* v2.1：轻量 LaTeX 子集 → HTML（零依赖）。目标是把常见公式渲染成可读文本，不是完整排版引擎。
      支持：\frac \sqrt \text、上下标 _{}/^{}、常用符号名、\left/\right、字距、\\ 换行。 */
@@ -3282,7 +3311,7 @@ var MD = (function(){
   }
   function fsCard(c){
     var nl = c.code.indexOf('\n'), path = (nl >= 0 ? c.code.slice(0, nl) : c.code).trim();
-    var label = { 'fs-read': '读取', 'fs-list': '列目录', 'fs-write': '写入申请', 'fs-done': '已写入', 'fs-rej': '已拒绝' }[c.lang] || c.lang;
+    var label = { 'fs-read': '读取', 'fs-list': '列目录', 'fs-write': '写入申请', 'fs-done': '已写入', 'fs-rej': '已拒绝', 'fs-back': '已撤销' }[c.lang] || c.lang;
     var outside = /^[a-zA-Z]:[\\/]/.test(path) || /^[\\/]{1,2}/.test(path) || path.split(/[\\/]/).indexOf('..') >= 0; // 工作区外（v1.4）
     var h = '<div class="fs-card"><div class="fs-head"><span class="fs-badge' +
       (c.lang === 'fs-done' ? ' ok' : c.lang === 'fs-rej' ? ' rej' : '') + '">' + label + '</span><span class="fs-path">' + path + '</span>';
@@ -3291,6 +3320,8 @@ var MD = (function(){
     if (c.lang === 'fs-write')
       h += '<button class="btn btn-primary" type="button" data-act="fs-apply" data-path="' + path + '">应用写入</button>' +
            '<button class="btn btn-sec" type="button" data-act="fs-reject" data-path="' + path + '">拒绝</button>';
+           if (c.lang === 'fs-done' && SC_SNAPS[path])
+             h += '<button class="btn btn-sec" type="button" data-act="fs-undo" data-path="' + path + '" title="把文件恢复成本次写入前的内容">撤销这次写入</button>';
     h += '</div>';
     if (c.lang === 'fs-write'){
       h += '<div class="fs-diff" data-fspath="' + path + '"></div>';
@@ -3311,7 +3342,44 @@ var MD = (function(){
       .concat(['<span class="hunk">…（差异预览已按 ' + LIMITS.FS_DIFF_LINES + ' 行截断）</span>']);
     return out.join('');
   }
-  return { render: render, diff: diff };
+  /* v1.28.4：围栏自检 —— 未闭合 / 参数为空要说出来，别静默丢掉 */
+  var TOOL_RE = /^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|fs-[a-z-]+)$/i;
+  var ARG_REQ = /^(agent|sub|fs-[a-z-]+|vfs-write|patch|web|search|get|browser|play|download|skill)$/i;
+  function warn(text){
+    var out = [], lines = String(text || '').split(/\r?\n/), open = null;
+    function push(kind, lang, line){
+      for (var k = 0; k < out.length; k++) if (out[k].kind === kind && out[k].lang === lang) return;
+      out.push({ kind: kind, lang: lang, line: line });
+    }
+    for (var i = 0; i < lines.length; i++){
+      var ln = lines[i], m = ln.match(/^```([A-Za-z0-9+#_-]*)[ \t]*([^\n]*)$/);
+      if (!m) continue;
+      var lang = m[1] || '', arg = String(m[2] || '').trim();
+      if (!open){ open = { lang: lang, arg: arg, line: i + 1 }; continue; }
+      var o = open; open = null;
+      if (ARG_REQ.test(o.lang) && !o.arg) push('empty', o.lang, o.line);
+    }
+    if (open && TOOL_RE.test(open.lang)) push('unclosed', open.lang, open.line);
+    return out;
+  }
+  /* v1.28.4：证据 —— 只认工具结果，不认正文里的『已完成』 */
+  function evidence(text){
+    var t = String(text || ''), lines = t.split(/\r?\n/), i, l;
+    var gen = (t.match(/```(?:vfs-write|patch|fs-write|fs-done|fs-back)/g) || []).length;
+    var saved = (t.match(/\[vfs\]\s*已写入/g) || []).length + (t.match(/\[(?:get|download)\]\s*已保存/g) || []).length +
+                (t.match(/```fs-done/g) || []).length;
+    var ranOk = 0, ranBad = 0, verified = 0, m;
+    for (i = 0; i < lines.length; i++){
+      l = lines[i];
+      if (/^\[run-result\]/.test(l)){ if (/成功/.test(l)) ranOk++; else if (/失败/.test(l)) ranBad++; }
+      else if ((m = /^退出码\s*(\d+)/.exec(l))) { if (+m[1]) ranBad++; else ranOk++; }
+      else if (/超时/.test(l) && /^\[cmd\]/.test(l)) ranBad++;
+      m = l.match(/【verify】/g); if (m) verified += m.length;
+      if (/^\[sub\]\s*verify\b/.test(l)) verified++;
+    }
+    return { gen: gen, saved: saved, ranOk: ranOk, ranBad: ranBad, verified: verified };
+  }
+  return { render: render, diff: diff, warn: warn, evidence: evidence };
 })();
 /* ==== 运行面板注入开始 ==== */
 /* C 解释器（c4 风格 int/char 子集，供沙箱运行面板） */
@@ -6087,7 +6155,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     (function(){
       var arCk = el('input', { type: 'checkbox' }); arCk.checked = !!S.cfg.autoRoute;
       arCk.addEventListener('change', function(){ setCfg({ autoRoute: arCk.checked }); });
-      arRow.appendChild(el('label', {}, [arCk, ' 自动选模式（按本轮输入猜该用 Chat / Work / Agent）']));
+      arRow.appendChild(el('label', {}, [arCk, ' 自动选模式（按本轮输入切 Chat / Work / Agent；切换会在输入框上方明示，可一键切回）']));
     })();
     p.appendChild(arRow);
 
@@ -6498,7 +6566,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.28.3', ua = navigator.userAgent || '';
+      var ver = 'v1.28.4', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6839,6 +6907,37 @@ p.appendChild(addBox);
       body.textContent = m.content;
     }
     n.appendChild(body);
+    /* v1.28.4：证据条 —— 已生成 / 已保存 / 已运行 / 已验证；没有 verify 就标「未验证」 */
+    if (m.role === 'assistant' && m.content){
+      var _ev = null;
+      try { _ev = MD.evidence(m.content); } catch (e) { _ev = null; }
+      if (_ev && (_ev.gen + _ev.saved + _ev.ranOk + _ev.ranBad + _ev.verified) > 0){
+        var _eb = el('div', { class: 'ev-strip' });
+        _eb.appendChild(el('span', { class: 'ev-h', text: '证据' }));
+        if (_ev.gen) _eb.appendChild(el('span', { class: 'ev-i', text: '已生成 ' + _ev.gen }));
+        if (_ev.saved) _eb.appendChild(el('span', { class: 'ev-i', text: '已保存 ' + _ev.saved }));
+        if (_ev.ranOk + _ev.ranBad)
+          _eb.appendChild(el('span', { class: 'ev-i' + (_ev.ranBad ? ' bad' : ''), text: '已运行 ' + (_ev.ranOk + _ev.ranBad) + (_ev.ranBad ? '（失败 ' + _ev.ranBad + '）' : '') }));
+        if (_ev.verified) _eb.appendChild(el('span', { class: 'ev-i ok', text: '已验证 ' + _ev.verified }));
+        else _eb.appendChild(el('span', { class: 'ev-i warn', text: '未验证' }));
+        n.appendChild(_eb);
+      }
+    }
+    /* v1.28.4：围栏没闭合/没参数时明说，避免『看起来派了其实没派』 */
+    if (m.role === 'assistant' && m.content && !m.isTool){
+      var _w = [];
+      try { _w = MD.warn(cleanAssistant(m.content)) || []; } catch (e) { _w = []; }
+      if (_w.length){
+        var _wt = _w.slice(0, 3).map(function(x){
+          return '```' + x.lang + (x.kind === 'unclosed' ? ' 未闭合（第 ' + x.line + ' 行）' : ' 缺少参数（第 ' + x.line + ' 行）');
+        }).join('；') + '，本轮未执行';
+        var _wb = el('div', { class: 'tool-warn' }, [
+          el('span', { class: 'tw-i', text: '⚠' }),
+          el('span', { class: 'tw-t', text: _wt })
+        ]);
+        n.appendChild(_wb);
+      }
+    }
     /* v0.2.9：抓到的图片显示缩略图（点击放大），让用户看到模型实际看到的画面 */
     if (m.imgs && m.imgs.length){
       var imgsBox = el('div', { class: 'msg-imgs' });
@@ -8143,6 +8242,29 @@ function sendMessage(){
     pop.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
     pop.hidden = false;
   }
+  /* v1.28.4：自动路由的提示条 —— 切了要说，且能一键切回 */
+  function hideRouteHint(){
+    var b = document.getElementById('route-hint');
+    if (b){ b.hidden = true; b.textContent = ''; }
+  }
+  function routeHint(from, to){
+    var b = document.getElementById('route-hint'); if (!b) return;
+    var nm = { chat: 'Chat', work: 'Work', agent: 'Agent' };
+    var nFrom = nm[from] || from, nTo = nm[to] || to;
+    b.textContent = '';
+    b.appendChild(el('span', { class: 'rh-t' }, ['已按本轮输入切到 ', el('b', { text: nTo }), '（原 ' + nFrom + '）']));
+    var back = el('button', { type: 'button', text: '切回 ' + nFrom });
+    back.addEventListener('click', function(){
+      setCfg({ mode: from, persona: '' });
+      hideRouteHint();
+      try { renderComposerCtl(); } catch (e) {}
+      toast('已切回 ' + nFrom);
+    });
+    var ok = el('button', { type: 'button', text: '知道了' });
+    ok.addEventListener('click', hideRouteHint);
+    b.appendChild(back); b.appendChild(ok);
+    b.hidden = false;
+  }
   function renderModeChip(){
     var b = $('#btn-cmode'); if (!b) return;
     var md = S.cfg.mode || 'chat';
@@ -9136,7 +9258,7 @@ function sendMessage(){
       autosize();
     },
     lightbox: lightbox,
-    toast: toast, applyTheme: applyTheme, openSettings: openSettings, closeModal: closeModal, holdBusy: holdBusy,
+    toast: toast, applyTheme: applyTheme, openSettings: openSettings, closeModal: closeModal, holdBusy: holdBusy, routeHint: routeHint, hideRouteHint: hideRouteHint,
     modalOpen: modalOpen, confirmBox: confirmBox, renderSessions: renderSessions,
     renderMsgs: renderMsgs, selectSession: selectSession, createSession: createSession,
     deleteSession: deleteSession, deleteProject: deleteProject, renameInline: renameInline, sendMessage: sendMessage,
@@ -9316,6 +9438,7 @@ $('#sidebar').addEventListener('click', function(e){
       case 'continue': UI.continueMsg(id); break;
       case 'fs-apply': { var fa = b.closest('.msg'); if (fa) FS.apply(fa.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
       case 'fs-reject': { var fr = b.closest('.msg'); if (fr) FS.reject(fr.getAttribute('data-id'), b.getAttribute('data-path')); break; }
+  case 'fs-undo': { var fu = b.closest('.msg'); if (fu) FS.undo(fu.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
       case 'cfg': UI.openSettings(); break;
       case 'sug': { var si = $('#input'); si.value = b.getAttribute('data-v') || ''; UI.autosize(); si.focus(); break; }
       case 'mock':
@@ -10163,10 +10286,35 @@ var FS = (function(){
         return;
       }
       NET.fs('write', path, block.body, ws, outside).then(function(r){
+        if (r && r.snap){ SC_SNAPS[path] = r.snap; saveSnaps(); }
         markDone(msg, path, 'fs-done'); UI.toast('已写入 ' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
       }, function(err){
         if (btn){ btn.disabled = false; btn.textContent = '应用写入'; }
         UI.toast('写入失败：' + (err && err.message || '未知错误'), true);
+      });
+    });
+  }
+  /* v1.28.4：撤销这次写入 —— 用写入前快照恢复，只覆盖 SoloChat 自己写过的那一份 */
+  function undo(mid, path, btn){
+    var snap = SC_SNAPS[path];
+    if (!snap){ UI.toast('没有可用的快照（可能已被清理）', true); return; }
+    var msg = byId(mid);
+    UI.confirmBox({
+      title: '撤销这次写入',
+      text: '将把 ' + path + ' 恢复成写入前的内容。' +
+        '\n\n快照：' + snap +
+        '\n\n只恢复 SoloChat 写入的这一份；如果你之后在别的编辑器里改过它，那些改动会被覆盖。',
+      danger: true, okText: '撤销写入'
+    }).then(function(ok){
+      if (!ok) return;
+      if (btn){ btn.disabled = true; btn.textContent = '撤销中…'; }
+      NET.fs('restore', path, snap, curWs(), isOutside(path)).then(function(r){
+        delete SC_SNAPS[path]; saveSnaps();
+        if (msg) markDone(msg, path, 'fs-back');
+        UI.toast('已撤销：' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
+      }, function(e){
+        if (btn){ btn.disabled = false; btn.textContent = '撤销'; }
+        UI.toast('撤销失败：' + (e && e.message || '未知错误'), true);
       });
     });
   }
@@ -10179,7 +10327,7 @@ var FS = (function(){
        Issue 16: 与 findWrite 一致取"最后一个"同路径 fs-write 块（findWrite 反向扫描返回末位），
        防同名块时读体/改头错位；正则容忍 \r\n 与路径行尾随空白。 */
     var esc = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    var re = new RegExp('```fs-write[ \\t]*\\r?\\n[ \\t]*' + esc + '[ \\t]*\\r?\\n', 'g');
+    var re = new RegExp('```(?:fs-write|fs-done|fs-rej|fs-back)[ \\t]*\\r?\\n[ \\t]*' + esc + '[ \\t]*\\r?\\n', 'g');
     var m, last = null;
     while ((m = re.exec(msg.content || ''))) last = m;
     if (!last) return;
@@ -10193,7 +10341,7 @@ var FS = (function(){
   function continueAfterWrites(msg){
     var s0 = stOf(msg.sid);
     var calls = scan(msg.content), open = 0, done = [], lines = [], i;
-    for (i = 0; i < calls.length; i++){ if (calls[i].op === 'fs-write') open++; else if (calls[i].op === 'fs-done' || calls[i].op === 'fs-rej') done.push(calls[i]); }
+    for (i = 0; i < calls.length; i++){ if (calls[i].op === 'fs-write') open++; else if (calls[i].op === 'fs-done' || calls[i].op === 'fs-rej' || calls[i].op === 'fs-back') done.push(calls[i]); }
     if (open || !done.length) return; // 仍有未处理的写入申请
     if (s0.turns >= LIMITS.FS_MAX_TURNS){ UI.toast('已达工具轮次上限（' + LIMITS.FS_MAX_TURNS + '）', true); return; }
     for (i = 0; i < done.length; i++)
@@ -10221,7 +10369,7 @@ var FS = (function(){
     get.then(function(d){ if (!node.firstChild) node.innerHTML = MD.diff(d.old, d.nw); });
   }
   return {
-    handleTurn: handleTurn, apply: apply, reject: reject, hydrateAll: hydrateAll,
+    handleTurn: handleTurn, apply: apply, reject: reject, undo: undo, hydrateAll: hydrateAll,
     reset: function(sid){ stMap[sid || S.sid] = { turns: 0, cancel: false }; },        // v2.2：按会话
     stop: function(sid){ stOf(sid).cancel = true; },                                  // v2.2：按会话
     protocol: PROTOCOL
@@ -12029,6 +12177,10 @@ try {
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
       bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
       sid: function(){ return S.sid; },
+   hint: function(a, b){ UI.routeHint(a, b); },
+   hideHint: function(){ UI.hideRouteHint(); },
+   fs: NET.fs,
+   snaps: function(){ return SC_SNAPS; },
       cfg: function(){ return S.cfg; },
       setCfg: function(o){ setCfg(o); } };
   }

@@ -1805,6 +1805,7 @@ namespace SoloChatHost
                     case "read": FsRead(req, id); break;
                     case "list": FsList(req, id); break;
                     case "write": FsWrite(req, id); break;
+      case "restore": FsRestore(req, id); break;   /* v1.28.4：撤销上次写入 */
                     case "delete": FsDelete(req, id); break; /* v1.13：面板里删文件（只限工作区内、非空目录不删） */
                     default:
                         PostFs(id, "fs.error", null, "未知文件操作: " + op);
@@ -1884,6 +1885,75 @@ namespace SoloChatHost
             catch (Exception ex) { PostFs(id, "fs.error", null, ex.Message); }
         }
 
+        /* v1.28.4：写前快照 —— 覆盖已有文件前留一份原件，支持「撤销这次写入」 */
+        static string SnapDir
+        {
+          get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoloChat", "backups"); }
+        }
+        
+        string SnapshotFile(string full)
+        {
+          try
+          {
+            if (!File.Exists(full)) return "";
+            Directory.CreateDirectory(SnapDir);
+            string id = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            File.Copy(full, Path.Combine(SnapDir, id + ".bak"), true);
+            File.WriteAllText(Path.Combine(SnapDir, id + ".json"),
+              JsonSerializer.Serialize(new { path = full, ts = DateTime.Now.ToString("o") }), new UTF8Encoding(false));
+            PruneSnaps();
+            return id;
+          }
+          catch { return ""; }
+        }
+        
+        void PruneSnaps()
+        {
+          try
+          {
+            var di = new DirectoryInfo(SnapDir);
+            if (!di.Exists) return;
+            var list = new List<FileInfo>(di.GetFiles("*.bak"));
+            list.Sort((a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+            long total = 0;
+            for (int k = 0; k < list.Count; k++)
+            {
+              total += list[k].Length;
+              if (k >= 500 || total > 200L * 1024 * 1024)
+              {
+                try { File.Delete(list[k].FullName); File.Delete(Path.ChangeExtension(list[k].FullName, ".json")); } catch { }
+              }
+            }
+          }
+          catch { }
+        }
+        
+        void FsRestore(JsonElement req, string id)
+        {
+          try
+          {
+            string snap = req.TryGetProperty("data", out JsonElement sn) ? (sn.GetString() ?? "") : "";
+            if (!Regex.IsMatch(snap, "^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$")) { PostFs(id, "fs.error", null, "快照编号无效"); return; }
+            string bak = Path.Combine(SnapDir, snap + ".bak"), meta = Path.Combine(SnapDir, snap + ".json");
+            if (!File.Exists(bak) || !File.Exists(meta)) { PostFs(id, "fs.error", null, "快照已过期或被清理"); return; }
+            string orig = "";
+            using (var doc = JsonDocument.Parse(File.ReadAllText(meta)))
+            {
+              if (doc.RootElement.TryGetProperty("path", out JsonElement pe)) orig = pe.GetString() ?? "";
+            }
+            if (string.IsNullOrEmpty(orig)) { PostFs(id, "fs.error", null, "快照元数据缺失"); return; }
+            string rel = req.GetProperty("path").GetString() ?? "";
+            bool outRoot = req.TryGetProperty("out", out JsonElement oEl) && oEl.ValueKind == JsonValueKind.True;
+            string p = outRoot ? GuardOutPath(rel) : GuardPath(ReqRoot(req), rel);
+            if (!string.Equals(Path.GetFullPath(p), Path.GetFullPath(orig), StringComparison.OrdinalIgnoreCase))
+            { PostFs(id, "fs.error", null, "快照与目标路径不一致，拒绝恢复"); return; }
+            File.Copy(bak, p, true);
+            Log("fs restore: " + rel + " snap=" + snap);
+            PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, restored = true, bytes = new FileInfo(p).Length }), null);
+          }
+          catch (Exception ex) { PostFs(id, "fs.error", null, ex.Message); }
+        }
+        
         void FsWrite(JsonElement req, string id)
         {
             string rel = req.GetProperty("path").GetString() ?? "";
@@ -1902,11 +1972,12 @@ namespace SoloChatHost
                     bom = a == 0xEF && b == 0xBB && c == 0xBF; // 已有 BOM 的文件保持其 BOM
                 }
             }
-            string dir = Path.GetDirectoryName(p);
+            string snap = File.Exists(p) ? SnapshotFile(p) : "";
+      string dir = Path.GetDirectoryName(p);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir); // 自动建父目录
             File.WriteAllText(p, data, bom ? new UTF8Encoding(true) : FsUtf8);
             Log("fs write ok: " + rel + " bytes=" + n);
-            PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, bytes = n }), null);
+            PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, bytes = n, snap = snap }), null);
         }
 
         void PickRoot(string id)
