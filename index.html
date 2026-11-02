@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6df6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
 <title>SoloChat · AI 对话</title>
@@ -3433,7 +3434,9 @@ function askCard(c){
     if (/^[-*•]\s+/.test(t)) opts.push(t.replace(/^[-*•]\s+/, ''));
     else if (!note) note = t;
   }
-  var key = (q.slice(0, 60) + '|' + opts.join(',')).replace(/"/g, '&quot;');
+  var askSid = (typeof S !== 'undefined' && S.sid) ? S.sid : 'draft';
+  var rawKey = askSid + '|' + q.slice(0, 80) + '|' + opts.join(',');
+  var key = rawKey.replace(/"/g, '&quot;');
   var done = (typeof S !== 'undefined' && S._asked && S._asked[key]) || '';
   var h = '<div class="ask-card' + (done ? ' done' : '') + '" data-askkey="' + key + '">' +
     '<div class="ask-h"><span class="ask-badge">提问</span><span class="ask-q">' + q + '</span></div>';
@@ -3452,7 +3455,9 @@ function askCard(c){
 function askAnswer(card, text){
   if (!card || !text) return;
   var key = card.getAttribute('data-askkey') || '';
-  S._asked = S._asked || {}; S._asked[key] = text;
+  S._asked = S._asked || {};
+  if (Object.keys(S._asked).length > 200) S._asked = {};
+  S._asked[key] = text;
   card.classList.add('done');
   var body = card.querySelector('.ask-body');
   if (body){ body.textContent = ''; var d = document.createElement('div'); d.className = 'ask-done'; d.textContent = '已回答：' + text; body.appendChild(d); }
@@ -6835,7 +6840,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.5', ua = navigator.userAgent || '';
+      var ver = 'v1.29.6', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
