@@ -6878,7 +6878,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.2', ua = navigator.userAgent || '';
+      var ver = 'v0.3.3', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10417,7 +10417,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
           }
         } catch (e) {}
       }
-    for (i = 0; i < auto.length; i++) apply(msg.id, auto[i].path, null); // 自动应用（btn 为空）
+    for (i = 0; i < auto.length; i++) apply(msg, auto[i].path, null); // v0.3.3：传消息对象，后台会话不在 S.msgs 里
     if (!reads.length) return;
     if (s0.turns >= LIMITS.FS_MAX_TURNS){ UI.toast('已达工具轮次上限（' + LIMITS.FS_MAX_TURNS + '）', true); return; }
     runReads(reads, msg.sid);
@@ -10430,6 +10430,8 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
   function runReads(reads, sid0){
     UI.holdBusy(1);
     var parts = [], done = 0, s0 = stOf(sid0);
+    /* v0.3.3：后台会话用自己的工作区，不读当前显示会话的 */
+    var ws0 = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(sid0);
   /* v1.28.3：一条回复里的多个 agent/sub 先聚成一批并行跑，剩下的工具照原样串行 */
   (function hoistSubs(){
     var subs = [], rest = [];
@@ -10564,16 +10566,16 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         }, function(e){ parts.push('[agent] ' + sRole + ' 失败：' + (e && e.message || e)); }).then(next);
         return;
       }
-      NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, curWs()).then(
+      NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, ws0).then(
         function(r){
-          if (c.op === 'fs-edit') return applyEdit(c, r).then(function(t){ parts.push(t); });
+          if (c.op === 'fs-edit') return applyEdit(c, r, ws0).then(function(t){ parts.push(t); });
           parts.push(fmtResult(c, r, null));
         },
         function(err){ parts.push(fmtResult(c, null, err && err.message || '执行失败')); }
       ).then(next);
     })();
   }
-  function applyEdit(c, r){ /* v0.3.0：精确局部替换（唯一匹配才写） */
+  function applyEdit(c, r, wsIn){ /* v0.3.0：精确局部替换（唯一匹配才写）；v0.3.3：写入根由调用方指定 */
     var text = (r && r.text) || '', o = c.oldText, n = c.newText;
     if (!o) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：缺少 --- old 段）');
     var at = text.indexOf(o), cnt = 0, i = 0;
@@ -10582,7 +10584,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     if (cnt > 1) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：匹配到 ' + cnt + ' 处，请给更长的唯一片段）');
     if (isOutside(c.path)) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：工作区外编辑需人工确认，请改用 fs-write）');
     var next = text.slice(0, at) + n + text.slice(at + o.length);
-    return NET.fs('write', c.path, next, curWs(), false).then(function(w){
+    return NET.fs('write', c.path, next, wsIn || curWs(), false).then(function(w){
       return '[fs-result] edit ' + c.path + '（已替换 1 处，写入 ' + ((w && w.bytes) || next.length) + ' 字节）';
     }, function(e){ return '[fs-result] edit ' + c.path + '（写入失败：' + (e && e.message || e) + '）'; });
   }
@@ -10603,11 +10605,12 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
      v1.4：工作区内（相对路径）由 handleTurn 自动应用；工作区外（绝对路径/UNC/..）逐次弹确认，
      确认框须写明【位置】与【操作内容】，用户同意后带 out=1 交给宿主再校验。 */
   function apply(mid, path, btn){
-    if (S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭', true); return; }
-    var msg = byId(mid), block = msg && findWrite(msg.content, path);
+    var msg = (mid && typeof mid === 'object') ? mid : byId(mid); /* v0.3.3：后台会话的消息不在 S.msgs 里 */
+    if (btn && S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭', true); return; }
+    var block = msg && findWrite(msg.content, path);
     if (!block){ UI.toast('找不到对应的写入申请', true); return; }
     var outside = isOutside(path);
-    var ws = curWs();
+    var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
     var ask = Promise.resolve(true);
     if (outside){
@@ -12213,7 +12216,8 @@ var WORK = (function(){
   }
   function handleTurn(msg){
     var w0 = stOf(msg && msg.sid);
-    if (S.cfg.mode !== 'work' || w0.cancel || !msg || msg.status !== 'ok') return;
+    if (w0.cancel || !msg || msg.status !== 'ok') return;
+  if (S.cfg.mode !== 'work' && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
     autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件） */
     var calls = scan(msg.content);
     if (!calls.length) return;
