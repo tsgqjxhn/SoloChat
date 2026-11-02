@@ -34,6 +34,7 @@
 - **其他** — 深/浅双主题、Alt+Space 全局呼出（宿主）、侧栏分组置顶、快捷键自定义、导入导出、`mock` 离线演示
 - **v1.28.1 新增** — 工具链还在跑时发送键保持「停止」不再提前复位；新增内置浏览器工具 `browser`（Work / Agent，应用内窗口带登录态）；Agent 模式下 `web` / `search` / `get` 围栏真的执行了；Chat 明确「没有工具」，不执行的围栏会标「本轮不执行」；自动选模式遇到网址或「打开/访问」不再落到 Chat
 - **v1.28.2 新增** — 取消 Work/Agent 的小模式（Auto/Read/Write 与 Work 子模式），一律按 auto 派活；子智能体内置角色换成 7 个阶段角色：clarify 理解需求 / criteria 成功标准 / plan 方案 / build 执行 / verify 验证 / fix 修正 / deliver 交付；Chat 不再注入子智能体清单
+- **v1.28.3 新增** — 母智能体按 clarify → criteria → plan → build → verify → fix → deliver 顺序推进（阶段协议写进 Work/Agent 系统提示词）；一条回复里写多个 ` ```agent ` 围栏会**并行**执行（同角色也可，最多 4 个）；每批子智能体跑完自动回注「本轮到了哪一步、下一步该谁」
 - **插件市场**：`Plugin` 分支维护可导入的扩展包集合（index.json + 校验脚本 + CI），见 https://github.com/tsgqjxhn/SoloChat/tree/Plugin
 - **v1.28.0 新增** — 系统提示词各段可改（Work / Agent / 直接落地 / 只读 / 各子智能体，保存后下一条消息生效，可恢复默认）；agentMode 收敛可派角色（auto 全量 / read 只读角色且放开 search·web·get / write 不派活）；删掉设置页里的解释性灰字
 - **v1.27.0 新增** — 内置工具的「查看」补上真正的契约：调用写法（围栏标签 + 参数行）、参数、返回格式、说明、限制与实现位置，并注明那 5 个字段只是登记信息、不是工具定义

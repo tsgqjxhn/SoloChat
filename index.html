@@ -1703,6 +1703,7 @@ var NET = (function(){
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
+    if (S.cfg.mode === 'work' || S.cfg.mode === 'agent') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
     var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
   var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
@@ -6497,7 +6498,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.28.2', ua = navigator.userAgent || '';
+      var ver = 'v1.28.3', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9964,6 +9965,19 @@ var FS = (function(){
   function runReads(reads, sid0){
     UI.holdBusy(1);
     var parts = [], done = 0, s0 = stOf(sid0);
+  /* v1.28.3：一条回复里的多个 agent/sub 先聚成一批并行跑，剩下的工具照原样串行 */
+  (function hoistSubs(){
+    var subs = [], rest = [];
+    for (var i = 0; i < reads.length; i++){
+      var c0 = reads[i];
+      if (c0.op === 'agent' || c0.op === 'sub'){
+        var nm = String(c0.path || '').trim().split(/\s+/)[0];
+        var tk = (String(c0.path || '').replace(nm, '') + (c0.body ? '\n' + c0.body : '')).trim();
+        if (nm) subs.push({ name: nm, task: tk });
+      } else rest.push(c0);
+    }
+    if (subs.length > 1){ rest.unshift({ op: 'suball', items: subs }); reads = rest; }
+  })();
     (function next(){
       if (s0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
       if (done >= reads.length){
@@ -10058,26 +10072,30 @@ var FS = (function(){
     }
     if (c.op === 'sub' || c.op === 'agent' || c.op === 'suball'){
         var sRole = String(c.path || '').trim().split(/\s+/)[0];
-        if (!sRole){ parts.push('[agent] 缺少角色名'); next(); return; }
+        if (!sRole && !(c.items && c.items.length)){ parts.push('[agent] 缺少角色名'); next(); return; }
         if (c.op === 'suball'){
-          var lines2 = (String(c.path || '').replace(sRole, '') + '\n' + (c.body || '')).split(/\r?\n/), items2 = [];
+          var lines2 = (String(c.path || '').replace(sRole, '') + '\n' + (c.body || '')).split(/\r?\n/), items2 = (c.items && c.items.length) ? c.items.slice() : [];
+          if (!items2.length){
           for (var li = 0; li < lines2.length; li++){
             var ln2 = lines2[li].trim(); if (!ln2) continue;
             var pm = ln2.match(/^([a-z][a-z0-9-]{1,24})\s*[|:：]\s*(.+)$/) || ln2.match(/^([a-z][a-z0-9-]{1,24})\s+(.+)$/);
             if (pm) items2.push({ name: pm[1], task: pm[2] });
           }
+          }
           if (!items2.length){ parts.push('[agent] 没解析出任务（每行：角色 | 任务）'); next(); return; }
           var t0p = Date.now();
           SUB.runAll(items2, 0).then(function(rs){
+            var hintA2 = SUB.stageHint(rs.map(function(r){ return r.name; }));
             parts.push('[agent] ' + rs.length + ' 个并行完成（' + (Date.now() - t0p) + 'ms）\n' +
-              rs.map(function(r){ return '【' + r.name + '】' + (r.ok ? '' : '（失败）') + '\n' + String(r.text).slice(0, 3000); }).join('\n\n'));
+              rs.map(function(r){ return '【' + r.name + '】' + (r.ok ? '' : '（失败）') + '\n' + String(r.text).slice(0, 3000); }).join('\n\n') + (hintA2 ? '\n' + hintA2 : ''));
           }, function(e){ parts.push('[agent] 失败：' + (e && e.message || e)); }).then(next);
           return;
         }
         var sTask = (String(c.path || '').replace(sRole, '') + (c.body ? '\n' + c.body : '')).trim();
         var t0r = Date.now();
         SUB.run(sTask, sRole, 0).then(function(txt){
-          parts.push(String(txt).slice(0, 6000) + '\n（' + (Date.now() - t0r) + 'ms）');
+          var hintS2 = SUB.stageHint([sRole]);
+          parts.push(String(txt).slice(0, 6000) + (hintS2 ? '\n' + hintS2 : '') + '\n（' + (Date.now() - t0r) + 'ms）');
         }, function(e){ parts.push('[agent] ' + sRole + ' 失败：' + (e && e.message || e)); }).then(next);
         return;
       }
@@ -11201,6 +11219,13 @@ var HANDOFF = (function(){
   return { to: to, summaryOf: summaryOf };
 })();
 
+/* v1.28.3：母智能体的阶段流程 + 并行派活纪律（Work / Agent 都注入） */
+var STAGE_PROTOCOL = '阶段流程（按顺序走，别倒着来）：'
+  + '① clarify 理解需求 → ② criteria 成功标准 → ③ plan 方案 → ④ build 执行 → ⑤ verify 验证 → ⑥ fix 修正 → ⑦ deliver 交付。\n'
+  + '小事可合并：criteria+plan 一句话带过，没问题就跳过 fix；但没 verify 不许说「完成／已测试」。\n'
+  + '派活写法：```agent 角色 任务。一条回复里写多个 agent 围栏（角色可以相同）会同时跑（并发 4），互不依赖的才拆开。\n'
+  + '拆分原则：按文件/按子任务拆给 build，按检查面拆给 verify；拆完自己合并结论，别把合并也派出去。';
+
 /* v0.5.0：子智能体（母智能体派活）—— 独立上下文、独立循环、只回最终答复
    与主对话的关系：母（当前会话）用 ```sub 名字 任务 派活；子在自己的消息数组里跑完，只把答案回灌成一条工具结果。
    子不能再派子（MAX_DEPTH=1），避免无限套娃与 token 爆炸。 */
@@ -11480,6 +11505,17 @@ var SUB = (function(){
   }
 
   /* 并行派活：最多 3 个并发，单个失败不影响其他 */
+  /* v1.28.3：回来一句「本轮到了哪一步、下一步该谁」*/
+  var STAGE_SEQ = ['clarify', 'criteria', 'plan', 'build', 'verify', 'fix', 'deliver'];
+  function stageHint(names){
+    var best = -1;
+    for (var i = 0; i < names.length; i++){ var k = STAGE_SEQ.indexOf(String(names[i] || '')); if (k > best) best = k; }
+    if (best < 0) return '';
+    var nxt = STAGE_SEQ[best + 1];
+    return nxt ? '[阶段] 本轮完成：' + names.join(' / ') + '；下一步：' + nxt
+         + '（可拆成多个 ```agent ' + nxt + ' … 并行）'
+      : '[阶段] 本轮完成：' + names.join(' / ') + '；流程已到最后一环。';
+  }
   function runAll(items, depth){
     return new Promise(function(resolve){
       if (!items.length) return resolve([]);
@@ -11496,11 +11532,11 @@ var SUB = (function(){
           if (done === items.length) resolve(results); else worker();
         });
       }
-      for (var k = 0; k < Math.min(3, items.length); k++) worker();
+      for (var k = 0; k < Math.min(4, items.length); k++) worker();   // v1.28.3：同种角色也能并行 4 个
     });
   }
 
-  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, find: find,
+  return { profiles: profiles, prompt: prompt, run: run, runAll: runAll, stageHint: stageHint, find: find,
            stageFiles: stageFiles, scanChild: scanChild, aclOf: aclOf, ROLES: ROLES, MAX_DEPTH: MAX_DEPTH, covered: covered, mode: am };
 })();
 
@@ -11686,6 +11722,20 @@ var WORK = (function(){
   function runCalls(calls, sid0){
     UI.holdBusy(1);
     var parts = [], events = [], imgs = [], done = 0, w0 = stOf(sid0);
+      /* v1.28.3：一条回复里的多个 agent/sub 先聚成一批并行跑，剩下的工具照原样串行 */
+      (function hoistSubs(){
+        var subs = [], rest = [];
+        for (var i = 0; i < calls.length; i++){
+          var c0 = calls[i];
+          if (c0.op === 'agent' || c0.op === 'sub'){
+            if (c0.items){ for (var q = 0; q < c0.items.length; q++) subs.push(c0.items[q]); continue; }
+            var nm = String(c0.arg || '').trim().split(/\s+/)[0];
+            var tk = (String(c0.arg || '').replace(nm, '') + (c0.body ? '\n' + c0.body : '')).trim();
+            if (nm) subs.push({ name: nm, task: tk });
+          } else rest.push(c0);
+        }
+        if (subs.length > 1){ rest.unshift({ op: 'suball', items: subs }); calls = rest; }
+      })();
     /* v0.2.1：一次工具结果 = 一条 role='tool' 消息；文本给模型，events 给 UI 画一行行卡片 */
     function add(text, ev){ parts.push(text); if (ev) events.push(ev); }
   function addImg(dataUrl){ if (dataUrl && imgs.length < 4) imgs.push(dataUrl); }
@@ -11719,19 +11769,22 @@ var WORK = (function(){
         next(); return;
       }
       if (c.op === 'suball'){
-        var rawLines = String(c.body || c.arg || '').split(/\r?\n/);
-        var items = [];
-        for (var sli = 0; sli < rawLines.length; sli++){
-          var ln = rawLines[sli].trim(); if (!ln) continue;
-          var mm2 = ln.match(/^([a-z][a-z0-9-]{1,24})\s*[|:：]\s*(.+)$/) || ln.match(/^([a-z][a-z0-9-]{1,24})\s+(.+)$/);
-          if (mm2) items.push({ name: mm2[1], task: mm2[2] });
+        var items = (c.items && c.items.length) ? c.items.slice() : [];
+        if (!items.length){
+          var rawLines = String(c.body || c.arg || '').split(/\r?\n/);
+          for (var sli = 0; sli < rawLines.length; sli++){
+            var ln = rawLines[sli].trim(); if (!ln) continue;
+            var mm2 = ln.match(/^([a-z][a-z0-9-]{1,24})\s*[|:：]\s*(.+)$/) || ln.match(/^([a-z][a-z0-9-]{1,24})\s+(.+)$/);
+            if (mm2) items.push({ name: mm2[1], task: mm2[2] });
+          }
         }
         if (!items.length){ add('[suball] 没解析出任务（每行：名字 | 任务）', { op: 'suball', ok: false, brief: '解析失败' }); next(); return; }
         var t0a = Date.now();
         SUB.runAll(items, 0).then(function(rs){
           var outTxt = rs.map(function(r){ return '【' + r.name + '】' + (r.ok ? '' : '（失败）') + '\n' + String(r.text).slice(0, 3000); }).join('\n\n');
           var allOk = true; for (var ri = 0; ri < rs.length; ri++) if (!rs[ri].ok) allOk = false;
-          add('[suball] ' + rs.length + ' 个并行完成（' + (Date.now() - t0a) + 'ms）\n' + outTxt,
+          var hintA = SUB.stageHint(rs.map(function(r){ return r.name; }));
+          add('[suball] ' + rs.length + ' 个并行完成（' + (Date.now() - t0a) + 'ms）\n' + outTxt + (hintA ? '\n' + hintA : ''),
             { op: 'suball', ok: allOk, ms: Date.now() - t0a, brief: rs.map(function(r){ return r.name; }).join(' + ') });
         }, function(e){
           add('[suball] 失败：' + (e && e.message || e), { op: 'suball', ok: false, brief: '失败' });
@@ -11743,7 +11796,8 @@ var WORK = (function(){
         var subTask = (String(c.arg || '').replace(subName, '') + (c.body ? '\n' + c.body : '')).trim();
         var t0s = Date.now();
         SUB.run(subTask, subName, 0).then(function(txt){
-          add('[sub] ' + subName + '\n```\n' + String(txt).slice(0, 6000) + '\n```', { op: 'sub', ok: true, ms: Date.now() - t0s, brief: subName });
+          var hintS = SUB.stageHint([subName]);
+          add('[sub] ' + subName + '\n```\n' + String(txt).slice(0, 6000) + '\n```' + (hintS ? '\n' + hintS : ''), { op: 'sub', ok: true, ms: Date.now() - t0s, brief: subName });
         }, function(e){
           add('[sub] ' + subName + ' 失败：' + (e && e.message || e), { op: 'sub', ok: false, brief: '失败' });
         }).then(next);
@@ -11971,7 +12025,7 @@ var WORK = (function(){
 try {
   if (localStorage.getItem('sc.debug') === '1'){
     window.SC_WORK = WORK;
-    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps, md: MD, busy: UI.holdBusy,
+    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps, md: MD, busy: UI.holdBusy, stage: STAGE_PROTOCOL,
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
       bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
       sid: function(){ return S.sid; },
