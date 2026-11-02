@@ -1194,7 +1194,7 @@ var DEF_CFG = {
   searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
   searchFetch: true,            // 正文抓取：对前 N 条结果抓网页正文替代摘要（失败保留摘要）
   searchFetchCount: 3,          // 抓取条数 0~5
-  proxy: 'http://127.0.0.1:7897', // HTTP 代理（仅宿主桥通道生效）；留空=系统代理（v1.5 默认 Clash/mihomo 混合端口 7897）
+  proxy: 'direct',               // v0.3.4：默认直连；留空 = 系统代理；也可填 http://127.0.0.1:7897 这类地址
   proxyMigrated: 0,             // 一次性迁移标记：旧版空代理 → v1.5 默认 7897（仅未自定义过代理的用户）
   ocr: {                        // 文档 OCR（v1.5）：扫描版 PDF 交给专用文档识别模型转文本
     engine: 'none',             // none | mistral | azure
@@ -1389,6 +1389,13 @@ function loadCfg(){
   if (!c.proxyMigrated){
     if (!cfg.proxy) cfg.proxy = DEF_CFG.proxy;
     cfg.proxyMigrated = 1;
+  }
+  /* v0.3.4：把旧默认的本地代理切回直连；用户改成别的地址则保持 */
+  if (!c.proxyDirectMigrated){
+    var pv = String(cfg.proxy || '').trim();
+    /* 空值（跟随系统代理）与旧默认 7897 都视为「没自己配过」，一次性切成直连 */
+    if (!pv || /^https?:\/\/127\.0\.0\.1:7897\/?$/i.test(pv)) cfg.proxy = 'direct';
+    cfg.proxyDirectMigrated = 1;
   }
   /* 迁移（一次性）：旧默认 maxTokens 2048 → 0，不再限制输出（避免思考被截断） */
   cfg.migMT = !!c.migMT;
@@ -6172,17 +6179,17 @@ p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [grpCk, ' 会话列
         el('label', {}, [qbCk, ' 任务栏快速输入条（Enter 提问，Esc / × 隐藏）'])
       ]));
 
-      /* 网络代理（原独立「代理」页，默认 127.0.0.1:7897） */
+      /* 网络代理（原独立「代理」页；v0.3.4 起默认直连） */
       p.appendChild(el('div', { class: 'sub', text: '网络代理' }));
-      p.appendChild(field('HTTP 代理', cfgInput('proxy', 'text', 'http://127.0.0.1:7897'),
-        '默认 http://127.0.0.1:7897（Clash / mihomo 混合端口）。留空 = 系统代理。格式 http://[user:pass@]host:port，缺 http:// 会自动补；走宿主桥通道：对话流式、模型列表、联网搜索、正文抓取、文档 OCR 都会使用；浏览器直连与页面内请求跟随系统代理，无法单独指定。'));
+      p.appendChild(field('HTTP 代理', cfgInput('proxy', 'text', 'direct'),
+        '默认 direct = 直连（不走任何代理）。留空 = 跟随系统代理；也可填 http://127.0.0.1:7897（Clash / mihomo 混合端口）。格式 http://[user:pass@]host:port，缺 http:// 会自动补；走宿主桥通道：对话流式、模型列表、联网搜索、正文抓取、文档 OCR 都会使用；浏览器直连与页面内请求跟随系统代理，无法单独指定。'));
       p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
         el('button', { class: 'btn btn-sec', 'data-m': 'proxy-test', text: '测试连通性' })
       ]));
       p.appendChild(el('div', { class: 'hint', text: '测试：经当前代理访问 gstatic 探测页（generate_204）。返回 204 即代理可用；改完地址记得先测再用。' }));
 /* v3.0 #9：代理按域名分流——列出的主机一律直连（常见：本地目录/内网网关） */
 p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev, openrouter.ai, 192.168.*'),
-  '逗号分隔；命中的主机不走上面的代理（目录、自检、本地网关用）。支持 * 通配。留空 = 全部走代理。'));
+  '逗号分隔；命中的主机一律直连（目录、自检、本地网关用）。支持 * 通配。代理为 direct 时本项无影响。'));
 
       /* 全局参数（原独立「全局参数」页） */
       p.appendChild(el('div', { class: 'sub', text: '全局参数' }));
@@ -6878,7 +6885,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.3', ua = navigator.userAgent || '';
+      var ver = 'v0.3.4', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9541,7 +9548,7 @@ function sendMessage(){
     L.push('宿主桥: ' + (NET.bridge.ok ? 'OK' : '未连接'));
     L.push('Base URL: ' + (S.cfg.baseURL ? S.cfg.baseURL.replace(/\/\/([^/]+)/, '//$1') : '（未配置）'));
     L.push('API Key: ' + (S.cfg.apiKey ? '已配置（' + S.cfg.apiKey.length + ' 字符，已隐藏）' : '未配置'));
-    L.push('代理: ' + (S.cfg.proxy || '系统') + ' / 直连例外: ' + (S.cfg.proxyDirect || '-'));
+    L.push('代理: ' + (/^direct$/i.test(String(S.cfg.proxy || '')) ? '直连' : (S.cfg.proxy || '系统')) + ' / 直连例外: ' + (S.cfg.proxyDirect || '-'));
     L.push('当前模型: ' + (S.cfg.currentModel || '-') + ' / 池大小: ' + (S.cfg.models || []).length);
     var e = ctxEst();
     L.push('上下文估算: ' + e.tok + ' (缓存 ' + e.cache + ' + 未缓存历史 ' + e.uncached + ' + 输入 ' + (e.inp + e.att) + ' + 输出 ' + e.out + ')');

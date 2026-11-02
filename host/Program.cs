@@ -187,6 +187,7 @@ namespace SoloChatHost
     static HttpClient ClientFor(string proxy)
         {
             proxy = (proxy ?? "").Trim();
+            if (string.Equals(proxy, "direct", StringComparison.OrdinalIgnoreCase)) return DirectHttp; // v0.3.4：显式直连
             if (proxy.Length == 0) return Http;
             if (proxy.IndexOf("://", StringComparison.Ordinal) < 0) proxy = "http://" + proxy;
             if (string.Equals(proxy, proxyKey, StringComparison.Ordinal)) return proxyHttp ?? Http;
