@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.46';
+var APP_VER = 'v0.3.47';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10558,6 +10558,15 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       } catch (e) {}
       UI.toast('只读模式：' + writes.length + ' 处写入已跳过', true);
       writes = [];
+    }
+  }
+  /* v0.3.47：fs-edit 也在计划门禁之内（它同样是写盘） */
+  if (permMode === 'ask' && !s0.planOk){
+    var _edits = reads.filter(function(c){ return c.op === 'fs-edit'; });
+    if (_edits.length){
+      reads = reads.filter(function(c){ return c.op !== 'fs-edit'; });
+      try { msg.content = String(msg.content || '') + '\n\n> ⏸ 计划门禁：本轮 ' + _edits.length + ' 处编辑未执行（先确认一次写入解锁本会话）'; DB.putMessage(msg); UI.repaintMsg(msg.id); } catch (e) {}
+      UI.toast('计划门禁：' + _edits.length + ' 处编辑已跳过，先确认一次写入', true);
     }
   }
   var gated = (permMode === 'ask') && (S.cfg.fsAutoWrite !== false) && !s0.planOk && writes.length > 0;
