@@ -620,6 +620,9 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .set-page h2{margin-bottom:14px}
 .set-foot{border-top:1px solid var(--hairline);padding:10px 14px;display:flex;justify-content:flex-end}
 .f-row{margin-bottom:14px}
+.f-row.ext-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.f-row.ext-row .hint{flex:1 1 220px}
+.f-row.ext-row .f-acts{margin-left:auto;display:flex;gap:6px;align-items:center}
 .f-row label{display:block;font-size:13px;font-weight:500;color:var(--ink);margin-bottom:5px}
 .f-row .hint{font-size:12px;color:var(--faint);margin-top:4px}
 .f-in,.f-row textarea,.f-row select{
@@ -852,6 +855,12 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .orch-line{margin:2px 0}
 .orch-line.bad{color:var(--danger)}
 .orch-line.ok{color:var(--success)}
+.det-host{grid-column:1 / -1}
+.det-box{margin:8px 0 12px;padding:10px 12px;border:1px solid var(--hairline);border-radius:10px;background:var(--soft)}
+.det-title{font-size:12.5px;font-weight:600;margin-bottom:4px;color:var(--text)}
+.det-h{display:flex;align-items:center;gap:8px;margin:10px 0 4px}
+.det-k{font-size:11.5px;color:var(--muted);letter-spacing:.02em}
+.det-pre{margin:0;padding:8px 10px;border-radius:8px;background:var(--canvas);border:1px solid var(--hairline);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
 .pkg-drop{margin:10px 0;padding:14px;border:1px dashed var(--hairline);border-radius:10px;text-align:center;font-size:12.5px;color:var(--faint);background:var(--soft)}
 .pkg-drop.over{border-color:var(--primary);color:var(--primary)}
 .pkg-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
@@ -5500,6 +5509,40 @@ var UI = (function(){
     UI.toast('已导出 ' + r.files + ' 个文件：' + r.dir);
   }, function(e){ UI.toast('导出失败：' + (e && e.message || e), true); });
 }
+function detailBox(d){
+  var box = el('div', { class: 'det-box' });
+  if (d && d.title) box.appendChild(el('div', { class: 'det-title', text: d.title }));
+  (d.blocks || []).forEach(function(b){
+    var h = el('div', { class: 'det-h' }, [ el('span', { class: 'det-k', text: b.k }) ]);
+    if (b.v){
+      var cp = el('button', { class: 'btn btn-ghost rn-mini', text: '复制' });
+      cp.addEventListener('click', function(){ copyText(String(b.v)); });
+      h.appendChild(cp);
+    }
+    box.appendChild(h);
+    box.appendChild(el('pre', { class: 'det-pre', text: (b.v == null || b.v === '') ? '（空）' : String(b.v) }));
+  });
+  return box;
+}
+function clearDetails(keep){
+  var bs = document.querySelectorAll('.det-box');
+  for (var i = 0; i < bs.length; i++){
+    if (bs[i] === keep) continue;
+    var par = bs[i].parentElement;
+    if (par) par.removeChild(bs[i]);
+  }
+}
+function toggleDetail(host, build){
+  if (!host) return;
+  if (host.firstChild){ host.textContent = ''; return; }
+  /* 同时只开一个详情，避免卡片里堆一片 */
+  clearDetails(null);
+  var others = document.querySelectorAll('.det-host');
+  for (var i = 0; i < others.length; i++) if (others[i] !== host) others[i].textContent = '';
+  var d;
+  try { d = build(); } catch(e){ UI.toast('打不开：' + (e && e.message || e), true); return; }
+  host.appendChild(detailBox(d));
+}
 function buildSettings(){
     var c = S.cfg;
     var main = el('div', { class: 'set-main' });
@@ -5898,7 +5941,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
             el('div', { class: 'p-name', text: '/' + pr.name }),
             el('div', { class: 'p-text', text: pr.text }),
             el('div', { class: 'f-actions', style: 'margin:0' }, [
-              el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
+              el('button', { class: 'btn btn-sec', 'data-m': 'p-view', 'data-i': idx, text: '查看' }),
+          el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
           el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
               el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
             ])
@@ -6029,7 +6073,22 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         el('span', { class: 'sc-chip', text: r.writes ? '可写(暂存)' : '只读' }),
         el('span', { class: 'sc-chip', text: '轮数 ≤ ' + (r.maxTurns || 3) })
       ]);
-      if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
+      var ahost = el('div', { class: 'det-host' });
+    var vA = el('button', { class: 'btn btn-ghost rn-mini', text: '查看' });
+    vA.addEventListener('click', function(){
+      toggleDetail(ahost, function(){
+        return { title: (r.title ? r.title + ' · ' : '') + r.name, blocks: [
+          { k: '说明', v: r.desc || '（无）' },
+          { k: '可用工具', v: acl.length ? acl.join(' / ') : '（无）' },
+          { k: '轮次 / token', v: '≤ ' + (r.maxTurns || 3) + ' 轮，≤ ' + (r.maxTokens || 1200) + ' token' },
+          { k: '读写', v: r.writes ? '可写（暂存区）' : '只读' },
+          { k: '来源', v: builtin ? '内置角色' : (r.pkg ? r.pkg : '（手工添加，无包）') },
+          { k: '提示词正文', v: r.body || '' }
+        ]};
+      });
+    });
+    head.appendChild(vA);
+    if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
       else {
         var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
         exA.addEventListener('click', function(){
@@ -6043,10 +6102,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       card.appendChild(head);
       card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
       card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
-      var det = el('details');
-      det.appendChild(el('summary', { text: '内部提示词（点开）' }));
-      det.appendChild(el('pre', { text: r.body || '（无）' }));
-      card.appendChild(det);
+      card.appendChild(ahost);
       return card;
     }
     var TOOL_POOL = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill', 'web', 'search', 'get', 'agent', 'cmd'];
@@ -6219,7 +6275,18 @@ function renderPkgs(){
         setTimeout(function(){ ex.disabled = false; }, 400);
       } catch(e){ ex.disabled = false; UI.toast('导出失败：' + (e && e.message || e), true); }
     });
-    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [ex, rm]));
+    var phost = el('div', { class: 'det-host' });
+    var pv = el('button', { class: 'btn btn-sec rn-mini', text: '查看' });
+    pv.addEventListener('click', function(){
+      toggleDetail(phost, function(){
+        var pack = EXT.exportFiles(p);
+        var blocks = [{ k: '文件结构（导出即长这样）', v: pack.files.map(function(f){ return f.rel; }).join('\n') }];
+        pack.files.forEach(function(f){ blocks.push({ k: f.rel, v: f.text }); });
+        return { title: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : ''), blocks: blocks };
+      });
+    });
+    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [pv, ex, rm]));
+    card.appendChild(phost);
     pkgsBox.appendChild(card);
   });
 }
@@ -6320,21 +6387,28 @@ p.appendChild(addBox);
         ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox(); });
         var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : '工具');
         var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
-        var row = el('div', { class: 'f-row' }, [
+        var row = el('div', { class: 'f-row ext-row' }, [
           el('label', {}, [ck, ' ' + (it.title || it.name)]),
           el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') })
         ]);
+        var dhost = el('div', { class: 'det-host' });
+        var acts = el('div', { class: 'f-acts' });
+        var viewBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '查看' });
+        viewBtn.addEventListener('click', function(){ toggleDetail(dhost, function(){ return EXT.describe(it.id); }); });
+        acts.appendChild(viewBtn);
         if (it.kind !== 'builtin'){
           var exBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
-      exBtn.addEventListener('click', function(){
-        try { savePkg(EXT.exportOne(it.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
-      });
-      row.appendChild(exBtn);
-      var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+          exBtn.addEventListener('click', function(){
+            try { savePkg(EXT.exportOne(it.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+          });
+          acts.appendChild(exBtn);
+          var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
           delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); renderModeBox(); });
-          row.appendChild(delBtn);
+          acts.appendChild(delBtn);
         }
+        row.appendChild(acts);
         list.appendChild(row);
+        list.appendChild(dhost);
       });
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
     }
@@ -6394,7 +6468,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.25.0', ua = navigator.userAgent || '';
+      var ver = 'v1.26.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8433,7 +8507,21 @@ function sendMessage(){
       setCfg({ prompts: arr }); ed.textContent = ''; S._pRefresh(); toast('已保存提示词');
       return;
     }
-    if (m === 'p-export'){
+    if (m === 'p-view'){
+    var ix4 = +b.getAttribute('data-i');
+    var pr4 = (S.cfg.prompts || [])[ix4];
+    if (!pr4) return;
+    clearDetails(null);
+    ed.textContent = '';
+    ed.appendChild(detailBox({ title: '/' + pr4.name, blocks: [
+      { k: '正文', v: pr4.text || '' },
+      { k: '来源包', v: pr4.pkg ? (pr4.pkg + (pr4.pkgVer ? '（' + pr4.pkgVer + '）' : '')) : '（手工添加，无包）' },
+      { k: '插入方式', v: '对话里输入 /' + pr4.name + ' 回车，整段插进输入框' },
+      { k: '导出结构', v: 'prompts/' + pr4.name + '.md' }
+    ] }));
+    return;
+  }
+  if (m === 'p-export'){
     var ix3 = +b.getAttribute('data-i');
     var pr3 = (S.cfg.prompts || [])[ix3];
     if (!pr3) return;
@@ -9384,7 +9472,7 @@ $('#sidebar').addEventListener('click', function(e){
         pages[j].classList.toggle('on', pages[j].getAttribute('data-page') === pg);
     }
     else if (m.indexOf('preset-') === 0) UI.presetBtn(m.slice(7));
-    else if (m === 'p-new' || m === 'p-ed-open' || m === 'p-ed-save' || m === 'p-ed-cancel' || m === 'p-del' || m === 'p-export') UI.promptCard(m, b);
+    else if (m === 'p-new' || m === 'p-ed-open' || m === 'p-ed-save' || m === 'p-ed-cancel' || m === 'p-del' || m === 'p-export' || m === 'p-view') UI.promptCard(m, b);
     else if (m === 'fetch-models'){
       b.disabled = true; b.textContent = '获取中…';
       NET.fetchModels().then(function(r){
@@ -10235,6 +10323,44 @@ function fileSafe(name, fallback){
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(x)) x = '_' + x;
   return x;
 }
+/* v1.26：条目详情 —— 文本 / 结构 / 声明式代码，只读 */
+function describe(id){
+  var it = null, isBuiltin = false, i;
+  for (i = 0; i < BUILTIN.length; i++) if (BUILTIN[i].id === id){ it = BUILTIN[i]; isBuiltin = true; break; }
+  if (!it) userItems().forEach(function(x){ if (x.id === id || x.name === id) it = x; });
+  if (!it) throw new Error('没有这个条目');
+  var B = [];
+  if (isBuiltin){
+    B.push({ k: '用途', v: (it.title || it.id) + ' — ' + (it.brief || '') });
+    B.push({ k: '可用模式', v: (it.modes || []).join(' / ') || '全部' });
+    B.push({ k: '怎么调', v: '在回复里写 ```' + it.id + ' 参数```，宿主执行后把结果回灌' });
+    B.push({ k: '结构（内置，只读）', v: JSON.stringify(it, null, 2) });
+    return { title: it.title || it.id, kind: 'builtin', blocks: B };
+  }
+  var src = it.pkg ? (it.pkg + (it.pkgVer ? '（' + it.pkgVer + '）' : '')) : '（手工添加，无包）';
+  B.push({ k: '类型', v: (it.kind === 'skill' ? '技能' : it.kind === 'agent' ? '智能体' : '工具') });
+  B.push({ k: '说明', v: it.desc || '（无）' });
+  B.push({ k: '可用模式', v: (it.modes || []).join(' / ') || '全部' });
+  B.push({ k: '启用', v: it.on === false ? '已关闭（本轮不注入/不可调）' : '已开启' });
+  B.push({ k: '来源包', v: src });
+  if (it.kind === 'tool'){
+    B.push({ k: '请求', v: (it.method || 'GET') + ' ' + (it.url || '') });
+    B.push({ k: '请求头', v: it.headers ? JSON.stringify(it.headers, null, 2) : '（无）' });
+    B.push({ k: '正文模板', v: it.bodyTpl || '（无，用 GET 参数）' });
+    B.push({ k: '调用方式', v: '```' + it.name + ' 参数```，{arg} 会被 URL 编码后填进 url/body' });
+    B.push({ k: '导出结构', v: 'tools/' + it.name + '.json' });
+    B.push({ k: '声明式 JSON', v: JSON.stringify({ name: it.name, title: it.title, desc: it.desc, type: 'http', method: it.method || 'GET', url: it.url, headers: it.headers || undefined, body: it.bodyTpl || undefined, modes: it.modes || ['work'] }, null, 2) });
+  } else if (it.kind === 'agent'){
+    B.push({ k: '可用工具', v: (it.tools || []).length ? it.tools.join(' / ') : '（无）' });
+    B.push({ k: '轮次 / token', v: '≤ ' + (it.maxTurns || 3) + ' 轮，≤ ' + (it.maxTokens || 1200) + ' token' });
+    B.push({ k: '导出结构', v: 'agents/' + it.name + '.md' });
+    B.push({ k: '提示词正文', v: it.body || '' });
+  } else {
+    B.push({ k: '导出结构', v: 'skills/' + it.name + '.md' });
+    B.push({ k: '正文', v: it.body || '' });
+  }
+  return { title: it.title || it.name, kind: it.kind, blocks: B };
+}
 function freeName(base){
   if (!find(base)) return base;
   for (var i = 2; i < 60; i++){
@@ -10503,7 +10629,7 @@ function importFiles(list){
     isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt,
-    importFiles: importFiles, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, addPromptItem: addPromptItem, delPkg: delPkg };
+    importFiles: importFiles, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, describe: describe, addPromptItem: addPromptItem, delPkg: delPkg };
 })();
 
 /* v0.6.0：模式层 —— 自动路由 + 自定义模式（配方）
