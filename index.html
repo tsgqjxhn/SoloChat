@@ -6899,7 +6899,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.12', ua = navigator.userAgent || '';
+      var ver = 'v0.3.15', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -12581,7 +12581,7 @@ try {
    hideHint: function(){ UI.hideRouteHint(); },
    fs: NET.fs,
    snaps: function(){ return SC_SNAPS; },
-  ver: (function(){ try { return String(ver || ''); } catch (e) { return ''; } })(), // v0.3.14：诊断包要能报出版本
+  ver: 'v0.3.15', // v0.3.15：直接写字面量（原来取的是作用域里不存在的 ver）
    diag: function(){ return DIAG; },
    FS: FS, DB: DB,
    search: function(q){ return NET.searchWeb(q, null, true); },
