@@ -1470,7 +1470,7 @@ var Vault = {
       (cfg.presets || []).forEach(function(p){ if (p.id === cfg.activePreset) act = p; });
       if (act) cfg.apiKey = act.apiKey || ''; // 顶层 apiKey 镜像活跃预置
       self.hydrated = true; // Issue 14: 密钥回读完成，此后允许 persist
-    }).catch(function(){ self.hydrated = true; });
+    }).catch(function(e){ self.hydrated = false; try { console.warn('保险库回读失败，本次不写回密钥', e); } catch (e2) {} }); // v0.3.11：失败时不能再置 true，否则 saveCfg 会用空 key 覆盖保险库
   }
 };
 function setCfg(patch){
@@ -6899,7 +6899,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.10', ua = navigator.userAgent || '';
+      var ver = 'v0.3.11', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
