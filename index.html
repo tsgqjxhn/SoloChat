@@ -1377,6 +1377,7 @@ function loadCfg(){
   } catch (e) {}
   var cfg = {};
   if (!c || typeof c !== 'object' || Array.isArray(c)) c = {}; // v0.3.0：脏配置不许炸启动
+    if (Array.isArray(c.presets)) c.presets = c.presets.filter(function(p){ return p && typeof p === 'object'; }); // v0.3.9：脏预置不许炸启动
     for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
   /* 迁移（一次性，v2.0）：旧 fileOps 布尔 → mode 三态；迁完删旧键 */
   if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent'].indexOf(cfg.mode) < 0)
@@ -6894,7 +6895,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.8', ua = navigator.userAgent || '';
+      var ver = 'v0.3.9', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
