@@ -1375,7 +1375,8 @@ function loadCfg(){
     }
   } catch (e) {}
   var cfg = {};
-  for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
+  if (!c || typeof c !== 'object' || Array.isArray(c)) c = {}; // v0.3.0：脏配置不许炸启动
+    for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
   /* 迁移（一次性，v2.0）：旧 fileOps 布尔 → mode 三态；迁完删旧键 */
   if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent'].indexOf(cfg.mode) < 0)
     cfg.mode = c.fileOps ? 'agent' : 'chat';
@@ -1687,7 +1688,7 @@ function diagSave(){ try { localStorage.setItem('sc.diag', JSON.stringify(DIAG))
 function D(k){ if (!Object.prototype.hasOwnProperty.call(DIAG, k) || typeof DIAG[k] !== 'number') return; DIAG[k]++; diagSave(); }
 function Dprov(ok, msg){
   try {
-    var key = normBase(S.cfg.baseURL || '') + ' | ' + (S.cfg.currentModel || '');
+    var key = String(S.cfg.baseURL || '').trim().replace(/\/+$/, '') + ' | ' + (S.cfg.currentModel || ''); // v0.3.0：normBase 在 NET 内部，这里不能用
     var p = DIAG.prov[key] || (DIAG.prov[key] = { ok: 0, fail: 0, last: 0, msg: '' });
     if (ok){ p.ok++; p.last = Date.now(); p.msg = ''; }
     else { p.fail++; p.last = Date.now(); p.msg = String(msg || '').slice(0, 60); }
@@ -6843,7 +6844,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.7', ua = navigator.userAgent || '';
+      var ver = 'v0.3.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9214,6 +9215,7 @@ function sendMessage(){
     var i = findMsg(id); if (i < 0) return;
     var cut = S.msgs.slice(0, i + 1).map(function(m){
       var c = {}; for (var k in m) c[k] = m[k];
+      c.id = uuid(); /* v0.3.0：必须换 id，否则 putMessages 按主键覆写会把原会话的消息搬走 */
       delete c.usage; delete c.variants; delete c.vIdx;
       return c;
     });
@@ -9463,7 +9465,9 @@ function sendMessage(){
   /* ---------- #4 配置快照 ---------- */
   function exportSnapshot(){
     var c = {}, skip = /(apiKey|token|secret|password)/i;
-    for (var k in S.cfg) if (!skip.test(k)) c[k] = S.cfg[k];
+    /* v0.3.0：先深拷贝再剥离，否则 scrub 删的是活动配置里的密钥 */
+    try { c = JSON.parse(JSON.stringify(S.cfg)); } catch (e) { c = {}; }
+    for (var k0 in c) if (skip.test(k0)) delete c[k0];
     /* presets 里也有 apiKey：深拷贝时递归剥离，避免密钥进快照文件 */
     (function scrub(v){
       if (!v || typeof v !== 'object') return v;
@@ -9769,9 +9773,10 @@ $('#sidebar').addEventListener('click', function(e){
       UI.renderChips();
     }
   });
-  var saveDraft = debounce(function(){ S.drafts[S.sid] = $('#input').value; }, 400);
+  var _draftSid = null;
+    var saveDraft = debounce(function(){ var dsid = _draftSid || S.sid; if (dsid) S.drafts[dsid] = $('#input').value; }, 400); // v0.3.0：锁住触发时的会话
   $('#composer').addEventListener('input', function(e){
-    if (e.target.id === 'input'){ UI.autosize(); saveDraft(); UI.cmpTrigger(); UI.renderCtxRing(); }
+    if (e.target.id === 'input'){ UI.autosize(); _draftSid = S.sid; saveDraft(); UI.cmpTrigger(); UI.renderCtxRing(); }
   });
   $('#composer').addEventListener('keydown', function(e){
     if (e.target.id !== 'input') return;
@@ -10403,13 +10408,13 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     if (subs.length > 1){ rest.unshift({ op: 'suball', items: subs }); reads = rest; }
   })();
     (function next(){
-      if (s0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
+      if (s0.cancel){ UI.holdBusy(-1); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
       if (done >= reads.length){
         s0.turns++;
         /* v1.17：闭环自修 —— 有失败就把失败清单回注，让模型带着证据重试（每轮最多两次） */
         var fails = [];
         for (var fi = 0; fi < parts.length; fi++)
-          if (/^\[(cmd|git)\]|^(工具失败|失败|错误)|exit code [1-9]|Error:|Exception/.test(String(parts[fi])) && !/成功/.test(String(parts[fi]).slice(0, 40))) fails.push(String(parts[fi]).slice(0, 240));
+          if (/^^(工具失败|失败|错误)|exit code [1-9]|Error:|Exception/.test(String(parts[fi])) && !/成功/.test(String(parts[fi]).slice(0, 40))) fails.push(String(parts[fi]).slice(0, 240));
         var txt0 = parts.join('\n\n');
         S._fixN = S._fixN || {};
         if (fails.length && S.cfg.autoFix !== false && (S._fixN[sid0] || 0) < 2){
@@ -12206,7 +12211,7 @@ var WORK = (function(){
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
-      if (w0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
+      if (w0.cancel){ UI.holdBusy(-1); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
       if (done >= calls.length){
         w0.turns++;
         finish();
