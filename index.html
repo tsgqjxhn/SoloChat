@@ -5494,9 +5494,10 @@ var UI = (function(){
   function savePkg(pack){
   if (!pack || !pack.files || !pack.files.length) return UI.toast('没有可导出的内容', true);
   if (!NET.pkgSave) return UI.toast('需要 exe 宿主版才能写入磁盘', true);
-  NET.pkgSave(pack.name, pack.files, 'desktop').then(function(r){
+  var where = (S.cfg.pkgWhere === 'downloads') ? 'downloads' : 'desktop';
+  NET.pkgSave(pack.name, pack.files, where).then(function(r){
+    setCfg({ lastPkgDir: r.dir });
     UI.toast('已导出 ' + r.files + ' 个文件：' + r.dir);
-    NET.revealPath(r.dir);
   }, function(e){ UI.toast('导出失败：' + (e && e.message || e), true); });
 }
 function buildSettings(){
@@ -5928,6 +5929,11 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         var cp = el('button', { class: 'btn btn-ghost rn-mini', text: '复制' });
         cp.addEventListener('click', function(){ copyText(txt); });
         head.appendChild(cp);
+        var exs = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
+        exs.addEventListener('click', function(){
+          try { savePkg(EXT.packText(title, txt)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+        });
+        head.appendChild(exs);
       }
       card.appendChild(head);
       if (note) card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted)', text: note }));
@@ -6111,6 +6117,23 @@ var bDir = el('button', { class: 'btn btn-primary', text: '导入文件夹…' }
 bFiles.addEventListener('click', function(){ fiFiles.click(); });
 bDir.addEventListener('click', function(){ fiDir.click(); });
 addBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:6px 0' }, [bFiles, bDir, fiFiles, fiDir]));
+var whereSel = el('select', { class: 'f-in', id: 'pk-where', style: 'width:auto;min-width:104px;padding:6px 8px' }, [
+  el('option', { value: 'desktop', text: '桌面' }),
+  el('option', { value: 'downloads', text: '下载文件夹' })
+]);
+whereSel.value = (S.cfg.pkgWhere === 'downloads') ? 'downloads' : 'desktop';
+whereSel.addEventListener('change', function(){
+  setCfg({ pkgWhere: whereSel.value });
+  UI.toast('导出位置已改为：' + (whereSel.value === 'downloads' ? '下载文件夹' : '桌面'));
+});
+var openLast = el('button', { class: 'btn btn-ghost rn-mini', text: '打开上次导出' });
+openLast.addEventListener('click', function(){
+  if (!S.cfg.lastPkgDir) return UI.toast('还没有导出过', true);
+  NET.revealPath(S.cfg.lastPkgDir);
+});
+addBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 10px;gap:8px' }, [
+  el('span', { class: 'sub', style: 'margin:0', text: '导出到' }), whereSel, openLast
+]));
 function pkgDone(rep){
   renderPkgs(); renderList(filter); renderModeBox();
   var msg = '导入 ' + rep.added + ' 项' + (rep.prompts ? '，' + rep.prompts + ' 条提示词' : '');
@@ -6371,7 +6394,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.24.0', ua = navigator.userAgent || '';
+      var ver = 'v1.25.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10205,6 +10228,13 @@ function pkgName(base, fallback){
   if (!/^[a-z][a-z0-9-]{1,23}$/.test(s)) s = '';
   return s || fallback;
 }
+function fileSafe(name, fallback){
+  var x = String(name == null ? '' : name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/^\.+/, '').replace(/[. ]+$/, '').trim();
+  if (!x) x = fallback || 'item';
+  if (x.length > 60) x = x.slice(0, 60);
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(x)) x = '_' + x;
+  return x;
+}
 function freeName(base){
   if (!find(base)) return base;
   for (var i = 2; i < 60; i++){
@@ -10361,7 +10391,7 @@ function itemEntry(it){
   return null;
 }
 function promptEntry(pr, idx){
-  var slug = pkgName(pr.name, 'prompt-' + (idx + 1));
+  var slug = fileSafe(pr.name, 'prompt-' + (idx + 1));
   return { kindKey: 'prompts', rel: 'prompts/' + slug + '.md',
     text: '---\nname: ' + pr.name + '\n---\n\n' + (pr.text || '') + '\n' };
 }
@@ -10394,6 +10424,10 @@ function exportOne(id){
   userItems().forEach(function(x){ if (x.id === id || x.name === id) it = x; });
   if (!it) throw new Error('没有这个条目');
   return packBuild(String(it.title || it.name), [it], []);
+}
+/* 任意文本 → 一个提示词包（系统提示词页导出用） */
+function packText(title, text){
+  return packBuild(fileSafe(title, '提示词'), [], [{ name: String(title || '提示词'), text: String(text || '') }]);
 }
 /* 提示词单项导出（提示词页） */
 function exportPrompt(name){
@@ -10469,7 +10503,7 @@ function importFiles(list){
     isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt,
-    importFiles: importFiles, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, addPromptItem: addPromptItem, delPkg: delPkg };
+    importFiles: importFiles, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, addPromptItem: addPromptItem, delPkg: delPkg };
 })();
 
 /* v0.6.0：模式层 —— 自动路由 + 自定义模式（配方）
