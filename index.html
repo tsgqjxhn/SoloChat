@@ -1623,13 +1623,14 @@ var DB = (function(){
     },
     /* 导出：逐表收集 Blob */
     exportData: function(){
-      return Promise.all([this.allSessions(), this.allAttachments(), this.allWorkfs()]).then(function(r){
-        var sess = r[0], atts = r[1], wfs = r[2];
+      return Promise.all([this.allSessions(), this.allAttachments(), this.allWorkfs(), req(_db.transaction('memory').objectStore('memory').getAll()), req(_db.transaction('tasks').objectStore('tasks').getAll())]).then(function(r){
+        var sess = r[0], atts = r[1], wfs = r[2], mem = r[3], tasks = r[4];
         var msgP = req(_db.transaction('messages').objectStore('messages').getAll());
-        return msgP.then(function(msgs){ return { v: 2, sessions: sess, messages: msgs, attachments: atts, workfs: wfs }; });
+        return msgP.then(function(msgs){ return { v: 3, sessions: sess, messages: msgs, attachments: atts, workfs: wfs, memory: mem, tasks: tasks }; });
       });
     },
     importData: function(d){
+    // v0.3.7：v3 备份带 memory/tasks
       return tx(['sessions', 'messages', 'attachments', 'workfs'], 'readwrite', function(t){
         var i, ss = t.objectStore('sessions'), mm = t.objectStore('messages'), aa = t.objectStore('attachments'),
             ww = t.objectStore('workfs');
@@ -1640,11 +1641,12 @@ var DB = (function(){
       });
     },
     clearAll: function(){
-      return tx(['sessions', 'messages', 'attachments', 'workfs'], 'readwrite', function(t){
+      return tx(['sessions', 'messages', 'attachments', 'workfs', 'memory', 'tasks'], 'readwrite', function(t){
         t.objectStore('sessions').clear();
         t.objectStore('messages').clear();
         t.objectStore('attachments').clear();
         t.objectStore('workfs').clear();
+    t.objectStore('memory').clear(); t.objectStore('tasks').clear(); // v0.3.7：记忆与任务卡也要清
       });
     },
     /* ---- VFS（Work 虚拟工作区，v2.0）：全部按会话隔离 ---- */
@@ -6892,7 +6894,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.6', ua = navigator.userAgent || '';
+      var ver = 'v0.3.7', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7481,7 +7483,7 @@ p.appendChild(addBox);
       msg.content = msg.content.slice(0, LIMITS.MSG_TEXT); // 超限截断（§4.3）
       msg.truncated = true;
     }
-    delete S.streams[sid]; // 登记出清（v2.2）
+    if (S.streams[sid] === st) delete S.streams[sid]; // v0.3.7：同会话新流不能被旧流收尾删掉 // 登记出清（v2.2）
     if (shown){
       if (!st.body || !st.body.isConnected) bindStreamDOM(st);
       /* 结束一次性换成完整 Markdown（§5.1.2） */
@@ -7513,7 +7515,7 @@ p.appendChild(addBox);
       renderCtxRing();
     }
     DB.putMessage(msg); // 一次性落库（§5.1.5）
-    if (msg.role === 'assistant' && status === 'ok') MEM.note(sid, S.msgs, 'ok'); // v1.17：记一笔
+    if (msg.role === 'assistant' && status === 'ok') MEM.note(sid, (shown ? S.msgs : []), 'ok'); // v0.3.7：后台会话别拿当前会话的消息 // v1.17：记一笔
     touchSession(null, sid);
     notifyBusy(); // v2.2：登记出清后重新计算「忙」状态
     if (shown && !((S.pend || 0) > 0)) setSending(false);
