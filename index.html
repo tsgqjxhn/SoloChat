@@ -76,7 +76,8 @@ input,textarea,select{font:inherit;color:inherit}
 body.sb-collapsed #sidebar{width:56px;min-width:56px;padding:0;overflow:hidden}
 body.sb-collapsed #sidebar>*:not(.sb-rail){display:none}
 body.sb-collapsed #tb-title{display:none}
-.sb-rail{display:none;flex:1;flex-direction:column;align-items:center;gap:4px;padding:10px 0;width:100%}
+.sb-rail{display:none;flex-direction:column;align-items:center;gap:4px;padding:4px 0;width:100%;
+  position:fixed;left:0;top:52px;bottom:120px;width:56px;z-index:24;box-sizing:border-box}
 body.sb-collapsed .sb-rail{display:flex}
 .rail-btn{width:40px;height:40px;border:0;background:none;border-radius:10px;display:flex;align-items:center;
   justify-content:center;color:var(--muted);cursor:pointer}
@@ -840,6 +841,11 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .tc-raw>summary:hover{color:var(--muted)}
 .tc-raw pre{margin:6px 0 0;padding:8px 10px;background:var(--code-bg);color:var(--code-ink);border-radius:var(--r-sm);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.55;overflow:auto;max-height:280px;white-space:pre-wrap;word-break:break-word}
+.orch-log{max-height:44vh;overflow:auto;background:var(--soft);border-radius:10px;padding:10px 12px;
+  font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.orch-line{margin:2px 0}
+.orch-line.bad{color:var(--danger)}
+.orch-line.ok{color:var(--success)}
 </style>
 </head>
 <body>
@@ -847,11 +853,11 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <div id="app">
   <aside id="sidebar" aria-label="会话列表">
     <div class="sb-rail" id="sb-rail">
+      <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg></button>
       <button class="rail-btn" data-r="new" title="新建会话" aria-label="新建会话"><svg class="ic"><use href="#i-edit"/></svg></button>
       <button class="rail-btn" data-r="search" title="搜索会话" aria-label="搜索会话"><svg class="ic"><use href="#i-search"/></svg></button>
       <button class="rail-btn" data-r="history" title="会话记录" aria-label="会话记录"><svg class="ic"><use href="#i-temp"/></svg></button>
       <div class="rail-sp"></div>
-      <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg></button>
       <button class="rail-btn" data-r="settings" title="设置" aria-label="设置"><svg class="ic"><use href="#i-gear2"/></svg></button>
     </div>
     <div class="sb-top">
@@ -1045,7 +1051,7 @@ var CHAT_ID = '你是 SoloChat，中文直接作答：先给结论，再给必�
 var MEDIA_HINT = '展示图片用 Markdown 语法 ![说明](https://图片直链)；`.mp4/.webm/.mov` 等视频直链会内嵌播放；引用网页用 [说明](链接)。' +
   '只在确有必要时插图/视频，链接必须真实存在，不要编造 URL。';
 var LS_CFG = 'sc.cfg.v1', LS_CFG_OLD = 'op.cfg.v1'; // 旧键在 loadCfg 中自动迁移
-var DB_NAME = 'ai-chat', DB_VER = 2; // v2：新增 workfs（Work 虚拟工作区，v2.0）
+var DB_NAME = 'ai-chat', DB_VER = 3; // v3：新增 memory（情景记忆）/ tasks（工作记忆），v1.17
 var DEF_CFG = {
   baseURL: '', apiKey: '', models: [], currentModel: '',
   presets: [], activePreset: '',        // 配置组：每组独立提供商；扁平四字段=当前组镜像
@@ -1401,6 +1407,13 @@ var DB = (function(){
           var w = db.createObjectStore('workfs', { keyPath: 'id' });
           w.createIndex('sid', 'sid');
         }
+        if (!db.objectStoreNames.contains('memory')){ /* v1.17：情景记忆（任务卡） */
+          var mm = db.createObjectStore('memory', { keyPath: 'id' });
+          mm.createIndex('ts', 'ts');
+        }
+        if (!db.objectStoreNames.contains('tasks')){ /* v1.17：工作记忆（会话级任务卡） */
+          db.createObjectStore('tasks', { keyPath: 'sid' });
+        }
       };
       rq.onsuccess = function(){ _db = rq.result; res(_db); };
       rq.onerror = function(){ rej(rq.error); };
@@ -1522,7 +1535,14 @@ var DB = (function(){
     allWorkfs: function(){
       return req(_db.transaction('workfs').objectStore('workfs').getAll());
     },
-    workfsBySid: function(sid){
+    /* v1.17：记忆库 */
+  memAll: function(){ return req(_db.transaction('memory').objectStore('memory').getAll()); },
+  memPut: function(rec){ return tx(['memory'], 'readwrite', function(t){ t.objectStore('memory').put(rec); }); },
+  memDel: function(id){ return tx(['memory'], 'readwrite', function(t){ t.objectStore('memory').delete(id); }); },
+  memClear: function(){ return tx(['memory'], 'readwrite', function(t){ t.objectStore('memory').clear(); }); },
+  taskGet: function(sid){ return req(_db.transaction('tasks').objectStore('tasks').get(sid)); },
+  taskPut: function(rec){ return tx(['tasks'], 'readwrite', function(t){ t.objectStore('tasks').put(rec); }); },
+  workfsBySid: function(sid){
       if (isTemp(sid)) return Promise.resolve((TEMP.files[sid] || []).slice()); /* v2.8 */
       return req(_db.transaction('workfs').objectStore('workfs').index('sid').getAll(IDBKeyRange.only(sid)));
     },
@@ -1663,7 +1683,8 @@ var NET = (function(){
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
-    var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
+    var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
+  var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
     if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
@@ -2158,8 +2179,8 @@ var NET = (function(){
           onChunk: function(t){ if (acc.length < 500000) acc += t; },
           onDone: function(status){
             if (fin) return; stop();
-            if (status && (status < 200 || status >= 300)) return resolve(null);
-            try { resolve(JSON.parse(acc).choices[0].message || null); } catch (e) { resolve(null); }
+            if (status && (status < 200 || status >= 300)){ console.warn('[chatOnce] http ' + status + ' ' + String(acc).slice(0, 300)); return resolve(null); }
+            try { var jj = JSON.parse(acc); var ms0 = jj.choices[0].message || null; if (!ms0 || !String(ms0.content || '').trim()) console.warn('[chatOnce] empty content, finish=' + (jj.choices[0].finish_reason) + ' msg=' + JSON.stringify(ms0).slice(0, 260)); resolve(ms0); } catch (e) { console.warn('[chatOnce] parse fail ' + String(acc).slice(0, 200)); resolve(null); }
           },
           onError: function(){ stop(); resolve(null); }
         };
@@ -6165,8 +6186,42 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     setFilter('tools');
   });
 
+  page('memory', '记忆', function(p){
+    var ck = el('input', { type: 'checkbox' }); ck.checked = S.cfg.memory !== false;
+    ck.addEventListener('change', function(){ setCfg({ memory: ck.checked }); UI.toast(ck.checked ? '已开启记忆注入' : '已关闭记忆注入'); });
+    p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [ck, ' 发送时注入「当前任务 + 相似历史」（只注入，不修改对话）'])]));
+    p.appendChild(el('div', { class: 'sub', text: '情景记忆：每次有产物的回合自动记一张任务卡（目标 / 产物 / 成败）。检索用词法打分（中文二元组），不联网、不建向量库。' }));
+    var q = el('input', { class: 'f-in', placeholder: '搜索记忆…' });
+    var list = el('div', { class: 'f-grid' });
+    p.appendChild(el('div', { style: 'margin:10px 0 6px' }, [q]));
+    p.appendChild(list);
+    function render(arr){
+      list.textContent = '';
+      if (!arr.length){ list.appendChild(el('div', { class: 'hint', text: '还没有记忆。做点带产物的任务就会自动记。' })); return; }
+      arr.forEach(function(m){
+        var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+        del.addEventListener('click', function(){ MEM.del(m.id).then(function(){ return MEM.search(q.value.trim()); }).then(render); });
+        list.appendChild(el('div', { class: 'sub-card' }, [
+          el('div', { class: 'sc-h' }, [el('span', { class: 'sc-name', text: (m.goal || '').slice(0, 60) }),
+            el('span', { class: 'sc-chip', text: m.status === 'fail' ? '失败' : '成功' }),
+            el('span', { class: 'sc-chip', text: new Date(m.ts).toLocaleDateString() }), del]),
+          el('div', { class: 'sc-desc', text: (m.artifacts || []).length ? '产物：' + m.artifacts.join('、') : '（无产物）' })
+        ]));
+      });
+    }
+    var clr = el('button', { class: 'btn btn-danger', text: '清空全部记忆' });
+    clr.addEventListener('click', function(){
+      UI.confirmBox({ title: '清空记忆？', text: '所有情景记忆会删除，不可恢复。', okText: '清空', danger: true }).then(function(ok){
+        if (!ok) return; MEM.clear().then(function(){ render([]); UI.toast('已清空'); });
+      });
+    });
+    p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [clr]));
+    q.addEventListener('input', function(){ MEM.search(q.value.trim()).then(render); });
+    MEM.all().then(render);
+  });
+
   page('about', '关于', function(p){
-      var ver = 'v1.16.0', ua = navigator.userAgent || '';
+      var ver = 'v1.17.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6755,6 +6810,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       renderCtxRing();
     }
     DB.putMessage(msg); // 一次性落库（§5.1.5）
+    if (msg.role === 'assistant' && status === 'ok') MEM.note(sid, S.msgs, 'ok'); // v1.17：记一笔
     touchSession(null, sid);
     notifyBusy(); // v2.2：登记出清后重新计算「忙」状态
     if (shown) setSending(false);
@@ -6838,6 +6894,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       renderWsBtn();
       renderCtxRing();
       RUNNER.syncForSession(sid); // v0.2.5：重进会话 → 有产物就自动打开工作区
+      MEM.warm(sid, list); // v1.17：预热记忆块
       attachStreamView(); // 恢复该会话的流绑定/发送键状态
       /* 恢复草稿 */
       $input.value = S.drafts[sid] || '';
@@ -7225,6 +7282,7 @@ function sendMessage(){
     var s = curSession() || createSession();
     if (quickPending){ quickPending = false; qa = { sid: s.id, last: 0 }; } // 快速条：建会话后补齐同步标记，小窗直接收流式回复
     FS.reset(); // 新一轮用户输入：工具轮次与取消标志复位（v1.1）
+  S._fixN = S._fixN || {}; S._fixN[S.sid] = 0; // v1.17：自修计数复位
     WORK.reset(); // Work 循环同款复位（v2.0）
     /* 附件先落 IDB，拿到 aid 列表 */
     var atts = S.pendAtts;
@@ -8008,6 +8066,9 @@ function sendMessage(){
     if (S.cfg.mode === 'chat') items.push({ t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' });
     items.push({ t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' });
     items.push({ t: '交接会话', p: '带上文切换到另一个模式', act: 'go-handoff' });
+    items.push({ t: '多智能体流水线', p: '架构 → 实现 → 测试 → 审查', act: 'go-pipe' });
+    items.push({ t: '多智能体辩论', p: '三视角并行 + 裁判合并', act: 'go-debate' });
+    items.push({ t: '工作流 · 生成页面', p: '生成→运行→自检重写→存盘', act: 'go-flow' });
     popItems(items, '更多');
   }
   function popPrompts(filter){
@@ -8070,6 +8131,9 @@ function sendMessage(){
       return;
     }
     if (pact === 'go-handoff'){ closePop(); return openHandoff(); }
+    if (pact === 'go-pipe'){ closePop(); return ORCH.pipeline(); }
+    if (pact === 'go-debate'){ closePop(); return ORCH.debate(); }
+    if (pact === 'go-flow'){ closePop(); return ORCH.flow(); }
   if (pact === 'go-prompt') return popPrompts('');
     if (pact === 'go-at') return popAt('');
     if (pact === 'at-use') return importHistory(id);
@@ -8819,6 +8883,25 @@ function sendMessage(){
 (function(){
   var rail = document.getElementById('sb-rail');
   if (!rail) return;
+  function syncRailGeom(){
+    if (!document.body.classList.contains('sb-collapsed')) return;
+    var tb = document.getElementById('topbar'), cp = document.getElementById('composer');
+    var top = tb ? tb.getBoundingClientRect().bottom : 52;
+    var bot = cp ? (window.innerHeight - cp.getBoundingClientRect().top) : 120;
+    rail.style.top = Math.max(0, top) + 'px';
+    rail.style.bottom = Math.max(0, bot) + 'px';
+  }
+  window._syncRailGeom = syncRailGeom;
+  window.addEventListener('resize', function(){ syncRailGeom(); });
+  window.addEventListener('sc:rail-geom', function(){ syncRailGeom(); });
+  setTimeout(syncRailGeom, 0); setTimeout(syncRailGeom, 300); setTimeout(syncRailGeom, 1200);
+  if (window.ResizeObserver){
+    try {
+      var ro = new ResizeObserver(function(){ syncRailGeom(); });
+      var cp0 = document.getElementById('composer'); if (cp0) ro.observe(cp0);
+      var tb0 = document.getElementById('topbar'); if (tb0) ro.observe(tb0);
+    } catch(e){}
+  }
   rail.addEventListener('click', function(e){
     var b = e.target.closest('[data-r]'); if (!b) return;
     var r = b.getAttribute('data-r');
@@ -9394,6 +9477,7 @@ $('#sidebar').addEventListener('click', function(e){
   function toggleSidebar(force){
     var hide = force === 'hide' ? true : force === 'show' ? false : !document.body.classList.contains('sb-collapsed');
     document.body.classList.toggle('sb-collapsed', hide);
+    if (window._syncRailGeom) setTimeout(window._syncRailGeom, 0);
     setCfg({ sbHidden: hide });
     var b = $('#btn-sb'); if (b) b.classList.toggle('on', !hide);
   }
@@ -9615,7 +9699,18 @@ var FS = (function(){
       if (s0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
       if (done >= reads.length){
         s0.turns++;
-        note('[fs-result]\n' + parts.join('\n\n').slice(0, LIMITS.FS_RESULT_CHARS), sid0);
+        /* v1.17：闭环自修 —— 有失败就把失败清单回注，让模型带着证据重试（每轮最多两次） */
+        var fails = [];
+        for (var fi = 0; fi < parts.length; fi++)
+          if (/^\[(cmd|git)\]|^(工具失败|失败|错误)|exit code [1-9]|Error:|Exception/.test(String(parts[fi])) && !/成功/.test(String(parts[fi]).slice(0, 40))) fails.push(String(parts[fi]).slice(0, 240));
+        var txt0 = parts.join('\n\n');
+        S._fixN = S._fixN || {};
+        if (fails.length && S.cfg.autoFix !== false && (S._fixN[sid0] || 0) < 2){
+          S._fixN[sid0] = (S._fixN[sid0] || 0) + 1;
+          txt0 += '\n\n【自动校验】上一步有 ' + fails.length + ' 个失败：\n' + fails.join('\n---\n') +
+            '\n先修好再交付；修不了就直接说卡在哪一步、缺什么，不要假装成功。';
+        }
+        note('[fs-result]\n' + txt0.slice(0, LIMITS.FS_RESULT_CHARS), sid0);
         UI.startStreamFor(sid0); // 结果回灌后自动续跑一轮（目标会话，v2.2）
         return;
       }
@@ -10100,6 +10195,295 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
            efforts: efforts };
 })();
 
+/* v1.17：记忆 —— 工作记忆（每会话一张任务卡）+ 情景记忆（历史任务卡，词法检索）
+   不引入向量库：中文按二元组切词，拉丁按词切，做重叠打分；够用且零依赖。 */
+var MEM = (function(){
+  var MAXN = 300;
+  function toks(t){
+    t = String(t || '').toLowerCase();
+    var out = (t.match(/[a-z0-9_.\-]{2,}/g) || []).slice(0, 80);
+    var hz = t.match(/[\u4e00-\u9fa5]+/g) || [];
+    for (var i = 0; i < hz.length && out.length < 200; i++){
+      var x = hz[i];
+      if (x.length === 1){ out.push(x); continue; }
+      for (var j = 0; j < x.length - 1 && out.length < 200; j++) out.push(x.slice(j, j + 2));
+    }
+    return out;
+  }
+  function uniq(a){ var m = {}, o = []; for (var i = 0; i < a.length; i++) if (!m[a[i]]){ m[a[i]] = 1; o.push(a[i]); } return o; }
+  function score(qt, card){
+    if (!card._t) card._t = uniq(toks((card.goal || '') + ' ' + (card.lesson || '') + ' ' + (card.artifacts || []).join(' ')));
+    var set = {}, n = card._t.length;
+    for (var i = 0; i < n; i++) set[card._t[i]] = 1;
+    var hit = 0;
+    for (var j = 0; j < qt.length; j++) if (set[qt[j]]) hit++;
+    return n ? hit / Math.sqrt(n) : 0;
+  }
+  function lastUser(msgs){
+    for (var i = (msgs || []).length - 1; i >= 0; i--)
+      if (msgs[i].role === 'user') return String(msgs[i].content || '').trim();
+    return '';
+  }
+  /* 写入：工作记忆 + （有工具动作时）情景卡 */
+  function note(sid, msgs, status){
+    if (!sid || S.cfg.memory === false) return Promise.resolve();
+    var goal = lastUser(msgs).slice(0, 160);
+    if (!goal) return Promise.resolve();
+    return DB.workfsBySid(sid).then(function(files){
+      var arts = (files || []).map(function(f){ return f.path; }).slice(0, 12);
+      var card = { sid: sid, goal: goal, artifacts: arts, ts: Date.now(), status: status || 'ok' };
+      return DB.taskPut(card).then(function(){
+        if (!arts.length) return;
+        return DB.memAll().then(function(all){
+          var dup = null;
+          for (var i = 0; i < (all || []).length; i++)
+            if (all[i].sid === sid && all[i].goal === goal) dup = all[i];
+          var rec = dup || { id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
+          rec.sid = sid; rec.goal = goal; rec.artifacts = arts; rec.ts = Date.now(); rec.status = status || 'ok';
+          rec.lesson = rec.lesson || '';
+          return DB.memPut(rec);
+        });
+      });
+    }).then(function(){
+      return promptFor(sid, msgs);
+    }).then(function(blk){
+      S._mem = S._mem || {}; S._mem[sid] = blk || '';
+    }).catch(function(){});
+  }
+  /* 打开会话时预热一次 */
+  function warm(sid, msgs){
+    if (!sid || S.cfg.memory === false) return Promise.resolve('');
+    return promptFor(sid, msgs).then(function(blk){ S._mem = S._mem || {}; S._mem[sid] = blk || ''; return blk; }).catch(function(){ return ''; });
+  }
+  /* 注入：当前任务卡 + 相似历史（不含本会话） */
+  function promptFor(sid, msgs){
+    if (S.cfg.memory === false) return '';
+    var q = lastUser(msgs).slice(0, 400);
+    if (!q) return '';
+    var out = [];
+    return DB.taskGet(sid).then(function(t){
+      if (t && t.goal) out.push('本会话目标：' + t.goal + (t.artifacts && t.artifacts.length ? '；已有产物：' + t.artifacts.join('、') : ''));
+      return DB.memAll();
+    }).then(function(all){
+      var qt = uniq(toks(q)), scored = [];
+      for (var i = 0; i < (all || []).length; i++){
+        if (all[i].sid === sid) continue;
+        var sc = score(qt, all[i]);
+        if (sc > 0.18) scored.push({ c: all[i], s: sc });
+      }
+      scored.sort(function(a, b){ return b.s - a.s; });
+      scored = scored.slice(0, 3);
+      if (scored.length){
+        out.push('相似经历（仅供参考，别照抄）：');
+        scored.forEach(function(x){
+          out.push('· ' + x.c.goal + (x.c.artifacts && x.c.artifacts.length ? '（产物：' + x.c.artifacts.join('、') + '）' : '') + ' — ' + (x.c.status === 'fail' ? '上次失败' : '上次成功') + (x.c.lesson ? '；教训：' + x.c.lesson : ''));
+        });
+      }
+      return out.length ? '【记忆】\n' + out.join('\n') : '';
+    }).catch(function(){ return ''; });
+  }
+  function search(q){
+    return DB.memAll().then(function(all){
+      var qt = uniq(toks(q));
+      var arr = (all || []).slice();
+      if (!qt.length) return arr.sort(function(a, b){ return b.ts - a.ts; });
+      arr = arr.map(function(c){ return { c: c, s: score(qt, c) }; }).filter(function(x){ return x.s > 0; });
+      arr.sort(function(a, b){ return b.s - a.s; });
+      return arr.map(function(x){ return x.c; });
+    });
+  }
+  function all(){ return DB.memAll(); }
+  function del(id){ return DB.memDel(id); }
+  function clear(){ return DB.memClear(); }
+  return { note: note, warm: warm, promptFor: promptFor, search: search, all: all, del: del, clear: clear };
+})();
+
+/* v1.17：编排 —— 多智能体流水线 / 辩论 / 工作流（DAG + 自检回边） */
+var ORCH = (function(){
+  function cut(t, n){ t = String(t || ''); return t.length > n ? t.slice(0, n) + '…' : t; }
+  function modal(title, sub){
+    var logEl = el('div', { class: 'orch-log' });
+    var acts = el('div', { class: 'f-actions', style: 'justify-content:flex-end;margin-top:12px' });
+    var box = el('div', { style: 'padding:18px 20px;min-width:min(720px,92vw)' }, [
+      el('h2', { text: title }), el('div', { class: 'sub', text: sub }), logEl, acts
+    ]);
+    UI.openModal(box, false);
+    return {
+      log: function(t, kind){
+        var d = el('div', { class: 'orch-line' + (kind ? ' ' + kind : ''), text: t });
+        logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+      },
+      acts: acts, close: function(){ UI.closeModal(); }
+    };
+  }
+  function ask(title, sub, ph, cb){
+    var ta = el('textarea', { class: 'f-in', rows: '4', placeholder: ph || '' });
+    ta.style.width = '100%';
+    var ok = el('button', { class: 'btn btn-primary', text: '开始' });
+    var no = el('button', { class: 'btn btn-sec', text: '取消' });
+    var box = el('div', { style: 'padding:18px 20px;min-width:min(560px,92vw)' }, [
+      el('h2', { text: title }), el('div', { class: 'sub', text: sub }), ta,
+      el('div', { class: 'f-actions', style: 'justify-content:flex-end;margin-top:12px' }, [no, ok])
+    ]);
+    UI.openModal(box, false);
+    no.addEventListener('click', function(){ UI.closeModal(); });
+    ok.addEventListener('click', function(){
+      var v = ta.value.trim();
+      if (!v){ UI.toast('先写点什么', true); return; }
+      UI.closeModal(); cb(v);
+    });
+    setTimeout(function(){ try { ta.focus(); } catch(e){} }, 50);
+  }
+  /* 没有会话就先建一个（编排要落库/落盘，必须有 sid） */
+  function ensureSid(title){
+    if (S.sid && curSession()) return S.sid;
+    var id = uuid(), now = Date.now();
+    var s = { id: id, title: title || '编排', createdAt: now, updatedAt: now, pinned: false,
+      model: S.cfg.currentModel || '', systemPrompt: '', params: {}, workspace: '', msgCount: 0, temp: false };
+    S.sessions.unshift(s);
+    S.sid = id; S.msgs = [];
+    try { DB.putSession(s); } catch(e){}
+    try { renderSessions(); } catch(e){}
+    try { var t = document.getElementById('tb-title'); if (t) t.textContent = s.title; } catch(e){}
+    return id;
+  }
+  function addToInput(txt){
+    var box = document.getElementById('input');
+    if (!box) return;
+    box.value = (box.value ? box.value + '\n\n' : '') + txt;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.focus();
+  }
+
+  /* ---------- 1. 流水线：架构 → 实现 → 测试 → 审查 ---------- */
+  var HINT = {
+    architect: '只做设计：文件清单、每个文件的职责与关键接口/数据形状、验收标准。不要写完整实现。',
+    coder: '按上面的设计实现，交完整文件内容（用 vfs-write 围栏或直接给完整文件）。',
+    tester: '基于设计与实现，列出可照做的验证步骤、逐条断言（输入→期望），并指出明显缺陷。',
+    review: '按严重度审查：正确性、边界、安全、可维护性。给出必须修的清单。'
+  };
+  function pipeline(){
+    ask('多智能体流水线', '四个角色依次干活，后一个看得到前一个的产出。', '例如：做一个能记事的待办页面', function(goal){
+      ensureSid('流水线：' + cut(goal, 16));
+      var m = modal('流水线：' + cut(goal, 40), '架构 → 实现 → 测试 → 审查');
+      var ctx = '', chain = Promise.resolve();
+      var steps = [['architect', '设计'], ['coder', '实现'], ['tester', '验证'], ['review', '审查']];
+      steps.forEach(function(st, i){
+        chain = chain.then(function(){
+          m.log('▶ ' + (i + 1) + '/4 ' + st[1] + '（' + st[0] + '）…');
+          var task = '目标：' + goal + (ctx ? '\n\n前序产出：\n' + cut(ctx, 3000) : '') + '\n\n' + (HINT[st[0]] || '');
+          var gap = i ? new Promise(function(r){ setTimeout(r, 1500); }) : Promise.resolve();
+          return gap.then(function(){ return SUB.run(task, st[0], 0); }).then(function(out){
+            ctx += '\n\n【' + st[0] + '】\n' + out;
+            m.log('✔ ' + st[0] + '：' + cut(out, 500), 'ok');
+          });
+        }).catch(function(e){ m.log('✘ ' + st[0] + '：' + (e && e.message || e), 'bad'); });
+      });
+      chain.then(function(){
+        var ins = el('button', { class: 'btn btn-sec', text: '把结论放进输入框' });
+        ins.addEventListener('click', function(){ addToInput(cut(ctx, 8000)); m.close(); });
+        var cp = el('button', { class: 'btn btn-ghost', text: '复制' });
+        cp.addEventListener('click', function(){
+          try { if (window.chrome && chrome.webview) chrome.webview.postMessage({ t: 'copy', text: ctx }); } catch(e){}
+          UI.toast('已复制');
+        });
+        m.acts.appendChild(cp); m.acts.appendChild(ins);
+        m.log('—— 结束 ——');
+      });
+    });
+  }
+
+  /* ---------- 2. 辩论：三视角并行 + 裁判 ---------- */
+  function debate(){
+    ask('多智能体辩论', '三个视角各自论证，再由审查角色合并共识与分歧。', '例如：这个页面该不该拆成组件？', function(q){
+      ensureSid('辩论：' + cut(q, 16));
+      var m = modal('辩论：' + cut(q, 40), 'explore / general / review 并行 → 裁判合并');
+      var views = [
+        ['explore', '从事实与证据角度：先列已知/未知，再论证。'],
+        ['general', '从实现与代价角度：给出可执行方案与成本。'],
+        ['review', '从风险与反例角度：找漏洞、边界条件、反例。']
+      ];
+      var ps = views.map(function(v){
+        return SUB.run('问题：' + q + '\n' + v[1] + '\n结论 5 行以内，给出你方最强的三条论据。', v[0], 0)
+          .then(function(out){ m.log('◆ ' + v[0] + '：' + cut(out, 300)); return '【' + v[0] + '】\n' + out; })
+          .catch(function(e){ return '【' + v[0] + '】（失败：' + (e && e.message || e) + '）'; });
+      });
+      Promise.all(ps).then(function(arr){
+        m.log('▶ 裁判合并…');
+        return NET.chatOnce([
+          { role: 'system', content: '你是裁判。合并多方论证：共识、分歧（各自最强理由）、结论与前提条件。不要复述全文。' },
+          { role: 'user', content: '问题：' + q + '\n\n各方观点：\n' + cut(arr.join('\n\n'), 8000) }
+        ], { maxTokens: 2400, timeout: 180000 });
+      }).then(function(msg){
+        var txt = (msg && msg.content) || '（无输出）';
+        m.log('✔ 裁判：\n' + txt, 'ok');
+        var ins = el('button', { class: 'btn btn-sec', text: '放进输入框' });
+        ins.addEventListener('click', function(){ addToInput(txt); m.close(); });
+        m.acts.appendChild(ins);
+      }).catch(function(e){ m.log('✘ ' + (e && e.message || e), 'bad'); });
+    });
+  }
+
+  /* ---------- 3. 工作流：生成 → 运行 → 自检重写 → 存盘 ---------- */
+  function extractHtml(t){
+    var t2 = String(t || '');
+    var mm = /```(?:html)?\s*\n([\s\S]*?)```/i.exec(t2);
+    if (mm && /<[a-z!]/i.test(mm[1])) return mm[1].trim();
+    var i = t2.search(/<!doctype html|<html/i);
+    return i >= 0 ? t2.slice(i).trim() : '';
+  }
+  function flow(){
+    ask('工作流 · 生成页面并自检', '生成 → 沙箱运行 → 有报错就带着报错重写（最多 2 次）→ 存入工作区', '例如：做一个能拖拽排序的看板', function(goal){
+      ensureSid('工作流：' + cut(goal, 16));
+      var m = modal('工作流', '节点 1 生成 · 2 运行 · 3 判定 · 4 存盘');
+      var code = '', tries = 0, lastErr = '';
+      function gen(err){
+        m.log('▶ 节点 1 生成' + (tries ? '（第 ' + tries + ' 次重写）' : ''));
+        return NET.chatOnce([
+          { role: 'system', content: '你是前端实现者。只输出一个完整可运行的单文件 HTML（内联 CSS/JS），不要解释。' },
+          { role: 'user', content: goal + (err ? '\n\n上次沙箱报错：\n' + cut(err, 2000) + '\n修好后输出完整 HTML。' : '') }
+        ], { maxTokens: 6000, timeout: 240000 }).then(function(msg){
+          var txt = (msg && msg.content) || '';
+          code = extractHtml(txt);
+          if (!code) throw new Error('模型没给出 HTML（回复 ' + txt.length + ' 字符：' + cut(txt, 120).replace(/\n/g, ' ') + '）');
+          m.log('✔ 生成 ' + code.length + ' 字符', 'ok');
+        });
+      }
+      function runNode(){
+        m.log('▶ 节点 2 沙箱运行');
+        return RUNNER.runCapture('html', code, false).then(function(r){
+          if (r.ok){ m.log('✔ 运行通过（' + r.ms + 'ms）', 'ok'); return true; }
+          lastErr = (r.error || '') + '\n' + (r.output || '');
+          m.log('✘ 运行失败：' + cut(lastErr, 300), 'bad');
+          return false;
+        });
+      }
+      function save(){
+        var sid = ensureSid('工作流产物');
+        var name = 'flow-' + Date.now().toString(36) + '.html';
+        m.log('▶ 节点 4 存盘');
+        return WORK.vfsWrite(sid, name, code).then(function(rec){
+          m.log('✔ 已存入工作区：' + rec.path, 'ok');
+          try { RUNNER.setTab('ws'); RUNNER.open(); } catch(e){}
+          try { RUNNER.renderWs(); } catch(e){}
+          var pv = el('button', { class: 'btn btn-sec', text: '预览结果' });
+          pv.addEventListener('click', function(){ RUNNER.setTab('view'); RUNNER.open(); });
+          m.acts.appendChild(pv);
+          return rec;
+        });
+      }
+      (function next(){
+        gen(tries ? lastErr : '').then(runNode).then(function(ok){
+          if (ok) return save();
+          if (tries >= 2){ m.log('✘ 两次重写仍失败，停止（产物未存盘）', 'bad'); return null; }
+          tries++; return next();
+        }).catch(function(e){ m.log('✘ ' + (e && e.message || e), 'bad'); });
+      })();
+    });
+  }
+  return { pipeline: pipeline, debate: debate, flow: flow };
+})();
+
 /* v0.6.0：配方（自定义模式）的增删 + 顶栏刷新 */
 function addPersona(j){
   var id = 'p' + Date.now().toString(36);
@@ -10187,6 +10571,17 @@ var SUB = (function(){
       body: '你是实现专家「coder」。可以 ```fs-list / ```fs-read 看现状，用 ```write 相对路径 交完整文件，用 ```patch 交补丁。' +
             '你写的东西不会直接进仓库：全部暂存到 _sub/coder/ 下，由母智能体审阅后再合并，所以放心写完整。' +
             '你不能执行任何命令（ACL 禁用 cmd/git）；需要跑测试就把命令写进结论，交给母智能体。' },
+    { id: 'architect', name: 'architect', kind: 'agent', builtin: true, title: '架构师',
+      desc: '只读设计：文件清单、接口与结构、验收标准，不写实现',
+      tools: ['fs-read', 'fs-list', 'skill'], writes: false, maxTurns: 2,
+      body: '你是架构师「architect」。只读：可用 \u0060\u0060\u0060fs-list / \u0060\u0060\u0060fs-read / \u0060\u0060\u0060skill。' +
+      '输出必须可直接交给实现者：① 文件清单（每个文件干什么）② 每个文件的关键结构/接口/数据形状 ③ 验收标准（怎么算做完）。' +
+      '不要写大段实现代码，不要客套。信息不足就说缺什么。' },
+    { id: 'tester', name: 'tester', kind: 'agent', builtin: true, title: '测试员',
+      desc: '只读验证：读实现、列验证步骤与断言、指出缺陷',
+      tools: ['fs-read', 'fs-list', 'skill'], writes: false, maxTurns: 2,
+      body: '你是测试员「tester」。只读：可用 \u0060\u0060\u0060fs-list / \u0060\u0060\u0060fs-read / \u0060\u0060\u0060skill。' +
+      '输出：① 验证步骤（可照做）② 每条断言（输入→期望输出）③ 已知缺陷（按严重度）。不许假装跑过没跑的测试。' },
     { id: 'review', name: 'review', kind: 'agent', builtin: true, title: '审计专家',
       desc: '纯推演审计：没有任何工具',
       tools: [], writes: false, maxTurns: 1,
@@ -10375,10 +10770,19 @@ var SUB = (function(){
 
       (function loop(){
         turns++;
-        NET.chatOnce(msgs, { maxTokens: p.maxTokens || 1200, timeout: p.timeout || 120000, temperature: 0.2 })
+      /* v1.17：空回复自动重试一次（免费模型常被瞬时限流，直接判死会让流水线断在中间） */
+      (function ask(n){
+        /* v1.17：推理型模型会把预算全花在 reasoning 上（finish=length、content=null），每次重试翻倍 */
+        return NET.chatOnce(msgs, { maxTokens: (p.maxTokens || 2400) * (n + 1), timeout: p.timeout || 180000, temperature: 0.2 })
           .then(function(r){
-            var content = String((r && r.content) || '').trim();
-            if (!content) return reject(new Error('子智能体无响应（模型返回空）'));
+            var c0 = String((r && r.content) || '').trim();
+            if (c0 || n >= 2) return r;
+            return new Promise(function(res){ setTimeout(res, (n + 1) * 3500); }).then(function(){ return ask(n + 1); });
+          });
+      })(0)
+      .then(function(r){
+          var content = String((r && r.content) || '').trim();
+          if (!content) return reject(new Error('子智能体无响应（模型返回空，可能被限流）'));
             msgs.push({ role: 'assistant', content: content });
             var calls = scanChild(content, acl.concat(['write', 'agent', 'sub', 'cmd', 'git', 'patch']).filter(function(v, i, a){ return a.indexOf(v) === i; }));
             if (!calls.length || turns >= max){
@@ -10869,7 +11273,7 @@ var WORK = (function(){
     handleTurn: handleTurn, scan: scan, applyUnified: applyUnified,
     reset: function(sid){ stMap[sid || S.sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }; }, // v2.2：按会话
     stop: function(sid){ stOf(sid).cancel = true; },                                                          // v2.2：按会话
-    protocol: PROTOCOL
+    protocol: PROTOCOL, vfsWrite: vfsWrite
   };
 })();
 
