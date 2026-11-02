@@ -1,0 +1,9 @@
+{
+  "name": "zen",
+  "title": "随机格言",
+  "desc": "调用 GitHub Zen API，返回一句编程格言",
+  "type": "http",
+  "method": "GET",
+  "url": "https://api.github.com/zen",
+  "modes": ["work", "agent"]
+}

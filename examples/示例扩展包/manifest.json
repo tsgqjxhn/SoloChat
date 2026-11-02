@@ -1,0 +1,10 @@
+{
+  "name": "示例扩展包",
+  "version": "1.0.0",
+  "author": "SoloChat",
+  "desc": "演示扩展包的目录结构与四类文件：技能 / 工具 / 智能体 / 提示词",
+  "skills": ["skills/code-review.md", "skills/regex.md"],
+  "tools": ["tools/zen.json"],
+  "agents": ["agents/writer.md"],
+  "prompts": ["prompts/weekly.md"]
+}

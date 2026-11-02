@@ -852,6 +852,9 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .orch-line{margin:2px 0}
 .orch-line.bad{color:var(--danger)}
 .orch-line.ok{color:var(--success)}
+.pkg-drop{margin:10px 0;padding:14px;border:1px dashed var(--hairline);border-radius:10px;text-align:center;font-size:12.5px;color:var(--faint);background:var(--soft)}
+.pkg-drop.over{border-color:var(--primary);color:var(--primary)}
+.pkg-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 </style>
 </head>
 <body>
@@ -862,7 +865,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg></button>
       <button class="rail-btn" data-r="new" title="新建会话" aria-label="新建会话"><svg class="ic"><use href="#i-edit"/></svg></button>
       <button class="rail-btn" data-r="search" title="搜索会话" aria-label="搜索会话"><svg class="ic"><use href="#i-search"/></svg></button>
-      <button class="rail-btn" data-r="history" title="会话记录" aria-label="会话记录"><svg class="ic"><use href="#i-temp"/></svg></button>
       <div class="rail-sp"></div>
       <button class="rail-btn" data-r="settings" title="设置" aria-label="设置"><svg class="ic"><use href="#i-gear2"/></svg></button>
     </div>
@@ -5952,7 +5954,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       tools: '内置能力默认全开，关掉后模型调用会被直接拒绝；下面还能加自己的声明式 http 工具。',
       agents: '子智能体：内置角色只读展示（含内部提示词），下面可以拼一个自己的组合智能体。',
       skills: '技能 = 一段说明，平时只占一行，模型需要时才用 \u0060\u0060\u0060skill 取全文。',
-      plugins: '插件 = 一次导入多个工具/技能，导入后落在「工具」「技能」两页。',
+      plugins: '插件 = 扩展包：一个文件夹带一组技能 / 工具 / 智能体 / 提示词，导入后落到各自页面，这里只显示包与来源。',
       prompt: '提示词 = 模型这一轮看到的东西：左边是你自己的常用提示词，右边是实际拼接进系统提示词的全文（含模式、子智能体、技能、扩展与 MCP 登记）。',
     mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
     };
@@ -6074,22 +6076,113 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     }
 
     /* ---------- 添加区（工具 / 插件） ---------- */
-    var addBox = el('div');
-    addBox.appendChild(el('div', { class: 'sub', text: '粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}；技能形如 {"kind":"skill","name":"my-style","desc":"写作风格","body":"…"}；插件形如 {"plugin":"x","tools":[…],"skills":[…]}。' }));
-    var taJson = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen",…}' });
-    addBox.appendChild(taJson);
-    var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
-    addBtn.addEventListener('click', function(){
-      try {
-        var j = JSON.parse(taJson.value);
-        if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
-        else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
-        else { EXT.add(j); UI.toast('已添加：' + j.name); }
-        taJson.value = ''; renderList(filter); renderModeBox();
-      } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
+var addBox = el('div');
+addBox.appendChild(el('div', { class: 'sub', text: '扩展包 = 一个文件夹：skills/*.md（技能）、tools/*.json（声明式 HTTP 工具）、agents/*.md（智能体）、prompts/*.md（提示词），可放 manifest.json 写名称与版本。单个 .md / .json 文件也能直接导入。' }));
+var fiFiles = el('input', { type: 'file', multiple: '', accept: '.json,.md,.markdown,.txt', style: 'display:none' });
+var fiDir = el('input', { type: 'file', style: 'display:none' });
+fiDir.setAttribute('webkitdirectory', ''); fiDir.setAttribute('directory', '');
+var bFiles = el('button', { class: 'btn btn-sec', text: '导入文件…' });
+var bDir = el('button', { class: 'btn btn-primary', text: '导入文件夹…' });
+bFiles.addEventListener('click', function(){ fiFiles.click(); });
+bDir.addEventListener('click', function(){ fiDir.click(); });
+addBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:6px 0' }, [bFiles, bDir, fiFiles, fiDir]));
+function pkgDone(rep){
+  renderPkgs(); renderList(filter); renderModeBox();
+  var msg = '导入 ' + rep.added + ' 项' + (rep.prompts ? '，' + rep.prompts + ' 条提示词' : '');
+  if (rep.skipped.length){
+    msg += '；跳过 ' + rep.skipped.length + ' 个';
+    console.warn('[扩展包] 跳过：\n' + rep.skipped.join('\n'));
+  }
+  UI.toast(msg, rep.skipped.length > 0);
+}
+function doImport(list){
+  EXT.importFiles(list).then(pkgDone, function(e){ UI.toast('导入失败：' + (e && e.message || e), true); });
+}
+fiFiles.addEventListener('change', function(){ doImport(fiFiles.files); fiFiles.value = ''; });
+fiDir.addEventListener('change', function(){ doImport(fiDir.files); fiDir.value = ''; });
+/* 拖放（含文件夹） */
+function walkEntry(ent, path, out){
+  return new Promise(function(res){
+    if (ent.isFile){ ent.file(function(f){ if (f){ f._rel = path + ent.name; out.push(f); } res(); }, function(){ res(); }); return; }
+    if (ent.isDirectory){
+      var rd = ent.createReader(), all = [];
+      (function more(){
+        rd.readEntries(function(es){
+          if (!es.length){
+            var ch = Promise.resolve();
+            all.forEach(function(x){ ch = ch.then(function(){ return walkEntry(x, path + ent.name + '/', out); }); });
+            ch.then(function(){ res(); }); return;
+          }
+          all = all.concat(Array.prototype.slice.call(es)); more();
+        }, function(){ res(); });
+      })();
+      return;
+    }
+    res();
+  });
+}
+function collectDrop(dt){
+  var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+  var ents = items.map(function(it){ try { return it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; } catch(e){ return null; } }).filter(Boolean);
+  if (!ents.length) return Promise.resolve(Array.prototype.slice.call((dt && dt.files) || []));
+  var out = [], ch = Promise.resolve();
+  ents.forEach(function(en){ ch = ch.then(function(){ return walkEntry(en, '', out); }); });
+  return ch.then(function(){ return out; });
+}
+var dropZone = el('div', { class: 'pkg-drop', text: '把文件或文件夹拖到这里' });
+dropZone.addEventListener('dragover', function(e){ e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', function(){ dropZone.classList.remove('over'); });
+dropZone.addEventListener('drop', function(e){
+  e.preventDefault(); dropZone.classList.remove('over');
+  collectDrop(e.dataTransfer).then(function(fs){ if (fs.length) doImport(fs); });
+});
+addBox.appendChild(dropZone);
+/* 已导入的包 */
+var pkgsBox = el('div', { class: 'pkg-list' });
+function renderPkgs(){
+  pkgsBox.textContent = '';
+  var map = {}, order = [];
+  EXT.all().forEach(function(it){
+    if (!it.pkg) return;
+    if (!map[it.pkg]){ map[it.pkg] = []; order.push(it.pkg); }
+    map[it.pkg].push(it);
+  });
+  if (!order.length){ pkgsBox.appendChild(el('div', { class: 'hint', text: '还没有导入扩展包。' })); return; }
+  order.forEach(function(p){
+    var items = map[p];
+    var card = el('div', { class: 'sub-card' });
+    card.appendChild(el('div', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') }));
+    card.appendChild(el('div', { class: 'sub', text:
+      items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); }).join('、') }));
+    var rm = el('button', { class: 'btn btn-danger rn-mini', text: '移除整包' });
+    rm.addEventListener('click', function(){
+      items.forEach(function(x){ EXT.del(x.id); });
+      renderPkgs(); renderList(filter); renderModeBox(); UI.toast('已移除「' + p + '」');
     });
-    addBox.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
-    p.appendChild(addBox);
+    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [rm]));
+    pkgsBox.appendChild(card);
+  });
+}
+addBox.appendChild(pkgsBox);
+renderPkgs();
+/* 高级：粘贴 JSON（保留给一次性手工添加） */
+var adv = el('details');
+adv.appendChild(el('summary', { class: 'sub', style: 'cursor:pointer', text: '高级：粘贴 JSON（单个工具 / 技能）' }));
+var taJson = el('textarea', { class: 'f-in', rows: '5', style: 'width:100%;font-family:ui-monospace,monospace;margin-top:6px', placeholder: '{"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}' });
+adv.appendChild(taJson);
+var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
+addBtn.addEventListener('click', function(){
+  try {
+    var j = JSON.parse(taJson.value);
+    if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
+    else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
+    else { EXT.add(j); UI.toast('已添加：' + j.name); }
+    taJson.value = ''; renderPkgs(); renderList(filter); renderModeBox();
+  } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
+});
+adv.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
+addBox.appendChild(adv);
+p.appendChild(addBox);
 
     /* ---------- MCP ---------- */
     var mcpBox = el('div');
@@ -6187,7 +6280,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       var isAgents = (k === 'agents'), isMcp = (k === 'mcp'), isPrompt = (k === 'prompt');
       modeBox.style.display = isAgents ? '' : 'none';
       arRow.style.display = (k === 'tools') ? '' : 'none';
-      list.style.display = (isMcp || isAgents || isPrompt) ? 'none' : '';
+      list.style.display = (isMcp || isAgents || isPrompt || k === 'plugins') ? 'none' : '';
       agentBox.style.display = isAgents ? '' : 'none';
       addBox.style.display = (k === 'tools' || k === 'plugins') ? '' : 'none';
       mcpBox.style.display = isMcp ? '' : 'none';
@@ -6236,7 +6329,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.21.0', ua = navigator.userAgent || '';
+      var ver = 'v1.22.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8905,7 +8998,6 @@ function sendMessage(){
     if (r === 'settings'){ UI.openSettings(); return; }
     if (r === 'expand'){ toggleSidebar('show'); return; }
     if (r === 'search'){ toggleSidebar('show'); setTimeout(function(){ var q = document.getElementById('sb-q'); if (q) q.focus(); }, 120); return; }
-    if (r === 'history'){ toggleSidebar('show'); return; }
   });
 })();
 $('#sidebar').addEventListener('click', function(e){
@@ -9972,7 +10064,7 @@ var EXT = (function(){
       tools: Array.isArray(item.tools) ? item.tools : [],
       writes: !!item.writes,
       maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
-      modes: item.modes || ['work'], on: item.on !== false });
+      modes: item.modes || ['work'], on: item.on !== false, pkg: item.pkg || '', pkgVer: item.pkgVer || '', model: item.model || '' });
     setCfg({ ext: u }); save();
     return item.name;
   }
@@ -10018,6 +10110,191 @@ var EXT = (function(){
   function fillTpl(str, arg){
     return String(str == null ? '' : str).split('{arg}').join(encodeURIComponent(String(arg == null ? '' : arg)));
   }
+/* ========== v1.22：扩展包导入（文件 / 文件夹） ========== */
+function readText(f){
+  return new Promise(function(res, rej){
+    try{
+      var r = new FileReader();
+      r.onload = function(){ res(String(r.result == null ? '' : r.result)); };
+      r.onerror = function(){ rej(r.error || new Error('读取失败')); };
+      r.readAsText(f);
+    } catch(e){ rej(e); }
+  });
+}
+/* --- 前置元数据：---  key: value  ---  正文 --- */
+function parseFront(txt){
+  var o = { m: {}, body: String(txt == null ? '' : txt) };
+  var t = o.body.replace(/^\uFEFF/, '');
+  if (t.slice(0, 3) !== '---'){ o.body = t; return o; }
+  var e = t.indexOf('\n---', 3);
+  if (e < 0){ o.body = t; return o; }
+  t.slice(3, e).split(/\r?\n/).forEach(function(l){
+    var mm = l.match(/^([A-Za-z_-]+)\s*:\s*(.*)$/);
+    if (!mm) return;
+    var k = mm[1].toLowerCase(), v = mm[2].trim().replace(/^['"]|['"]$/g, '');
+    if (v === 'true') v = true; else if (v === 'false') v = false;
+    else if (/^\[[\s\S]*\]$/.test(v)) v = v.slice(1, -1).split(',').map(function(s){ return s.trim().replace(/^['"]|['"]$/g, ''); }).filter(Boolean);
+    o.m[k] = v;
+  });
+  o.body = t.slice(e + 4).replace(/^\r?\n/, '');
+  return o;
+}
+function baseName(p){
+  return String(p || '').split('/').pop().replace(/\.[a-z0-9]+$/i, '');
+}
+function pkgName(base, fallback){
+  var s = String(base || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 22);
+  if (!/^[a-z][a-z0-9-]{1,23}$/.test(s)) s = '';
+  return s || fallback;
+}
+function freeName(base){
+  if (!find(base)) return base;
+  for (var i = 2; i < 60; i++){
+    var n = base.slice(0, 18) + '-' + i;
+    if (!find(n)) return n;
+  }
+  return base.slice(0, 14) + '-' + Date.now().toString(36).slice(-4);
+}
+function addPromptItem(name, text){
+  var ps = (S.cfg.prompts || []).slice();
+  var nm = String(name || '提示词').trim().slice(0, 40) || '提示词';
+  var base = nm, i = 2;
+  while (ps.some(function(x){ return x.name === nm; })){ nm = base + ' ' + i; i++; }
+  ps.push({ name: nm, text: String(text || '') });
+  setCfg({ prompts: ps });
+  return nm;
+}
+/* 单个条目：按 kind 落到 cfg.ext 或 cfg.prompts；失败只记录、不中断整包 */
+function importOne(j, pkg, ver, rep){
+  return readText(j.file).then(function(txt){
+    var fm = parseFront(txt), m = fm.m || {}, meta = j.meta || {};
+    var kind = j.kind || m.kind || 'tool';
+    var base = baseName(j.path);
+    if (kind === 'tool'){
+      var obj;
+      try { obj = JSON.parse(txt); } catch(e){ throw new Error('不是合法 JSON'); }
+      var url = obj.url || meta.url;
+      if (!url) throw new Error('工具缺少 url（只支持声明式 HTTP，不能带代码）');
+      var nm = freeName(pkgName(obj.name || base, 'tool-' + Date.now().toString(36)));
+      add({ kind: 'tool', name: nm, title: obj.title || obj.name || base, desc: obj.desc || '',
+        url: url, method: obj.method || 'GET', headers: obj.headers || null, body: obj.body || null,
+        modes: obj.modes || ['work'], pkg: pkg, pkgVer: ver });
+      rep.added++;
+      return;
+    }
+    if (kind === 'skill'){
+      var body = String(fm.body || '').trim();
+      if (!body) throw new Error('技能正文为空');
+      var nm2 = freeName(pkgName(m.name || base, 'skill-' + Date.now().toString(36)));
+      add({ kind: 'skill', name: nm2, title: m.title || m.name || base,
+        desc: m.desc || m.description || '', body: body,
+        modes: m.modes || ['work', 'agent'], pkg: pkg, pkgVer: ver });
+      rep.added++;
+      return;
+    }
+    if (kind === 'agent'){
+      var bod = String(fm.body || '').trim();
+      if (!bod) throw new Error('智能体提示词为空');
+      var tls = Array.isArray(m.tools) ? m.tools : [];
+      var nm3 = freeName(pkgName(m.name || base, 'agent-' + Date.now().toString(36)));
+      add({ kind: 'agent', name: nm3, title: m.title || m.name || base,
+        desc: m.desc || m.description || ('来自 ' + pkg), body: bod, tools: tls,
+        writes: tls.indexOf('fs-write') >= 0 || tls.indexOf('patch') >= 0,
+        modes: m.modes || ['work', 'agent'], model: m.model || '',
+        maxTurns: m.maxturns || m.maxTurns || 4, maxTokens: m.maxtokens || m.maxTokens || 1600,
+        pkg: pkg, pkgVer: ver });
+      rep.added++;
+      return;
+    }
+    if (kind === 'prompt'){
+      var pb = String(fm.body || '').trim() || String(m.text || '').trim();
+      if (!pb) throw new Error('提示词为空');
+      addPromptItem(m.name || base, pb);
+      rep.prompts++;
+      return;
+    }
+    throw new Error('不认识的 kind：' + kind);
+  }).then(null, function(e){
+    rep.skipped.push(j.path + '：' + (e && e.message || e));
+  });
+}
+/* 一个文件夹（或一组散文件）→ 一个扩展包 */
+function importGroup(root, entries, rep){
+  var byPath = {};
+  entries.forEach(function(e){ byPath[e.path] = e.file; });
+  var manF = byPath['manifest.json'] || byPath['package.json'] || byPath['ext.json'];
+  var manP = manF ? readText(manF).then(function(t){
+    try { return JSON.parse(t); }
+    catch(e){ throw new Error('manifest.json 不是合法 JSON：' + e.message); }
+  }) : Promise.resolve(null);
+  return manP.then(function(man){
+    var pkg = String((man && (man.name || man.title)) || root || '未命名扩展包').slice(0, 40);
+    var ver = String((man && man.version) || '');
+    var jobs = [];
+    if (man){
+      var kinds = { skills: 'skill', tools: 'tool', agents: 'agent', prompts: 'prompt' };
+      Object.keys(kinds).forEach(function(k){
+        (man[k] || []).forEach(function(it){
+          var f = typeof it === 'string' ? it : (it && (it.file || it.path));
+          if (!f) return;
+          if (!byPath[f]){ rep.skipped.push(pkg + '：清单里的 ' + f + ' 不存在'); return; }
+          jobs.push({ kind: kinds[k], path: f, file: byPath[f], meta: (typeof it === 'object' ? it : {}) });
+        });
+      });
+      (man.items || []).forEach(function(it){
+        if (!it || !it.file) return;
+        if (!byPath[it.file]){ rep.skipped.push(pkg + '：清单里的 ' + it.file + ' 不存在'); return; }
+        jobs.push({ kind: it.kind || 'skill', path: it.file, file: byPath[it.file], meta: it });
+      });
+    }
+    /* 清单只写了部分文件（或只写名字/版本）时，剩下的按目录结构补齐 */
+    var explicitItems = !!(man && man.items && man.items.length);
+    if (!explicitItems){
+      var seenP = {};
+      jobs.forEach(function(x){ seenP[x.path] = 1; });
+      entries.forEach(function(e){
+        if (seenP[e.path]) return;
+        var low = e.path.toLowerCase();
+        var kind = /(^|\/)skills?\//.test(low) ? 'skill'
+          : /(^|\/)tools?\//.test(low) ? 'tool'
+          : /(^|\/)agents?\//.test(low) ? 'agent'
+          : /(^|\/)prompts?\//.test(low) ? 'prompt' : '';
+        if (!kind || !/\.(md|markdown|txt|json)$/.test(low)) return;
+        if (/(^|\/)(readme|license|changelog)\./.test(low)) return;
+        jobs.push({ kind: kind, path: e.path, file: e.file, meta: {} });
+      });
+    }
+    if (!jobs.length && entries.length === 1){
+      var f0 = entries[0];
+      jobs.push({ kind: /\.json$/i.test(f0.path) ? '' : 'skill', path: f0.path, file: f0.file, meta: {} });
+    }
+    if (!jobs.length){ rep.skipped.push((pkg || '扩展包') + '：没找到 skills/ tools/ agents/ prompts/ 里的文件'); return; }
+    var ch = Promise.resolve(), n0 = rep.added;
+    jobs.forEach(function(j){ ch = ch.then(function(){ return importOne(j, pkg, ver, rep); }); });
+    return ch.then(function(){
+      rep.pkgs.push({ name: pkg, version: ver, count: rep.added - n0, total: jobs.length });
+    });
+  });
+}
+function importFiles(list){
+  var files = Array.prototype.slice.call(list || []).filter(function(f){ return f && f.size > 0; });
+  if (!files.length) return Promise.reject(new Error('没有选到文件'));
+  var groups = {}, order = [];
+  files.forEach(function(f){
+    var rel = String(f.webkitRelativePath || f._rel || f.name || '').replace(/\\/g, '/');
+    var seg = rel.split('/');
+    var root = seg.length > 1 ? seg[0] : '';
+    var p = seg.length > 1 ? seg.slice(1).join('/') : rel;
+    if (!groups[root]){ groups[root] = []; order.push(root); }
+    groups[root].push({ path: p, file: f });
+  });
+  var rep = { pkgs: [], added: 0, prompts: 0, skipped: [] };
+  var chain = Promise.resolve();
+  order.forEach(function(root){
+    chain = chain.then(function(){ return importGroup(root, groups[root], rep); });
+  });
+  return chain.then(function(){ return rep; });
+}
   function runTool(name, arg){
     var it = hasTool(name);
     if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
@@ -10065,7 +10342,8 @@ var EXT = (function(){
   return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
     isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
-    runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt };
+    runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt,
+    importFiles: importFiles, addPromptItem: addPromptItem };
 })();
 
 /* v0.6.0：模式层 —— 自动路由 + 自定义模式（配方）
