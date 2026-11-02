@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.22';
+var APP_VER = 'v0.3.23';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -7233,6 +7233,7 @@ p.appendChild(addBox);
   if (m.model) head.appendChild(el('span', { class: 'msg-tokens', text: String(m.model).split('/').pop().slice(0, 24), title: m.model })); // v0.3.21
     if (S.cfg.msgFork !== false && !fsres && m.role !== 'system')
       head.appendChild(el('button', { class: 'msg-fork', title: '从这里新开一个分支会话', 'data-fork': m.id }, [icon('branch'), '分支']));
+  try { var _wr = (String(m.content || '').match(/```fs-write[ \t]+[^\n]+/g) || []).length; if (_wr > 1 && m.role !== 'user' && m.status === 'ok') head.appendChild(el('button', { class: 'msg-fork', title: '把这条回复里的 ' + _wr + ' 处写入一次应用', 'data-act': 'fs-applyall', 'data-id': m.id }, ['应用全部（' + _wr + '）'])); } catch (e) {} // v0.3.23：对标 Cursor 的 Accept all
     n.appendChild(head);
     if (m.reasoning)
       n.appendChild(el('details', { class: 'reason' }, [
@@ -9804,6 +9805,7 @@ $('#sidebar').addEventListener('click', function(e){
         case 'varnext': UI.variantStep(id, 1); break;
       case 'continue': UI.continueMsg(id); break;
       case 'fs-apply': { var fa = b.closest('.msg'); if (fa) FS.apply(fa.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
+        case 'fs-applyall': { var mm2 = b.closest('.msg'); if (mm2) FS.applyAll(mm2.getAttribute('data-id')); break; }
       case 'fs-reject': { var fr = b.closest('.msg'); if (fr) FS.reject(fr.getAttribute('data-id'), b.getAttribute('data-path')); break; }
   case 'fs-undo': { var fu = b.closest('.msg'); if (fu) FS.undo(fu.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
       case 'cfg': UI.openSettings(); break;
@@ -10696,6 +10698,17 @@ if (r && r.snap){ var sk = snapKey(msg.sid, ws, path); var arr = SC_SNAPS[sk]; i
     });
   }
   /* v1.28.4：撤销这次写入 —— 用写入前快照恢复，只覆盖 SoloChat 自己写过的那一份 */
+  /* v0.3.23：一条回复里多处写入，一次应用完（对标 Cursor 的 Accept all） */
+  function applyAll(mid){
+    var msg = byId(mid); if (!msg) return;
+    var seen = {}, n = 0;
+    scan(msg.content).forEach(function(c){
+      if (c.op !== 'fs-write' || seen[c.path]) return;
+      seen[c.path] = 1; n++;
+      apply(msg, c.path, null);
+    });
+    if (!n) UI.toast('这条回复里没有可应用的写入', true);
+  }
   function undo(mid, path, btn){
   var um = byId(mid);
   var uws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(um && um.sid); // v0.4.0a：按消息所属会话
@@ -10775,7 +10788,7 @@ var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[
     get.then(function(d){ if (!node.firstChild) node.innerHTML = MD.diff(d.old, d.nw); });
   }
   return {
-    handleTurn: handleTurn, apply: apply, reject: reject, undo: undo, hydrateAll: hydrateAll,
+    handleTurn: handleTurn, apply: apply, applyAll: applyAll, reject: reject, undo: undo, hydrateAll: hydrateAll,
     reset: function(sid){ stMap[sid || S.sid] = { turns: 0, cancel: false }; },        // v2.2：按会话
     stop: function(sid){ stOf(sid).cancel = true; },                                  // v2.2：按会话
     protocol: PROTOCOL
