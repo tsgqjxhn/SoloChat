@@ -5607,9 +5607,15 @@ var UI = (function(){
   function renderPool(boxArg){
     var box = boxArg || $('#mdl-pool'); if (!box) return;
     box.textContent = '';
+    /* v0.3.1：手动输入模型 ID —— 加进池子后自动补全能力（目录 → OpenRouter → 名称推断） */
+    var manIn = el('input', { class: 'f-in', id: 'mdl-manual', placeholder: '手动输入模型 ID，如 qwen3-max / claude-sonnet-4', style: 'flex:1' });
+    var manBtn = el('button', { class: 'btn', type: 'button', text: '添加并获取信息' });
+    manBtn.addEventListener('click', function(){ addModelManual(String(manIn.value || '').trim()); });
+    manIn.addEventListener('keydown', function(ev){ if (ev.key === 'Enter'){ ev.preventDefault(); addModelManual(String(manIn.value || '').trim()); } });
+    box.appendChild(el('div', { class: 'f-row', style: 'gap:8px;margin-bottom:8px' }, [manIn, manBtn]));
     var ap = AP(), ms = ap.models || [], cur = ap.currentModel;
     if (!ms.length){
-      box.appendChild(el('div', { class: 'mdl-empty', text: '还没有模型：点「获取列表」挑几个，或让服务商接口返回模型后勾选填入。' }));
+      box.appendChild(el('div', { class: 'mdl-empty', text: '还没有模型：上面手动填一个，或点「获取列表」挑几个。' }));
       return;
     }
     for (var i = 0; i < ms.length; i++){
@@ -5664,7 +5670,30 @@ var UI = (function(){
       })(ms[i]);
     }
   }
-  function mmToggleCfg(id){
+  /* v0.3.1：手动加模型 → 立刻联网补全上下文/模态/思考字段，取不到再按名称推断 */
+function addModelManual(id){
+  if (!id){ toast('先填模型 ID', true); return; }
+  if (/\s/.test(id)){ toast('模型 ID 里不能有空格', true); return; }
+  var ap = AP();
+  if (!ap.models) ap.models = [];
+  var added = ap.models.indexOf(id) < 0;
+  if (added) ap.models.push(id);
+  if (!ap.currentModel) ap.currentModel = id;
+  S.cfg.models = ap.models;
+  mirrorPreset(); saveCfg(); renderPool(); renderComposerCtl();
+  var ro = $('#ctx-ro'); if (ro) ro.value = ctxDisp();
+  toast((added ? '已添加 ' : '已在池中 ') + id + '，正在获取能力信息…');
+  fillMetaFromCatalog([id], true).then(function(){
+    renderPool();
+    var m = mMeta(id) || {};
+    if (m.ctx || m.out || (m.in && m.in.length) || m.reason || m.nonChat) toast(id + '：' + mmSummary(id));
+    else toast('已添加 ' + id + '，但没取到能力信息；可以点 ⚙ 手工填，或换个带版本号的完整 ID', true);
+  }).catch(function(e){
+    renderPool();
+    toast('已添加 ' + id + '，能力获取失败：' + ((e && e.message) || e) + '（可点 ⚙ 手工填）', true);
+  });
+}
+function mmToggleCfg(id){
     var box = $('#mdl-pool'); if (!box) return;
     var row = box.querySelector('.mdl-row[data-row="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
     if (!row) return;
@@ -6844,7 +6873,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.0', ua = navigator.userAgent || '';
+      var ver = 'v0.3.1', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
