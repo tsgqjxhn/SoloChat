@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.18';
+var APP_VER = 'v0.3.19';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8097,8 +8097,10 @@ function sendMessage(){
       if (!bg) toast('上下文 80%+，自动压缩中…');
       compactCtx(s, msgs, function(ok){
         S.compacting = false;
-        if (ok && !bg) toast('摘要完成，继续发送');
-        runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, bg); // 失败回退原上下文继续
+    /* v0.3.19：压缩是异步的（数秒到数十秒），期间用户可能切走会话；此时不能再按前台续跑，否则气泡会插进当前显示的会话 */
+    var nowBg = bg || (s.id !== S.sid);
+    if (ok && !nowBg) toast('摘要完成，继续发送');
+    runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, nowBg);
       });
       return;
     }
