@@ -73,16 +73,20 @@ input,textarea,select{font:inherit;color:inherit}
   box-shadow:14px 0 40px rgba(0,0,0,.14);
 }
 #main{flex:1; min-width:0; display:flex; flex-direction:column}
-body.sb-collapsed #sidebar{width:56px;min-width:56px;padding:0;overflow:hidden}
+body.sb-collapsed #sidebar{width:0;min-width:0;padding:0;overflow:visible;pointer-events:none;
+  background:transparent;border-right:0;box-shadow:none}
 body.sb-collapsed #sidebar>*:not(.sb-rail){display:none}
 body.sb-collapsed #tb-title{display:none}
 .sb-rail{display:none;flex-direction:column;align-items:center;gap:4px;padding:4px 0;width:100%;
-  position:fixed;left:0;top:52px;bottom:var(--rn-b,120px);width:56px;z-index:24;box-sizing:border-box}
+  position:fixed;left:0;top:52px;bottom:var(--rn-b,120px);width:56px;z-index:44;box-sizing:border-box;
+  background:var(--canvas);border-right:1px solid var(--hairline);pointer-events:auto}
 body.sb-collapsed .sb-rail{display:flex}
 .rail-btn{width:40px;height:40px;border:0;background:none;border-radius:10px;display:flex;align-items:center;
   justify-content:center;color:var(--muted);cursor:pointer}
 .rail-btn:hover{background:var(--soft);color:var(--ink)}
 .rail-btn svg{width:18px;height:18px}
+.rail-btn.rail-logo{color:var(--primary)}
+.rail-btn.rail-logo svg{width:20px;height:20px;stroke:none}
 .rail-sp{flex:1}
 #rn-rail{position:fixed;right:0;top:52px;bottom:var(--rn-b,120px);width:46px;display:none;flex-direction:column;align-items:center;
   gap:6px;padding:10px 0;border-left:1px solid var(--hairline);background:var(--canvas);z-index:29}
@@ -854,7 +858,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <div id="app">
   <aside id="sidebar" aria-label="会话列表">
     <div class="sb-rail" id="sb-rail">
-      <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg></button>
+      <button class="rail-btn rail-logo" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic fill"><use href="#i-logo"/></svg></button>
       <button class="rail-btn" data-r="new" title="新建会话" aria-label="新建会话"><svg class="ic"><use href="#i-edit"/></svg></button>
       <button class="rail-btn" data-r="search" title="搜索会话" aria-label="搜索会话"><svg class="ic"><use href="#i-search"/></svg></button>
       <button class="rail-btn" data-r="history" title="会话记录" aria-label="会话记录"><svg class="ic"><use href="#i-temp"/></svg></button>
@@ -884,7 +888,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
-        <button class="icon-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
       </div>
       <div id="win-ctl">
         <button class="win-btn" data-win="min" title="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
@@ -924,6 +927,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   </main>
 
   <div id="rn-rail" aria-label="右侧面板">
+  <button class="rail-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
   <button class="rail-btn" data-rn="ws" title="工作区"><svg class="ic"><use href="#i-ws"/></svg></button>
   <button class="rail-btn" data-rn="view" title="运行 / 预览"><svg class="ic"><use href="#i-play"/></svg></button>
   <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-ul"/></svg></button>
@@ -6231,7 +6235,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.18.0', ua = navigator.userAgent || '';
+      var ver = 'v1.19.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
