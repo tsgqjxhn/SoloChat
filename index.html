@@ -743,6 +743,8 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 
 /* #12 工具调用卡片 */
 .tool-card{border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--soft);margin:10px 0;overflow:hidden}
+.tool-card.dead{border-style:dashed;opacity:.78}
+.tool-card.dead .th span:nth-child(2){color:var(--danger);font-weight:600}
 .tool-card>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;font-size:12px;color:var(--body);
   background:var(--card);border-bottom:1px solid var(--hairline);cursor:pointer}
 .tool-card>.th .tag{font-size:10px;padding:1px 6px;border-radius:var(--r-pill);background:var(--canvas);
@@ -3091,7 +3093,7 @@ var MD = (function(){
     var codes = [];
     /* v1.14：围栏首行可以带参数（```vfs-write index.html / ```fs-read src/a.js / ```run js）。
        以前正则只认「```lang + 换行」，带参数的围栏整块漏判，原文连 ``` 一起糊在正文里。 */
-    var TOOL_LANG = /^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get|skill|agent|sub|suball|fs-[a-z-]+)$/i;
+    var TOOL_LANG = /^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|fs-[a-z-]+)$/i;
     src = src.replace(/```([A-Za-z0-9+#-]*)[ \t]*([^\n]*)\n([\s\S]*?)```/g, function(m, lang, arg, code){
       var a = String(arg || '').trim(), body = code.replace(/\n+$/, '');
       if (a && TOOL_LANG.test(lang)) body = a + '\n' + body;   /* 参数并进体首行，工具卡片照旧读首行 */
@@ -3156,10 +3158,11 @@ var MD = (function(){
 
       var cm = /^\uE000(\d+)\uE000$/.exec(line.trim()); /* 代码块占位符独占一行 */
       if (cm){ var c = codes[+cm[1]];
+        if (c.lang && typeof MODE !== 'undefined' && MODE.toolAllowed && !MODE.toolAllowed(c.lang)){ html += deadCard(c); i++; continue; } /* v1.28.1：本轮没有的工具 */
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
+        if (/^(run|vfs-write|vfs-list|patch|preview|web|search|play|download|get|browser)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本 */
         var _ln = !!S.cfg.lineNo, _bc = c.code;
@@ -3248,13 +3251,20 @@ var MD = (function(){
     return html;
   }
   /* fs-* 围栏→文件工具卡片（c.code 已整体转义） */
+  /* v1.28.1：当前模式没有的工具围栏 —— 别让它看着像在跑 */
+  function deadCard(c){
+    var mn = { chat: 'Chat', work: 'Work', agent: 'Agent' }[S.cfg.mode] || S.cfg.mode;
+    return '<div class="tool-card dead"><div class="th"><span class="tag">' + esc(c.lang) + '</span>' +
+      '<span>本轮不执行</span><span class="meta">' + esc(mn) + ' 模式没有这个工具</span></div>' +
+      '<div class="tb"><pre><code>' + esc(c.code) + '</code></pre></div></div>';
+  }
   function toolCard(c){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放', download: '下载视频', get: '抓取文件' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', patch: '应用补丁', preview: '预览', web: '抓取网页', search: '联网搜索', play: '打开播放', download: '下载视频', get: '抓取文件', browser: '打开内置浏览器' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get' || lang === 'browser'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -6015,7 +6025,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     }
     function renderSys(){
       sysBox.textContent = '';
-      sysBox.appendChild(sec('Chat', S.cfg.research ? MODE.text('research') : '', S.cfg.research ? '深度研究开关已开' : '', 'research'));
+      sysBox.appendChild(sec('Chat · 纯对话', MODE.text('chat'), S.cfg.research ? '深度研究已开，本段不生效' : '', 'chat'));
+      sysBox.appendChild(sec('Chat · 深度研究', MODE.text('research'), S.cfg.research ? '开关已开' : '', 'research'));
       sysBox.appendChild(sec('Work', MODE.text('work'), '', 'work'));
       sysBox.appendChild(sec('Agent', MODE.text('agent'), '', 'agent'));
       sysBox.appendChild(sec('Agent · 直接落地', MODE.text('agentWrite'), '', 'agentWrite'));
@@ -6489,7 +6500,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.28.0', ua = navigator.userAgent || '';
+      var ver = 'v1.28.1', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7080,7 +7091,7 @@ p.appendChild(addBox);
     if (msg.role === 'assistant' && status === 'ok') MEM.note(sid, S.msgs, 'ok'); // v1.17：记一笔
     touchSession(null, sid);
     notifyBusy(); // v2.2：登记出清后重新计算「忙」状态
-    if (shown) setSending(false);
+    if (shown && !((S.pend || 0) > 0)) setSending(false);
     if (qa && msg.sid === qa.sid){ // 快速提问终态：错误给简短原因，其余给全文
       if (NET.bridge.ok) NET.bridge.send({ t: 'quick.answer', text: quickText(msg.errMsg || msg.content || ''), done: true });
       qa = null;
@@ -7238,6 +7249,13 @@ p.appendChild(addBox);
     var use = $send.querySelector('use');
     use.setAttribute('href', v ? '#i-stop' : '#i-send'); // 生成中 → 主题化圆角方块停止键
     $send.title = v ? '停止生成（Esc）' : '发送 (Enter)';
+  }
+  /* v1.28.1：回合的文字流结束了，但工具链（子智能体 / 抓取 / 下载）还在跑 ——
+     用计数器把「停止」状态挂住，别让按钮提前变回发送键。 */
+  function holdBusy(d){
+    S.pend = Math.max(0, (S.pend || 0) + d);
+    if (S.pend > 0){ if (!S.sending) setSending(true); }
+    else if (!Object.keys(S.streams || {}).length) setSending(false);
   }
   function renderChips(){
     $chips.textContent = '';
@@ -9132,7 +9150,7 @@ function sendMessage(){
       autosize();
     },
     lightbox: lightbox,
-    toast: toast, applyTheme: applyTheme, openSettings: openSettings, closeModal: closeModal,
+    toast: toast, applyTheme: applyTheme, openSettings: openSettings, closeModal: closeModal, holdBusy: holdBusy,
     modalOpen: modalOpen, confirmBox: confirmBox, renderSessions: renderSessions,
     renderMsgs: renderMsgs, selectSession: selectSession, createSession: createSession,
     deleteSession: deleteSession, deleteProject: deleteProject, renameInline: renameInline, sendMessage: sendMessage,
@@ -9887,7 +9905,7 @@ var FS = (function(){
     '沟通：动手前用两三句说明计划（改哪些文件、为什么），有歧义先问一次再继续；不要一边猜一边大幅改动。' +
     '结束格式：改动清单（文件:行/函数）→ 验证方式与结果 → 未验证项与风险，三段写完就停，不要复述整篇代码。';;
   function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|sub|agent|suball)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|sub|agent|suball|browser|web|search|get)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -9959,6 +9977,7 @@ var FS = (function(){
     return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{1,2}/.test(p) || p.split(/[\\/]/).indexOf('..') >= 0;
   }
   function runReads(reads, sid0){
+    UI.holdBusy(1);
     var parts = [], done = 0, s0 = stOf(sid0);
     (function next(){
       if (s0.cancel) return; // v2.2：只在显式停止时中断；切换会话不再打断（后台继续）
@@ -9976,6 +9995,7 @@ var FS = (function(){
             '\n先修好再交付；修不了就直接说卡在哪一步、缺什么，不要假装成功。';
         }
         note('[fs-result]\n' + txt0.slice(0, LIMITS.FS_RESULT_CHARS), sid0);
+        UI.holdBusy(-1);
         UI.startStreamFor(sid0); // 结果回灌后自动续跑一轮（目标会话，v2.2）
         return;
       }
@@ -10017,7 +10037,41 @@ var FS = (function(){
           });
         return;
       }
-      if (c.op === 'sub' || c.op === 'agent' || c.op === 'suball'){
+      if (c.op === 'browser'){
+      var bu2 = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
+      if (!bu2){ parts.push('[browser] 地址无效（需 http/https 绝对地址）'); next(); return; }
+      var bo2 = NET.openExternal(bu2, 'window');
+      parts.push('[browser] ' + (bo2 ? '已在应用内窗口打开：' : '打开失败：') + bu2);
+      next(); return;
+    }
+    /* v1.28.1：Agent 里也真的执行 web / search / get（以前只写进提示词，围栏没人跑） */
+    if (c.op === 'web'){
+      var wu = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
+      if (!wu){ parts.push('[web] 地址无效（需 http/https 绝对地址）'); next(); return; }
+      NET.fetchPageText(wu).then(function(txt){
+        if (!txt) parts.push('[web] 抓取失败：' + wu + '（反爬/登录墙/断网；可改用 search）');
+        else { var cut = txt.slice(0, LIMITS.WORK_WEB_CHARS); parts.push('[web] ' + wu + '（成功，' + txt.length + ' 字）\n\u0060\u0060\u0060\n' + cut + '\n\u0060\u0060\u0060'); }
+      }, function(e){ parts.push('[web] 失败：' + (e && e.message || e)); }).then(next);
+      return;
+    }
+    if (c.op === 'search'){
+      var qq = String(c.path || '').trim();
+      if (!qq){ parts.push('[search] 缺少查询词'); next(); return; }
+      NET.searchWeb(qq, null, true).then(function(r){
+        if (!r || !r.block) parts.push('[search] 未返回结果：' + qq + '（检查 设置 → 连接与模型 → 联网搜索）');
+        else parts.push('[search] ' + qq + '（' + (r.n || 0) + ' 条）\n\n' + r.block);
+      }, function(e){ parts.push('[search] 失败：' + (e && e.message || e)); }).then(next);
+      return;
+    }
+    if (c.op === 'get'){
+      var gu = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
+      if (!gu){ parts.push('[get] 地址无效'); next(); return; }
+      NET.fileGet(gu, '', null).then(function(r){
+        parts.push('[get] 已保存：' + ((r && (r.path || r.name)) || gu) + '（' + ((r && r.size) || 0) + ' 字节）');
+      }, function(e){ parts.push('[get] 失败：' + (e && e.message || e)); }).then(next);
+      return;
+    }
+    if (c.op === 'sub' || c.op === 'agent' || c.op === 'suball'){
         var sRole = String(c.path || '').trim().split(/\s+/)[0];
         if (!sRole){ parts.push('[agent] 缺少角色名'); next(); return; }
         if (c.op === 'suball'){
@@ -10184,6 +10238,7 @@ var EXT = (function(){
     { id: 'web',        kind: 'tool', title: '抓网页正文', brief: 'URL → 纯文本', modes: ['work','agent'] },
     { id: 'search',     kind: 'tool', title: '联网搜索',   brief: '关键词 → 标题/链接/摘要', modes: ['work','agent'] },
     { id: 'get',        kind: 'tool', title: '抓文件',     brief: 'URL → 落盘（图片/PDF/Office/音视频），文档抽正文', modes: ['work','agent'] },
+  { id: 'browser',    kind: 'tool', title: '内置浏览器', brief: 'URL → 应用内窗口（带 cookie/登录态）', modes: ['work','agent'] },
     { id: 'download',   kind: 'tool', title: '下载视频',   brief: 'B 站/直链 → mp4，HLS 自动拼接', modes: ['work'] },
     { id: 'play',       kind: 'tool', title: '应用内播放', brief: 'URL → 悬浮播放窗口', modes: ['work'] },
     { id: 'run',        kind: 'tool', title: '沙箱运行',   brief: 'html/js/css → 控制台输出', modes: ['work'] },
@@ -10348,6 +10403,7 @@ var SPECS = {
   search: { form: 'search <关键词>', arg: '一句查询词', ret: '[search] 关键词（N 条）+ 标题/链接/摘要块', note: '走 设置 → 连接与模型 → 联网搜索 里配的服务商。', limit: '服务商或密钥没配好会返回「未返回结果」；结果条数与摘要长度由服务商决定。' },
   get: { form: 'get <url>', arg: '文件直链（http/https）', ret: '[get] 已保存：路径（大小，类型）', note: '图片/PDF/Office/压缩包/音视频都能落盘；文档顺手抽正文（前 4000 字）。', limit: '图片会以 data URL 附进结果供模型看图；网页版没有宿主桥时不可用。' },
   download: { form: 'download <视频页 URL 或 BV 号>', arg: 'B 站页面地址，或 BV 号（如 BV1xx411x7xx）', ret: '[download] 已保存：mp4 路径（大小，清晰度）', note: '宿主侧下载并自动拼 HLS 分片。', limit: '仅 Work 模式；需要宿主 exe，网页版没有这个能力。' },
+  browser: { form: 'browser <url>', arg: '一个 http/https 绝对地址', ret: '[browser] 已在应用内窗口打开：url', note: '开一个应用内浏览器窗口（同一 WebView2，带 cookie 与登录态），用来看网页、榜单、需要登录的页面。', limit: '仅 Work / Agent；窗口由宿主 exe 打开，纯网页版退化为新标签页。地址必须是绝对 URL。' },
   play: { form: 'play <url>', arg: 'http/https 地址', ret: '[play] 已在播放窗口打开：url', note: '在顶层播放窗口打开，带 Referer 与登录态。', limit: '仅 Work 模式；地址必须是绝对 URL。' },
   run: { form: 'run <html|svg|js|css|c>' + '\n' + '（紧跟代码体）', arg: '第一行写类型，剩下是源码', ret: '[run-result] 类型 成功/失败（Nms）+ 控制台输出', note: '在沙箱 iframe / 脚本引擎里真跑一遍，拿真实输出，别在正文里手算。', limit: '支持 html/svg/js/css/c；同型错误连续多次会先自愈重试一次，仍失败就停下。' },
   preview: { form: 'preview <工作区相对路径>', arg: '如 index.html（不许 ..）', ret: '[preview] 已在运行面板打开：路径', note: '右侧运行面板的内置浏览器直接看产物。', limit: '仅 Work 模式；文件必须已在会话工作区里（先 vfs-write）。' },
@@ -10360,6 +10416,7 @@ var SPECS = {
   'fs-edit': { form: 'fs-edit <相对路径>' + '\n--- old（原文）' + '\n--- new（新文）', arg: '路径 + old/new 两段', ret: '[fs-result] edit 路径 + 结果', note: '唯一匹配替换，省 token 的首选。', limit: '匹配不到或匹配到多处会失败，需要补上下文重试，不要退回整文件重写。' },
   skill: { form: 'skill <技能名>', arg: '技能条目的 name', ret: '该技能的说明正文', note: '按名字把技能说明取进上下文，相当于临时加载一份手册。', limit: '技能不存在会回错误；只读，不改技能内容。' },
   sub: { form: 'sub <角色> <任务>', arg: '角色名 + 任务描述（可多行）', ret: '子智能体的最终答复（不回过程）', note: '开一个独立上下文的子智能体跑一段活，只把结果拿回来。', limit: '仅 Work；子智能体受各自的工具白名单限制。' },
+  agent: { form: 'agent <角色> <任务>', arg: '角色名（explore/coder/architect/tester/review/general）+ 任务', ret: '子智能体的最终答复（不回过程）', note: '按角色派活，角色决定工具白名单与是否可写盘。', limit: '仅 Work / Agent；read 模式只放行只读角色，write 模式不派活。' },
   suball: { form: 'suball 多个（角色 + 任务）段', arg: '按行/段写多组角色与任务', ret: '各组结果汇总', note: '几个互不依赖的活同时跑。', limit: '并行度与超时受宿主限制；结果按组回灌。' }
 };
 /* v1.26：条目详情 —— 文本 / 结构 / 声明式代码，只读 */
@@ -10690,7 +10747,8 @@ var MODE = (function(){
   var AGENT_P = '子智能体（Agent）：先只读探查（```fs-list / ```fs-read / ```git diff），再给分步计划；' +
     '要改的才动手，改前先读原文，改动用最小 diff；' +
     '只有当任务能拆成互不依赖的几块（≥2 处并行检索或修改）时才用 ```agent explore|coder|review 派出去，' +
-    '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。';
+    '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。' +
+  '要看真实网页就 \u0060\u0060\u0060browser <url> 开应用内窗口，别派子智能体去「访问」网址。';
   /* v1.14：Work = 画布 + 沙箱脚本合并。核心约定：成品进工作区，正文只给结论 */
   var AGENT_W_P = '直接落地：先读要改的文件，然后用最小 diff 改完，改完说清改了哪些文件、怎么验证；不需要先出计划。';
 var AGENT_READ_P = '本轮只读：读文件用 ```fs-list / ```fs-read，查外部信息用 ```search / ```web / ```get；'
@@ -10700,8 +10758,13 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
     '不碰真实磁盘，也不要在正文里贴整段代码或整篇文档。\n' +
     '2) 需要算数、批处理、跑一遍验证，就用 ```run 在沙箱里执行脚本、读它的输出，别在正文里手算。\n' +
     '3) 正文只写结论与说明：做了什么、文件叫什么、怎么用，2-5 行说完；文件列表交给右侧「工作区」面板展示。\n' +
-    '4) 只有用户明确说「贴出来看看」时才在正文里展开代码。';
-  var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
+    '4) 只有用户明确说「贴出来看看」时才在正文里展开代码。\n' +
+    '5) 要看网页（榜单、文档、需要登录的页面）用 ```browser <url> 开应用内浏览器窗口；只要文字内容用 ```web。';
+  /* v1.28.1：Chat 没有工具，模型常自己编围栏和「已派出去」的话 —— 直接写死 */
+var CHAT_NO_TOOLS_P = '本轮是纯对话，没有任何工具：不能读写文件、不能联网、不能派子智能体、不能打开内置浏览器。\n'
+  + '不要写 \u0060\u0060\u0060agent / \u0060\u0060\u0060sub / \u0060\u0060\u0060web / \u0060\u0060\u0060search / \u0060\u0060\u0060browser 之类的工具围栏，也不要声称「已经派出去」「正在抓取」。\n'
+  + '需要动手或联网时，直接告诉用户切到 Work 或 Agent。';
+var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
   var SUBS = {
     chat: [],
     work: [],   // v1.14：画布 + 沙箱脚本合并成一个 Work（提示词见 WORK_P）
@@ -10724,7 +10787,7 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
     var m = S.cfg.mode || 'chat';
     var out = [];
     if (m === 'work') out.push(MODE.text('work'));
-    if (m === 'chat' && S.cfg.research) out.push(MODE.text('research'));
+    if (m === 'chat') out.push(MODE.text(S.cfg.research ? 'research' : 'chat'));
     if (m === 'agent'){
       var am = S.cfg.agentMode || 'auto';
       if (am === 'write'){
@@ -10764,7 +10827,7 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
 
   var RULES = [
     ['agent', /(工作区|仓库|改代码|重构|单元测试|跑测试|读一下|目录结构|\bgit\b|\bdiff\b|补丁|\.(js|ts|tsx|py|java|go|rs|md|json|html)\b)/i],
-    ['work',  /(抓|爬|下载|检索|搜索|查一下|网页|链接|视频|图片|截图|表格|\bpdf\b|docx|excel|接口|\bapi\b|脚本|生成.*(html|图表|报告))/i]
+    ['work',  /(抓|爬|下载|检索|搜索|查一下|网页|链接|打开|访问|展开|浏览器|视频|图片|截图|表格|\bpdf\b|docx|excel|接口|\bapi\b|脚本|生成.*(html|图表|报告))/i]
   ];
   function personas(){ return S.cfg.personas || []; }
   function persona(id){
@@ -10775,6 +10838,8 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
   function route(text){
     var t = String(text || '');
     for (var i = 0; i < RULES.length; i++) if (RULES[i][1].test(t)) return RULES[i][0];
+    /* v1.28.1：句子里带网址、或明说要打开/访问，就别落到 Chat —— Chat 没有工具，模型只能空口答应 */
+    if (/https?:\/\//i.test(t) || /(打开|访问|展开|浏览器|browser)/i.test(t)) return 'work';
     return 'chat';
   }
   function promptFor(){
@@ -10796,11 +10861,17 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
   }
   return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
            SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied,
-           texts: { work: WORK_P, agent: AGENT_P, research: RESEARCH_P, agentWrite: AGENT_W_P, agentRead: AGENT_READ_P },
+           texts: { chat: CHAT_NO_TOOLS_P, work: WORK_P, agent: AGENT_P, research: RESEARCH_P, agentWrite: AGENT_W_P, agentRead: AGENT_READ_P },
   /* v1.28：系统提示词各段可改写（存 cfg.sysEdits），空字符串也算「改过」 */
   edited: function(key){ var o = S.cfg.sysEdits || {}; return Object.prototype.hasOwnProperty.call(o, key); },
   text: function(key){ var o = S.cfg.sysEdits || {}; if (Object.prototype.hasOwnProperty.call(o, key)) return o[key] || ''; return MODE.texts[key] || ''; },
-           efforts: efforts };
+           /* v1.28.1：某个工具在当前模式是否可用（渲染时给「不会执行」的围栏打标） */
+    toolAllowed: function(op){
+      var list = (typeof EXT !== 'undefined' && EXT.BUILTIN) ? EXT.BUILTIN : [];
+      for (var i = 0; i < list.length; i++) if (list[i].id === op) return (list[i].modes || []).indexOf(S.cfg.mode) >= 0;
+      return true;
+    },
+    efforts: efforts };
 })();
 
 /* v1.17：记忆 —— 工作记忆（每会话一张任务卡）+ 情景记忆（历史任务卡，词法检索）
@@ -11454,9 +11525,9 @@ var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
-  var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
+  var PROTOCOL = "Work 协议（v2.3 精简）：你在页面沙箱里完成短任务；沙箱本身不联网、不写磁盘。\\n工具（围栏首行是参数）：\\n```browser URL —— 在应用内浏览器窗口打开网页（需要登录态/看页面本身时用）。\n```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 ```search。\\n```search 查询词 —— 联网检索，回标题+链接+摘要。\\n```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\\n```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件≤1MB）。\\n```vfs-list —— 列工作区。\\n```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\\n```preview 相对路径 —— 在右侧面板打开产物自检。\\n```browser URL —— 在应用内浏览器窗口打开任意网页（带 cookie/登录态，看榜单/文档/需登录页面用它，别派子智能体去「访问」）。\n```play URL —— 在应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\\n```download URL 或 BV —— 保存视频/音频到「下载/SoloChat」；说「爬/下载/保存视频」一律用它，别用 web 抓视频页，网页地址会判失败。\\n```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json），文档抽正文 4000 字回灌，图片会作为图片给你看。\\n绝不回答「我无法访问网络」——先调工具；只有工具真的失败才回报原因。\\nB 站：榜单 ```web https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all&ps=1 取 bvid，再 ```download；首页是 JS 渲染，别浪费轮次。\\n回答方式：问「是什么/查一下/看看」就把结论直接写在回复里，不要包装成 html/md 产物；只有明确要文件/页面/导出/下载时才落盘并列清单。\\n纪律：外部事实先 web/search 取真实内容，禁止凭记忆编造；每轮说明哪些已验证（引用输出）、哪些未验证；没真跑不许写「已测试」。";
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|search|play|download|get|skill|suball|sub|agent|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|search|play|download|get|browser|skill|suball|sub|agent|vfs-(?:write|list))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -11630,11 +11701,13 @@ var WORK = (function(){
     runCalls(calls, msg.sid);
   }
   function runCalls(calls, sid0){
+    UI.holdBusy(1);
     var parts = [], events = [], imgs = [], done = 0, w0 = stOf(sid0);
     /* v0.2.1：一次工具结果 = 一条 role='tool' 消息；文本给模型，events 给 UI 画一行行卡片 */
     function add(text, ev){ parts.push(text); if (ev) events.push(ev); }
   function addImg(dataUrl){ if (dataUrl && imgs.length < 4) imgs.push(dataUrl); }
     function finish(extra){
+      UI.holdBusy(-1);
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
       if (!/^\[(run-result|vfs|web|search|preview|play|download|get)\]/.test(body)) body = '[run-result]\n' + body;
@@ -11849,6 +11922,14 @@ var WORK = (function(){
         }).then(next);
         return;
       }
+      /* ---- v1.28.1：内置浏览器窗口（任意网页，带 cookie/登录态） ---- */
+      if (c.op === 'browser'){
+        var bu = NET.safeUrl(String(c.arg || '').trim() || String(c.body || '').trim());
+        if (!bu){ add('[browser] 地址无效（需 http/https 绝对地址）：' + (c.arg || '（空）'), { op: 'browser', ok: false, brief: '地址无效' }); next(); return; }
+        var bo = NET.openExternal(bu, 'window');
+        add('[browser] 已在应用内窗口打开：' + bu, { op: 'browser', url: bu, ok: !!bo });
+        next(); return;
+      }
       /* ---- v0.2.3：在应用内播放窗口打开视频/网页（顶层 WebView2，带 Referer 与登录态） ---- */
       if (c.op === 'play'){
         var pu = NET.safeUrl(c.arg);
@@ -11907,9 +11988,10 @@ var WORK = (function(){
 try {
   if (localStorage.getItem('sc.debug') === '1'){
     window.SC_WORK = WORK;
-    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps,
+    window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps, md: MD, busy: UI.holdBusy,
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
       bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
+      sid: function(){ return S.sid; },
       cfg: function(){ return S.cfg; },
       setCfg: function(o){ setCfg(o); } };
   }
