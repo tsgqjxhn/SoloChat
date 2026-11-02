@@ -3173,7 +3173,7 @@ try { SC_SNAPS = JSON.parse(localStorage.getItem('sc.snaps') || '{}') || {}; } c
 function saveSnaps(){ try { localStorage.setItem('sc.snaps', JSON.stringify(SC_SNAPS)); } catch (e) {} }
 /* v0.4.0a：快照键 = 会话 + 工作区 + 路径，避免跨会话互相覆盖 */
 function snapKey(sid, ws, path){ return (sid || '') + '|' + (ws || '') + '|' + path; }
-function snapGet(sid, ws, path){ return SC_SNAPS[snapKey(sid, ws, path)] || SC_SNAPS[path] || ''; }
+function snapGet(sid, ws, path){ var v = SC_SNAPS[snapKey(sid, ws, path)] || SC_SNAPS[path]; return Array.isArray(v) ? ((v[v.length - 1] || {}).s || '') : (v || ''); }
 function snapAny(path){ if (SC_SNAPS[path]) return true; for (var k in SC_SNAPS) if (k.slice(-1 - path.length) === '|' + path) return true; return false; }
 
 var MD = (function(){
@@ -6899,7 +6899,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.11', ua = navigator.userAgent || '';
+      var ver = 'v0.3.12', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10668,7 +10668,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         return;
       }
       NET.fs('write', path, block.body, ws, outside).then(function(r){
-        if (r && r.snap){ SC_SNAPS[snapKey(msg.sid, ws, path)] = r.snap; saveSnaps(); }
+if (r && r.snap){ var sk = snapKey(msg.sid, ws, path); var arr = SC_SNAPS[sk]; if (!Array.isArray(arr)) arr = arr ? [{ t: Date.now(), s: arr }] : []; arr.push({ t: Date.now(), s: r.snap, b: (r.bytes || 0) }); while (arr.length > 5) arr.shift(); SC_SNAPS[sk] = arr; saveSnaps(); } // v0.3.12：每个会话/路径留最近 5 次写入快照
         try { stOf(msg.sid).planOk = true; } catch (e) {}   /* v1.29.0：确认过一次就解锁本会话自动写入 */
         markDone(msg, path, 'fs-done'); UI.toast('已写入 ' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
       }, function(err){
@@ -10682,7 +10682,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
   var um = byId(mid);
   var uws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(um && um.sid); // v0.4.0a：按消息所属会话
   var uk = snapKey(um && um.sid, uws, path);
-    var snap = SC_SNAPS[uk] || SC_SNAPS[path];
+var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[_sv.length - 1] || {}).s || '') : _sv; // v0.3.12：取最近一条
     if (!snap){ UI.toast('没有可用的快照（可能已被清理）', true); return; }
     var msg = byId(mid);
     UI.confirmBox({
