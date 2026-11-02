@@ -552,6 +552,7 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 /* 输入区 */
 #composer{flex:none;border-top:1px solid var(--hairline);padding:10px 16px 12px;position:relative;z-index:36}
 #chips{display:flex;gap:8px;flex-wrap:wrap;max-width:var(--content-w);margin:0 auto 8px}
+#route-hint[hidden],#route-hint:empty{display:none}   /* v1.29.1：display:flex 会盖掉 hidden，必须显式关掉 */
 #route-hint{max-width:var(--content-w);margin:0 auto 8px;display:flex;align-items:center;gap:10px;
   padding:7px 10px;border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--soft);font-size:12.5px;color:var(--text-2)}
 .tool-warn{display:flex;gap:6px;align-items:flex-start;margin:6px 0 2px;padding:6px 9px;
@@ -6696,7 +6697,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.0', ua = navigator.userAgent || '';
+      var ver = 'v1.29.1', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
