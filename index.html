@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.28';
+var APP_VER = 'v0.3.29';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -7236,7 +7236,7 @@ p.appendChild(addBox);
   if (m.model) head.appendChild(el('span', { class: 'msg-tokens', text: String(m.model).split('/').pop().slice(0, 24), title: m.model })); // v0.3.21
     if (S.cfg.msgFork !== false && !fsres && m.role !== 'system')
       head.appendChild(el('button', { class: 'msg-fork', title: '从这里新开一个分支会话', 'data-fork': m.id }, [icon('branch'), '分支']));
-  try { var _wr = (String(m.content || '').match(/```fs-write[ \t]+[^\n]+/g) || []).length; if (_wr > 1 && m.role !== 'user' && m.status === 'ok') head.appendChild(el('button', { class: 'msg-fork', title: '把这条回复里的 ' + _wr + ' 处写入一次应用', 'data-act': 'fs-applyall', 'data-id': m.id }, ['应用全部（' + _wr + '）'])); } catch (e) {} // v0.3.23：对标 Cursor 的 Accept all
+  try { var _wr = (String(m.content || '').match(/```fs-write(?=[ \t]|$)/gm) || []).length; if (_wr > 1 && m.role !== 'user') head.appendChild(el('button', { class: 'msg-fork', title: '把这条回复里的 ' + _wr + ' 处写入一次应用', 'data-act': 'fs-applyall', 'data-id': m.id }, ['应用全部（' + _wr + '）'])); } catch (e) {} // v0.3.29：围栏行只有名字、路径在下一行
     n.appendChild(head);
     if (m.reasoning)
       n.appendChild(el('details', { class: 'reason' }, [
@@ -7498,9 +7498,10 @@ p.appendChild(addBox);
     msg.status = status;
   if (st && st.t0) msg.ms = Date.now() - st.t0; // v0.3.8：本轮耗时（对标 Claude）
   try { if (msg.role === 'assistant' && !msg.model) msg.model = S.cfg.currentModel || ''; } catch (e) {} // v0.3.21：记录是哪个模型答的
+  try { var _hd = $('#msg-list') && $listNode(msg.id) && $listNode(msg.id).querySelector('.msg-head'); if (_hd && msg.model && !_hd.querySelector('.msg-model')) { var _ms = document.createElement('span'); _ms.className = 'msg-tokens msg-model'; _ms.textContent = String(msg.model).split('/').pop().slice(0, 24); _ms.title = msg.model; _hd.appendChild(_ms); } } catch (e) {} // v0.3.29：流式建节点时 model 还没赋值，收尾补上
     if (errInfo) msg.errMsg = errInfo.msg;
     if (usage && usage.total_tokens) msg.tokens = usage.total_tokens;
-  if (usage){ if (usage.prompt_tokens) msg.tokIn = usage.prompt_tokens; if (usage.completion_tokens) msg.tokOut = usage.completion_tokens; } // v0.3.28：分别记输入/输出，对标 AI Studio
+  var _uu = (st && st.msg && st.msg.usage) || usage || null; if (_uu){ if (_uu.prompt_tokens) msg.tokIn = _uu.prompt_tokens; if (_uu.completion_tokens) msg.tokOut = _uu.completion_tokens; if (_uu.total_tokens) msg.tokens = _uu.total_tokens; } // v0.3.29：明细在 msg.usage 里
     if (msg.content.length > LIMITS.MSG_TEXT){
       msg.content = msg.content.slice(0, LIMITS.MSG_TEXT); // 超限截断（§4.3）
       msg.truncated = true;
@@ -8110,7 +8111,7 @@ function sendMessage(){
       compactCtx(s, msgs, function(ok){
         S.compacting = false;
     /* v0.3.19：压缩是异步的（数秒到数十秒），期间用户可能切走会话；此时不能再按前台续跑，否则气泡会插进当前显示的会话 */
-    var nowBg = bg || (s.id !== S.sid);
+    var nowBg = (s.id !== S.sid); // v0.3.29：回调发生时是否在前台，与原来是否后台无关
     if (ok && !nowBg) toast('摘要完成，继续发送');
     runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, nowBg);
       });
@@ -10705,6 +10706,7 @@ if (r && r.snap){ var sk = snapKey(msg.sid, ws, path); var arr = SC_SNAPS[sk]; i
   /* v1.28.4：撤销这次写入 —— 用写入前快照恢复，只覆盖 SoloChat 自己写过的那一份 */
   /* v0.3.23：一条回复里多处写入，一次应用完（对标 Cursor 的 Accept all） */
   function applyAll(mid){
+    if (S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭：切到 Agent 模式才能应用写入', true); return; } // v0.3.29
     var msg = byId(mid); if (!msg) return;
     var seen = {}, n = 0;
     scan(msg.content).forEach(function(c){
@@ -12607,9 +12609,9 @@ var WORK = (function(){
 
 /* 调试钩子（仅当 localStorage['sc.debug']==='1'）：便于自动化测试 Work 沙箱的纯函数 */
 try {
+try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题栏直接显示当前构建版本，便于确认装的是哪个包
   if (localStorage.getItem('sc.debug') === '1'){
     window.SC_WORK = WORK;
-try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题栏直接显示当前构建版本，便于确认装的是哪个包
     window.SC_DBG = { EXT: EXT, SUB: SUB, MODE: MODE, modelCaps: NET.modelCaps, md: MD, busy: UI.holdBusy, stage: STAGE_PROTOCOL,
       ws: function(){ var c = curSession(); return (c && c.workspace) || ''; },
       bindWs: function(path){ var c = curSession(); if (!c) return ''; c.workspace = path; DB.putSession(c); return c.workspace; },
