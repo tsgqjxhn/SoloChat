@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.41';
+var APP_VER = 'v0.3.42';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10501,7 +10501,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (call.op === 'fs-edit'){ /* v0.3.0：局部替换，体内 --- old / --- new 两段 */
         var bd = String(call.body).replace(/\r/g, '');
         var kNew = bd.indexOf('\n--- new\n'), kOld = bd.indexOf('--- old\n');
-        if (kNew >= 0 && kOld >= 0){ call.oldText = bd.slice(kOld + 8, kNew); call.newText = bd.slice(kNew + 9); }
+      if (kNew >= 0 && kOld >= 0){ call.oldText = bd.slice(kOld + 8, kNew); call.newText = bd.slice(kNew + 9).replace(/\n$/, ''); } // v0.3.42：new 段末尾那一个换行是围栏前的，不该算进内容
       }
       out.push(call);
     }
@@ -10550,7 +10550,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var permMode = S.cfg.permMode || (S.cfg.planGate === false ? 'auto' : 'ask');
   if (permMode === 'readonly'){
     /* v0.3.6：只读模式 —— 不写文件、不执行 cmd/git，只保留读类工具 */
-    reads = reads.filter(function(c){ return c.op !== 'cmd' && c.op !== 'git' && c.op !== 'fs-write'; });
+    reads = reads.filter(function(c){ return c.op !== 'cmd' && c.op !== 'git' && c.op !== 'fs-write' && c.op !== 'fs-edit'; }); // v0.3.42：fs-edit 也是写
     if (writes.length){
       try {
         msg.content = String(msg.content || '') + '\n\n> 🔒 只读模式：本轮 ' + writes.length + ' 处写入未执行（设置 → 通用设置 → 权限）';
@@ -10853,7 +10853,7 @@ var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[
        Issue 16: 与 findWrite 一致取"最后一个"同路径 fs-write 块（findWrite 反向扫描返回末位），
        防同名块时读体/改头错位；正则容忍 \r\n 与路径行尾随空白。 */
     var esc = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    var re = new RegExp('```(?:fs-write|fs-done|fs-rej|fs-back)[ \\t]*\\r?\\n[ \\t]*' + esc + '[ \\t]*\\r?\\n', 'g');
+  var re = new RegExp('```(?:fs-write|fs-done|fs-rej|fs-back)(?:[ \\t]*\\r?\\n[ \\t]*|[ \\t]+)' + esc + '[ \\t]*\\r?\\n', 'g'); // v0.3.42：兼容围栏行直接写路径
     var m, last = null;
     while ((m = re.exec(msg.content || ''))) last = m;
     if (!last) return;
@@ -10871,7 +10871,7 @@ var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[
     if (open || !done.length) return; // 仍有未处理的写入申请
     if (s0.turns >= LIMITS.FS_MAX_TURNS){ UI.toast('已达工具轮次上限（' + LIMITS.FS_MAX_TURNS + '）', true); return; }
     for (i = 0; i < done.length; i++)
-      lines.push('[fs-result] write ' + done[i].path + (done[i].op === 'fs-done' ? '（用户已确认写入）' : '（用户已拒绝写入，文件未修改）'));
+  lines.push('[fs-result] write ' + done[i].path + (done[i].op === 'fs-done' ? '（用户已确认写入）' : (done[i].op === 'fs-back' ? '（用户撤销了这次写入，文件已恢复为写入前内容）' : '（用户已拒绝写入，文件未修改）'))); // v0.3.42：撤销≠拒绝
     s0.turns++;
     note(lines.join('\n'), msg.sid);
     UI.startStreamFor(msg.sid); // 把确认结果告知模型，收尾（v2.2：目标会话）
