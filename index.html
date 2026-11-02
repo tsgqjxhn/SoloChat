@@ -621,7 +621,8 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .set-foot{border-top:1px solid var(--hairline);padding:10px 14px;display:flex;justify-content:flex-end}
 .f-row{margin-bottom:14px}
 .f-row.ext-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
-.f-row.ext-row .hint{flex:1 1 220px}
+.f-row.ext-row label{flex:0 0 auto}
+.f-row.ext-row .hint{flex:1 1 auto;min-width:0}
 .f-row.ext-row .f-acts{margin-left:auto;display:flex;gap:6px;align-items:center}
 .f-row label{display:block;font-size:13px;font-weight:500;color:var(--ink);margin-bottom:5px}
 .f-row .hint{font-size:12px;color:var(--faint);margin-top:4px}
@@ -6468,7 +6469,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.26.0', ua = navigator.userAgent || '';
+      var ver = 'v1.27.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10323,6 +10324,27 @@ function fileSafe(name, fallback){
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(x)) x = '_' + x;
   return x;
 }
+/* v1.27：内置工具的「真实契约」——调用写法 / 参数 / 返回 / 限制。
+   内置工具不是一段可导出的 JSON，它们由扫描围栏 + 宿主桥实现，这里写清楚模型该怎么调。 */
+var SPECS = {
+  web: { form: 'web <url>', arg: '一个 http/https 绝对地址', ret: '[web] 地址（成功，N 字）+ 正文纯文本', note: '抓网页转纯文本，适合读文章/文档页。', limit: '只抓文本：图片、音视频等二进制会直接跳过（要存文件用 get，要看视频用 play）；反爬、登录墙、断网会失败，可退回 search 拿摘要。' },
+  search: { form: 'search <关键词>', arg: '一句查询词', ret: '[search] 关键词（N 条）+ 标题/链接/摘要块', note: '走 设置 → 连接与模型 → 联网搜索 里配的服务商。', limit: '服务商或密钥没配好会返回「未返回结果」；结果条数与摘要长度由服务商决定。' },
+  get: { form: 'get <url>', arg: '文件直链（http/https）', ret: '[get] 已保存：路径（大小，类型）', note: '图片/PDF/Office/压缩包/音视频都能落盘；文档顺手抽正文（前 4000 字）。', limit: '图片会以 data URL 附进结果供模型看图；网页版没有宿主桥时不可用。' },
+  download: { form: 'download <视频页 URL 或 BV 号>', arg: 'B 站页面地址，或 BV 号（如 BV1xx411x7xx）', ret: '[download] 已保存：mp4 路径（大小，清晰度）', note: '宿主侧下载并自动拼 HLS 分片。', limit: '仅 Work 模式；需要宿主 exe，网页版没有这个能力。' },
+  play: { form: 'play <url>', arg: 'http/https 地址', ret: '[play] 已在播放窗口打开：url', note: '在顶层播放窗口打开，带 Referer 与登录态。', limit: '仅 Work 模式；地址必须是绝对 URL。' },
+  run: { form: 'run <html|svg|js|css|c>' + '\n' + '（紧跟代码体）', arg: '第一行写类型，剩下是源码', ret: '[run-result] 类型 成功/失败（Nms）+ 控制台输出', note: '在沙箱 iframe / 脚本引擎里真跑一遍，拿真实输出，别在正文里手算。', limit: '支持 html/svg/js/css/c；同型错误连续多次会先自愈重试一次，仍失败就停下。' },
+  preview: { form: 'preview <工作区相对路径>', arg: '如 index.html（不许 ..）', ret: '[preview] 已在运行面板打开：路径', note: '右侧运行面板的内置浏览器直接看产物。', limit: '仅 Work 模式；文件必须已在会话工作区里（先 vfs-write）。' },
+  'vfs-write': { form: 'vfs-write <相对路径>' + '\n' + '（紧跟完整内容）', arg: '第一行路径，剩下是全文', ret: '[vfs] 已写入 路径（大小）', note: '写进本会话的内存工作区（IndexedDB），不碰真实磁盘；可一次写多个文件。', limit: '同路径再写就是整文件覆盖；局部改请用 patch。' },
+  'vfs-list': { form: 'vfs-list', arg: '无', ret: '[vfs] 工作区文件（N 项）+ 路径（大小）列表', note: '看当前会话工作区里都有什么。', limit: '只列本会话的工作区，不含真实磁盘。' },
+  patch: { form: 'patch <相对路径>' + '\n' + '（紧跟 unified diff）', arg: '第一行路径，剩下是 @@ 开头的 diff', ret: '[vfs] 已打补丁 路径（大小）', note: '局部修改省 token。', limit: '目标文件必须已存在；diff 上下文匹配不上会失败。' },
+  'fs-read': { form: 'fs-read <相对路径>', arg: '相对工作区根的路径', ret: '[fs-result] read 路径 + 文件内容', note: '读真实磁盘上的文件。', limit: '长文件会被截断：先定位再改；读不了 .env/密钥这类文件。' },
+  'fs-list': { form: 'fs-list <相对路径>' , arg: '可空，空 = 工作区根', ret: '[fs-result] list 路径（N 项）+ 条目', note: '动手前先看结构。', limit: '只能在工作区内；出界要逐次确认。' },
+  'fs-write': { form: 'fs-write <相对路径>' + '\n' + '（紧跟完整内容）', arg: '第一行路径，剩下是全文', ret: '[fs-result] write 路径 + 结果', note: '新建文件或整文件替换。', limit: '工作区内直接写；工作区外每次都要你确认（显示完整路径与内容）。大改用这个，小改别用。' },
+  'fs-edit': { form: 'fs-edit <相对路径>' + '\n--- old（原文）' + '\n--- new（新文）', arg: '路径 + old/new 两段', ret: '[fs-result] edit 路径 + 结果', note: '唯一匹配替换，省 token 的首选。', limit: '匹配不到或匹配到多处会失败，需要补上下文重试，不要退回整文件重写。' },
+  skill: { form: 'skill <技能名>', arg: '技能条目的 name', ret: '该技能的说明正文', note: '按名字把技能说明取进上下文，相当于临时加载一份手册。', limit: '技能不存在会回错误；只读，不改技能内容。' },
+  sub: { form: 'sub <角色> <任务>', arg: '角色名 + 任务描述（可多行）', ret: '子智能体的最终答复（不回过程）', note: '开一个独立上下文的子智能体跑一段活，只把结果拿回来。', limit: '仅 Work；子智能体受各自的工具白名单限制。' },
+  suball: { form: 'suball 多个（角色 + 任务）段', arg: '按行/段写多组角色与任务', ret: '各组结果汇总', note: '几个互不依赖的活同时跑。', limit: '并行度与超时受宿主限制；结果按组回灌。' }
+};
 /* v1.26：条目详情 —— 文本 / 结构 / 声明式代码，只读 */
 function describe(id){
   var it = null, isBuiltin = false, i;
@@ -10331,10 +10353,17 @@ function describe(id){
   if (!it) throw new Error('没有这个条目');
   var B = [];
   if (isBuiltin){
+    var sp = SPECS[it.id] || null;
     B.push({ k: '用途', v: (it.title || it.id) + ' — ' + (it.brief || '') });
+    if (sp){
+      B.push({ k: '调用写法', v: '```' + sp.form.replace(/\n/g, '\n') + '```' });
+      B.push({ k: '参数', v: sp.arg });
+      B.push({ k: '返回', v: sp.ret });
+      B.push({ k: '说明', v: sp.note });
+      B.push({ k: '限制 / 实现', v: sp.limit });
+    }
     B.push({ k: '可用模式', v: (it.modes || []).join(' / ') || '全部' });
-    B.push({ k: '怎么调', v: '在回复里写 ```' + it.id + ' 参数```，宿主执行后把结果回灌' });
-    B.push({ k: '结构（内置，只读）', v: JSON.stringify(it, null, 2) });
+    B.push({ k: '条目元数据', v: JSON.stringify(it, null, 2) + '\n\n（上面这段只是扩展页里的登记信息，工具本体在页面扫描围栏 + 宿主桥里，不是一段可导出的 JSON）' });
     return { title: it.title || it.id, kind: 'builtin', blocks: B };
   }
   var src = it.pkg ? (it.pkg + (it.pkgVer ? '（' + it.pkgVer + '）' : '')) : '（手工添加，无包）';
