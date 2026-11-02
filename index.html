@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.16';
+var APP_VER = 'v0.3.17';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -3177,6 +3177,7 @@ function saveSnaps(){ try { localStorage.setItem('sc.snaps', JSON.stringify(SC_S
 function snapKey(sid, ws, path){ return (sid || '') + '|' + (ws || '') + '|' + path; }
 function snapGet(sid, ws, path){ var v = SC_SNAPS[snapKey(sid, ws, path)] || SC_SNAPS[path]; return Array.isArray(v) ? ((v[v.length - 1] || {}).s || '') : (v || ''); }
 function snapAny(path){ if (SC_SNAPS[path]) return true; for (var k in SC_SNAPS) if (k.slice(-1 - path.length) === '|' + path) return true; return false; }
+function snapCount(path){ var n = 0; for (var k in SC_SNAPS){ if (k.slice(-1 - path.length) !== '|' + path) continue; var v = SC_SNAPS[k]; n = Math.max(n, Array.isArray(v) ? v.length : 1); } return n; } // v0.3.17：可回退次数
 
 var MD = (function(){
   /* v2.1：轻量 LaTeX 子集 → HTML（零依赖）。目标是把常见公式渲染成可读文本，不是完整排版引擎。
@@ -10698,7 +10699,8 @@ var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[
       if (!ok) return;
       if (btn){ btn.disabled = true; btn.textContent = '撤销中…'; }
       NET.fs('restore', path, snap, uws, isOutside(path)).then(function(r){
-        delete SC_SNAPS[uk]; delete SC_SNAPS[path]; saveSnaps();
+        var _sk = SC_SNAPS[uk] ? uk : (SC_SNAPS[path] ? path : null);
+        if (_sk){ var _v = SC_SNAPS[_sk]; if (Array.isArray(_v)){ _v.pop(); if (!_v.length) delete SC_SNAPS[_sk]; } else delete SC_SNAPS[_sk]; } saveSnaps(); // v0.3.17：一次退一步
         try { D('undos'); } catch (e) {}
         if (msg) markDone(msg, path, 'fs-back');
         UI.toast('已撤销：' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
