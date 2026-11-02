@@ -73,7 +73,20 @@ input,textarea,select{font:inherit;color:inherit}
   box-shadow:14px 0 40px rgba(0,0,0,.14);
 }
 #main{flex:1; min-width:0; display:flex; flex-direction:column}
-body.sb-collapsed #sidebar{display:none}
+body.sb-collapsed #sidebar{width:56px;min-width:56px;padding:0;overflow:hidden}
+body.sb-collapsed #sidebar>*:not(.sb-rail){display:none}
+body.sb-collapsed #tb-title{display:none}
+.sb-rail{display:none;flex:1;flex-direction:column;align-items:center;gap:4px;padding:10px 0;width:100%}
+body.sb-collapsed .sb-rail{display:flex}
+.rail-btn{width:40px;height:40px;border:0;background:none;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;color:var(--muted);cursor:pointer}
+.rail-btn:hover{background:var(--soft);color:var(--ink)}
+.rail-btn svg{width:18px;height:18px}
+.rail-sp{flex:1}
+#rn-rail{position:fixed;right:0;top:52px;bottom:0;width:46px;display:none;flex-direction:column;align-items:center;
+  gap:6px;padding:10px 0;border-left:1px solid var(--hairline);background:var(--canvas);z-index:29}
+body.rn-open #rn-rail,body.m-chat #rn-rail{display:none}
+body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 
 /* 侧栏 */
 .sb-top{padding:14px 12px 10px}
@@ -573,14 +586,20 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .set-main{display:flex;flex-direction:column;flex:1;min-height:0}
 .set-cols{display:flex;flex:1;min-height:0}
 .set-nav{width:168px;flex:none;border-right:1px solid var(--hairline);padding:14px 10px}
-.set-top{display:flex;align-items:center;gap:2px;padding:0 14px;border-bottom:1px solid var(--hairline);flex:none;
-  background:var(--soft)}
-.set-top .st-name{font-size:13px;font-weight:600;color:var(--ink);padding:0 12px 0 2px;margin-right:6px;
-  border-right:1px solid var(--hairline);line-height:34px}
-.set-top button{border:0;background:none;font:inherit;font-size:13px;color:var(--muted);padding:9px 12px;
+.pt-tabs{display:flex;align-items:center;gap:2px;margin:-4px 0 16px;border-bottom:1px solid var(--hairline)}
+.pt-tabs button{border:0;background:none;font:inherit;font-size:13px;color:var(--muted);padding:9px 12px;
   border-bottom:2px solid transparent;cursor:pointer}
-.set-top button:hover{color:var(--ink)}
-.set-top button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--primary)}
+.pt-tabs button:hover{color:var(--ink)}
+.pt-tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--primary)}
+.sub-card{border:1px solid var(--hairline);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--canvas)}
+.sub-card .sc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sub-card .sc-name{font-weight:600;color:var(--ink);font-size:13px}
+.sc-chip{display:inline-block;font-size:11px;color:var(--muted);border:1px solid var(--hairline);border-radius:999px;padding:1px 8px;line-height:1.6}
+.sub-card .sc-desc{font-size:12.5px;color:var(--body);margin:5px 0 7px}
+.sub-card details>summary{cursor:pointer;font-size:12px;color:var(--muted);list-style:none}
+.sub-card details>summary::-webkit-details-marker{display:none}
+.sub-card pre{margin:6px 0 0;padding:8px 10px;background:var(--soft);border-radius:8px;font-size:11.5px;
+  line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
 .set-title{
   font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--ink);
   letter-spacing:var(--tracking-display);padding:2px 10px 12px;
@@ -827,6 +846,14 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 
 <div id="app">
   <aside id="sidebar" aria-label="会话列表">
+    <div class="sb-rail" id="sb-rail">
+      <button class="rail-btn" data-r="new" title="新建会话" aria-label="新建会话"><svg class="ic"><use href="#i-edit"/></svg></button>
+      <button class="rail-btn" data-r="search" title="搜索会话" aria-label="搜索会话"><svg class="ic"><use href="#i-search"/></svg></button>
+      <button class="rail-btn" data-r="history" title="会话记录" aria-label="会话记录"><svg class="ic"><use href="#i-temp"/></svg></button>
+      <div class="rail-sp"></div>
+      <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg></button>
+      <button class="rail-btn" data-r="settings" title="设置" aria-label="设置"><svg class="ic"><use href="#i-gear2"/></svg></button>
+    </div>
     <div class="sb-top">
       <div class="brand"><svg class="ic fill" aria-hidden="true"><use href="#i-logo"/></svg><b>SoloChat</b></div>
       <button id="btn-new" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>新建会话</button>
@@ -889,7 +916,12 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     </div>
   </main>
 
-  <aside id="runner" data-tab="ws" aria-label="工作区 / 运行 / 终端">
+  <div id="rn-rail" aria-label="右侧面板">
+  <button class="rail-btn" data-rn="ws" title="工作区"><svg class="ic"><use href="#i-ws"/></svg></button>
+  <button class="rail-btn" data-rn="view" title="运行 / 预览"><svg class="ic"><use href="#i-play"/></svg></button>
+  <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-ul"/></svg></button>
+</div>
+<aside id="runner" data-tab="ws" aria-label="工作区 / 运行 / 终端">
     <div class="rn-resize" id="rn-resize" title="拖动调整宽度（双击复位）"></div>
     <div class="rn-head">
       <div class="rn-tabs" id="rn-tabs" role="tablist">
@@ -4337,6 +4369,16 @@ var RUNNER = (function(){
     syncRnBottom();
     window.addEventListener('resize', syncRnBottom);
     $('#rn-close').addEventListener('click', close);
+    (function(){
+      var rail = document.getElementById('rn-rail');
+      if (!rail) return;
+      rail.addEventListener('click', function(e){
+        var b = e.target.closest('[data-rn]'); if (!b) return;
+        if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
+        setTab(b.getAttribute('data-rn'));
+        open();
+      });
+    })();
     var pbtn = $('#btn-panel');
     if (pbtn) pbtn.addEventListener('click', function(){
       if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
@@ -5413,12 +5455,11 @@ var UI = (function(){
     var c = S.cfg;
     var main = el('div', { class: 'set-main' });
     var wrap = el('div', {}, [main]);
-    var top = el('div', { class: 'set-top' });   /* v1.15：扩展设置的上边栏 */
     var cols = el('div', { class: 'set-cols' });
     var nav = el('div', { class: 'set-nav' });
     var body = el('div', { class: 'set-body' });
     cols.appendChild(nav); cols.appendChild(body);
-    main.appendChild(top); main.appendChild(cols);
+    main.appendChild(cols);
     nav.appendChild(el('div', { class: 'set-title', text: '设置' }));
     /* v3.0 #1：设置搜索（按文字过滤当前页的字段行；有输入时跨页命中） */
     (function(){
@@ -5445,27 +5486,22 @@ var UI = (function(){
       });
     })();
 
-    /* v1.15：扩展相关页统统收到上边栏里，左目录仍可按页切换 */
-  var TOP_TABS = [ ['agents', '智能体'], ['tools', '工具'], ['prompt', '提示词'], ['skills', '技能'], ['plugins', '插件'] ];
-  var topBtns = {};
-  top.appendChild(el('span', { class: 'st-name', text: '扩展' }));
-  TOP_TABS.forEach(function(t){
-    var b = el('button', { type: 'button', 'data-top': t[0], text: t[1] });
-    topBtns[t[0]] = b; top.appendChild(b);
-  });
-  function topGo(key){
-    var pg = (key === 'prompt') ? 'prompt' : 'ext';
-    var pages = document.querySelectorAll('#modal .set-page');
-    for (var i = 0; i < pages.length; i++) pages[i].classList.toggle('on', pages[i].getAttribute('data-page') === pg);
-    for (var j = 0; j < nav.children.length; j++) nav.children[j].classList.toggle('on', nav.children[j].getAttribute('data-sp') === pg);
-    for (var k in topBtns) topBtns[k].classList.toggle('on', k === key);
-    var ext = document.querySelector('#modal .set-page[data-page="ext"]');
-    if (ext && ext._setFilter && key !== 'prompt') ext._setFilter(key);
-    var bd = document.querySelector('#modal .set-body'); if (bd) bd.scrollTop = 0;
+    /* v1.16：页内顶栏助手（扩展页、提示词页各用一套；不再是设置的总上边栏） */
+  function pageTabs(defs, pick){
+    var bar = el('div', { class: 'pt-tabs' });
+    var btns = {};
+    defs.forEach(function(d){
+      var b = el('button', { type: 'button', text: d[1] });
+      b.addEventListener('click', function(){
+        for (var k in btns) btns[k].classList.toggle('on', k === d[0]);
+        pick(d[0], b);
+      });
+      btns[d[0]] = b; bar.appendChild(b);
+    });
+    if (defs.length) btns[defs[0][0]].classList.add('on');
+    bar._pick = function(k){ if (btns[k]) btns[k].click(); };
+    return bar;
   }
-  top.addEventListener('click', function(e){
-    var b = e.target.closest('[data-top]'); if (b) topGo(b.getAttribute('data-top'));
-  });
   function page(id, label, buildFn){
       var p = el('div', { class: id === 'conn' ? 'set-page on' : 'set-page', 'data-page': id });
       p.appendChild(el('h2', { text: label }));
@@ -5781,51 +5817,124 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 
     /* —— 页⑤ 提示词 —— */
     page('prompt', '提示词', function(p){
-      var box = el('div', { class: 'p-cards' }), edHost = el('div', { id: 'p-editor' });
-      function editor(pr, idx){
-        return el('div', { class: 'p-card edit' }, [
-          el('input', { class: 'f-in', id: 'p-ed-name', placeholder: '名称（如：翻译）', value: pr ? pr.name : '' }),
-          el('textarea', { class: 'f-in', id: 'p-ed-text', placeholder: '提示词内容…', style: 'min-height:88px', text: pr ? pr.text : '' }),
-          el('div', { class: 'f-actions', style: 'margin:0' }, [
-            el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-cancel', text: '取消' }),
-            el('button', { class: 'btn btn-primary', 'data-m': 'p-ed-save', 'data-i': idx==null?'':idx, text: '保存' })
-          ])
-        ]);
-      }
-      function refresh(){
-        box.textContent = '';
-        var ps = c.prompts || [];
-        if (!ps.length) box.appendChild(el('div', { class: 'hint', text: '还没有提示词。点上方新建，对话输入 /名称 插入。' }));
-        for (var i = 0; i < ps.length; i++){
-          (function(pr, idx){
-            box.appendChild(el('div', { class: 'p-card' }, [
-              el('div', { class: 'p-name', text: '/' + pr.name }),
-              el('div', { class: 'p-text', text: pr.text }),
-              el('div', { class: 'f-actions', style: 'margin:0' }, [
-                el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
-                el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
-              ])
-            ]));
-          })(ps[i], i);
-        }
-      }
-      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
-        el('button', { class: 'btn btn-sec', 'data-m': 'p-new' }, [icon('plus'), '新建提示词'])
-      ]));
-      p.appendChild(box); p.appendChild(edHost);
-      S._pRefresh = refresh; S._pEditor = editor;
-      refresh();
-    });
+    var userBox = el('div'), sysBox = el('div');
+    sysBox.style.display = 'none';
+    p.appendChild(pageTabs([['user', '用户自定义'], ['system', '系统提示词']], function(k){
+      userBox.style.display = (k === 'user') ? '' : 'none';
+      sysBox.style.display = (k === 'system') ? '' : 'none';
+      if (k === 'system') renderSys();
+    }));
+    p.appendChild(userBox); p.appendChild(sysBox);
 
-    /* —— 页⑥ 关于 —— */
+    /* ---- 用户自定义（原来的卡片 + 编辑器） ---- */
+    var box = el('div', { class: 'p-cards' }), edHost = el('div', { id: 'p-editor' });
+    function editor(pr, idx){
+      return el('div', { class: 'p-card edit' }, [
+        el('input', { class: 'f-in', id: 'p-ed-name', placeholder: '名称（如：翻译）', value: pr ? pr.name : '' }),
+        el('textarea', { class: 'f-in', id: 'p-ed-text', placeholder: '提示词内容…', style: 'min-height:88px', text: pr ? pr.text : '' }),
+        el('div', { class: 'f-actions', style: 'margin:0' }, [
+          el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-cancel', text: '取消' }),
+          el('button', { class: 'btn btn-primary', 'data-m': 'p-ed-save', 'data-i': idx==null?'':idx, text: '保存' })
+        ])
+      ]);
+    }
+    function refresh(){
+      box.textContent = '';
+      var ps = c.prompts || [];
+      if (!ps.length) box.appendChild(el('div', { class: 'hint', text: '还没有提示词。点上方新建，对话输入 /名称 插入。' }));
+      for (var i = 0; i < ps.length; i++){
+        (function(pr, idx){
+          box.appendChild(el('div', { class: 'p-card' }, [
+            el('div', { class: 'p-name', text: '/' + pr.name }),
+            el('div', { class: 'p-text', text: pr.text }),
+            el('div', { class: 'f-actions', style: 'margin:0' }, [
+              el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
+              el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
+            ])
+          ]));
+        })(ps[i], i);
+      }
+    }
+    userBox.appendChild(el('div', { class: 'sub', text: '这些是你自己存的，对话里输入 /名称 就插进去。' }));
+    userBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+      el('button', { class: 'btn btn-sec', 'data-m': 'p-new' }, [icon('plus'), '新建提示词'])
+    ]));
+    userBox.appendChild(box); userBox.appendChild(edHost);
+    S._pRefresh = refresh; S._pEditor = editor;
+    refresh();
+
+    /* ---- 系统提示词（只读：模型实际收到的原文） ---- */
+    function copyText(txt){
+      try {
+        if (window.chrome && chrome.webview && chrome.webview.postMessage) chrome.webview.postMessage({ t: 'copy', text: txt });
+        else if (navigator.clipboard) navigator.clipboard.writeText(txt);
+        UI.toast('已复制');
+      } catch(e){ UI.toast('复制失败', true); }
+    }
+    function sec(title, txt, note){
+      var card = el('div', { class: 'sub-card' });
+      var head = el('div', { class: 'sc-h' }, [ el('span', { class: 'sc-name', text: title }) ]);
+      if (txt){
+        var cp = el('button', { class: 'btn btn-ghost rn-mini', text: '复制' });
+        cp.addEventListener('click', function(){ copyText(txt); });
+        head.appendChild(cp);
+      }
+      card.appendChild(head);
+      if (note) card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted)', text: note }));
+      card.appendChild(el('pre', { text: txt || '（空）' }));
+      return card;
+    }
+    function renderSys(){
+      sysBox.textContent = '';
+      sysBox.appendChild(el('div', { class: 'sub', text: '下面是拼进 system 的原文，只读。模式、子智能体、扩展（工具/技能/插件）各占一段；MCP 目前只有登记，不参与拼接。' }));
+      var T = MODE.texts;
+      sysBox.appendChild(sec('Chat', S.cfg.research ? T.research : '', S.cfg.research ? '深度研究开关已开' : 'Chat 没有模式提示词（只有底座规则 + 你的自定义提示词）'));
+      sysBox.appendChild(sec('Work', T.work, '工作区模式'));
+      sysBox.appendChild(sec('Agent', T.agent, 'Agent 模式'));
+      sysBox.appendChild(sec('Agent · 直接落地', T.agentWrite, 'agentMode = write 时替换 Agent 段'));
+      sysBox.appendChild(sec('Agent · 本轮只读', T.agentRead, 'agentMode = read 时追加'));
+      SUB.ROLES.forEach(function(r){
+        var a = SUB.aclOf(r);
+        sysBox.appendChild(sec('子智能体 · ' + r.name + (r.title ? '（' + r.title + '）' : ''), r.body,
+          (r.desc || '') + ' · 工具：' + (a.length ? a.join(' / ') : '无')));
+      });
+      EXT.all().forEach(function(it){
+        if (it.kind === 'agent' && it.on !== false)
+          sysBox.appendChild(sec('子智能体 · ' + it.name + '（自定义）', it.body || '', it.desc || ''));
+      });
+      EXT.all().forEach(function(it){
+        if (it.kind === 'skill' && it.on !== false)
+          sysBox.appendChild(sec('技能 · ' + it.name, it.body || '', it.desc || '（无说明）'));
+      });
+      ['chat', 'work', 'agent'].forEach(function(m){
+        var ex = EXT.prompt(m);
+        sysBox.appendChild(sec('扩展视角 · ' + m, ex, '这一模式下启用的自定义工具/技能摘要'));
+      });
+      var mcp = S.cfg.mcp || [];
+      if (mcp.length) sysBox.appendChild(sec('MCP 服务器（登记）', mcp.map(function(m){ return '· ' + (m.name || m.url) + ' — ' + m.url + '（' + ((m.tools||[]).length) + ' 个工具）'; }).join('\n'), '只在「扩展 → MCP」里登记与探测'));
+    }
+    renderSys();
+  });
+
+  /* —— 页⑥ 关于 —— */
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
     var filter = 'tools';
+    var INTRO = {
+      tools: '内置能力默认全开，关掉后模型调用会被直接拒绝；下面还能加自己的声明式 http 工具。',
+      agents: '子智能体：内置角色只读展示（含内部提示词），下面可以拼一个自己的组合智能体。',
+      skills: '技能 = 一段说明，平时只占一行，模型需要时才用 \u0060\u0060\u0060skill 取全文。',
+      plugins: '插件 = 一次导入多个工具/技能，导入后落在「工具」「技能」两页。',
+      mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
+    };
+    p.appendChild(pageTabs([['tools', '工具'], ['agents', '智能体'], ['skills', '技能'], ['plugins', '插件'], ['mcp', 'MCP']], function(k){ setFilter(k); }));
+
     var intro = el('div', { class: 'sub' });
     p.appendChild(intro);
+
     var modeBox = el('div', { class: 'sub' });
     p.appendChild(modeBox);
-    function renderModeBox2(){
+    function renderModeBox(){
       function cnt(mode){
         var on = 0, all = EXT.all();
         for (var i = 0; i < all.length; i++){
@@ -5838,9 +5947,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       modeBox.textContent = '模式 = 提示词档位 + 工具集 + 限额。Chat：' + cnt('chat') + ' 项能力（默认无工具）；Work：' + cnt('work') + ' 项；Agent：' + cnt('agent') + ' 项。' +
         ' 子智能体：' + SUB.profiles('work').length + ' 个（Work）/ ' + SUB.profiles('agent').length + ' 个（Agent）。';
     }
-    renderModeBox2();
+    renderModeBox();
 
-    /* 工具页：自动选模式开关 */
     var arRow = el('div', { class: 'f-row' });
     (function(){
       var arCk = el('input', { type: 'checkbox' }); arCk.checked = !!S.cfg.autoRoute;
@@ -5852,106 +5960,213 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     var list = el('div', { class: 'f-grid' });
     p.appendChild(list);
 
-    /* 智能体页 */
+    /* ---------- 智能体：卡片 + 组合器 ---------- */
     var agentBox = el('div');
-    agentBox.appendChild(el('div', { style: 'margin:2px 0 8px;font-size:13px;font-weight:600', text: '子智能体角色（内置）' }));
-    agentBox.appendChild(el('div', { class: 'sub', style: 'display:block;white-space:pre-wrap;margin-top:4px;line-height:1.7',
-      text: SUB.ROLES.map(function(r){
-        var a = SUB.aclOf(r);
-        return '· ' + r.name + ' — ' + (r.desc || '') + '\n  ACL：' + (a.length ? a.join(' / ') : '无工具（纯推理）');
-      }).join('\n') }));
-    agentBox.appendChild(el('div', { class: 'sub', style: 'display:block;margin-top:6px',
-      text: '子智能体独立上下文、不落库；越权调用会被调度器拦截并回注原因；结果以 [subagent-result: 角色] 摘要回到母上下文。' }));
-    var auditBtn = el('button', { class: 'btn btn-sec', text: '命令记录', style: 'margin:10px 0 4px' });
-    auditBtn.addEventListener('click', function(){
-      NET.bridge.cmdAudit().then(function(lines){
-        var txt = (lines && lines.length) ? lines.slice().reverse().join('\n') : '（还没有执行过命令）';
-        var box = el('div', { style: 'padding:16px 18px;max-width:780px' }, [
-          el('div', { style: 'font-weight:600;margin-bottom:8px', text: '命令审计（最近 ' + (lines ? lines.length : 0) + ' 条，新的在上）' }),
-          el('pre', { style: 'max-height:420px;overflow:auto;font-size:12px;line-height:1.55;background:var(--soft);padding:10px;border-radius:8px;white-space:pre-wrap', text: txt })
-        ]);
-        openModal(box, false);
-      }, function(e){ toast('读取失败：' + (e && e.message || e), true); });
-    });
-    agentBox.appendChild(auditBtn);
     p.appendChild(agentBox);
+    function agentCard(r, builtin){
+      var acl = SUB.aclOf(r);
+      var card = el('div', { class: 'sub-card' });
+      var head = el('div', { class: 'sc-h' }, [
+        el('span', { class: 'sc-name', text: (r.title ? r.title + ' · ' : '') + r.name }),
+        el('span', { class: 'sc-chip', text: '工具 ' + acl.length + ' 项' }),
+        el('span', { class: 'sc-chip', text: r.writes ? '可写(暂存)' : '只读' }),
+        el('span', { class: 'sc-chip', text: '轮数 ≤ ' + (r.maxTurns || 3) })
+      ]);
+      if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
+      else {
+        var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+        del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
+        head.appendChild(del);
+      }
+      card.appendChild(head);
+      card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
+      card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
+      var det = el('details');
+      det.appendChild(el('summary', { text: '内部提示词（点开）' }));
+      det.appendChild(el('pre', { text: r.body || '（无）' }));
+      card.appendChild(det);
+      return card;
+    }
+    var TOOL_POOL = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill', 'web', 'search', 'get', 'agent', 'cmd'];
+    function agentComposer(){
+      var box = el('div', { class: 'sub-card' });
+      box.appendChild(el('div', { class: 'sc-name', text: '新建组合智能体' }));
+      box.appendChild(el('div', { class: 'sc-desc', text: '起个名字，勾选它能用的工具，写清它的职责和输出格式；保存后母智能体就能 \u0060\u0060\u0060agent 名字 任务 派它干活。' }));
+      var nameIn = el('input', { class: 'f-in', placeholder: '显示名，如：数据分析' });
+      var idIn = el('input', { class: 'f-in', placeholder: 'ID：小写字母/数字/短横，如 data-analyst' });
+      var row1 = el('div', { style: 'display:flex;gap:8px;margin:6px 0' }, [nameIn, idIn]);
+      nameIn.style.flex = '1'; idIn.style.flex = '1';
+      box.appendChild(row1);
+      var tpl = el('div', { class: 'f-actions', style: 'margin:6px 0 0;justify-content:flex-start' });
+      SUB.ROLES.forEach(function(r){
+        var b = el('button', { class: 'btn btn-ghost rn-mini', text: '照抄 ' + r.name });
+        b.addEventListener('click', function(){
+          ta.value = r.body || ''; nameIn.value = nameIn.value || (r.title || r.name);
+          idIn.value = idIn.value || (r.name + '-' + Math.random().toString(36).slice(2, 5));
+          TOOL_POOL.forEach(function(t){ cks[t].checked = (SUB.aclOf(r).indexOf(t) >= 0); });
+        });
+        tpl.appendChild(b);
+      });
+      box.appendChild(tpl);
+      var ta = el('textarea', { class: 'f-in', rows: '5', placeholder: '内部提示词：你是谁、负责什么、输出什么格式、不许做什么' });
+      ta.style.width = '100%';
+      box.appendChild(ta);
+      var grid = el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0' });
+      var cks = {};
+      TOOL_POOL.forEach(function(t){
+        var ck = el('input', { type: 'checkbox' }); cks[t] = ck;
+        grid.appendChild(el('label', { class: 'sc-chip', style: 'cursor:pointer' }, [ck, ' ' + t]));
+      });
+      box.appendChild(grid);
+      var save = el('button', { class: 'btn btn-primary', text: '添加' });
+      save.addEventListener('click', function(){
+        try {
+          var id = String(idIn.value || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 25);
+          if (!/^[a-z][a-z0-9-]{1,24}$/.test(id)) id = 'ag' + Date.now().toString(36);
+          var sel = TOOL_POOL.filter(function(t){ return cks[t].checked; });
+          EXT.add({ kind: 'agent', name: id, title: (nameIn.value || '').trim() || id,
+            desc: '自定义组合 · 工具 ' + sel.length + ' 项',
+            body: ta.value || '', tools: sel,
+            writes: sel.indexOf('fs-write') >= 0 || sel.indexOf('patch') >= 0,
+            modes: ['work', 'agent'], maxTurns: 4 });
+          UI.toast('已添加智能体：' + ((nameIn.value || '').trim() || id));
+          renderAgents(); renderModeBox();
+        } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
+      });
+      box.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:8px' }, [save]));
+      return box;
+    }
+    function renderAgents(){
+      agentBox.textContent = '';
+      SUB.ROLES.forEach(function(r){ agentBox.appendChild(agentCard(r, true)); });
+      var mine = EXT.all().filter(function(it){ return it.kind === 'agent'; });
+      mine.forEach(function(it){ agentBox.appendChild(agentCard(it, false)); });
+      agentBox.appendChild(agentComposer());
+    }
 
-    /* 添加区（工具 / 插件） */
+    /* ---------- 添加区（工具 / 插件） ---------- */
     var addBox = el('div');
-    addBox.appendChild(el('div', { class: 'sub', text: '粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}；技能形如 {"kind":"skill","name":"my-style","desc":"写作风格","body":"…"}；插件形如 {"plugin":"x","tools":[…],"skills":[…]}；只给 name + prompt 的会被当成自定义模式。' }));
-    var ta = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen",…}' });
-    addBox.appendChild(ta);
+    addBox.appendChild(el('div', { class: 'sub', text: '粘贴 JSON 后点添加。工具形如 {"kind":"tool","name":"zen","desc":"随机格言","type":"http","url":"https://api.github.com/zen"}；技能形如 {"kind":"skill","name":"my-style","desc":"写作风格","body":"…"}；插件形如 {"plugin":"x","tools":[…],"skills":[…]}。' }));
+    var taJson = el('textarea', { class: 'f-in', rows: '7', style: 'width:100%;font-family:ui-monospace,monospace', placeholder: '{"kind":"tool","name":"zen",…}' });
+    addBox.appendChild(taJson);
     var addBtn = el('button', { class: 'btn btn-sec', text: '添加' });
     addBtn.addEventListener('click', function(){
       try {
-        var j = JSON.parse(ta.value);
+        var j = JSON.parse(taJson.value);
         if (j.prompt && !j.kind && !j.tools && !j.skills){ addPersona(j); UI.toast('已添加自定义模式：' + (j.name || '')); }
         else if (j.tools || j.skills){ var n = EXT.importPlugin(j); UI.toast('已导入 ' + n + ' 项'); }
         else { EXT.add(j); UI.toast('已添加：' + j.name); }
-        ta.value = ''; renderList(filter);
+        taJson.value = ''; renderList(filter); renderModeBox();
       } catch(e){ UI.toast('添加失败：' + (e && e.message || e), true); }
     });
     addBox.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
     p.appendChild(addBox);
 
-    var INTRO = {
-      agents: '智能体 = 子智能体角色 + 自定义模式。勾选状态决定模型能不能派它出去干活。',
-      tools: '工具 = 内置能力（默认全开，关掉后模型调用会被直接拒绝）+ 你加的自定义工具（声明式 http）。',
-      skills: '技能 = 一段说明文字，平时只占一行，模型需要时才用 \u0060\u0060\u0060skill 取全文。',
-      plugins: '插件 = 一次导入多个工具/技能，导入后分别落在「工具」「技能」两页里，这里只负责导入。'
-    };
+    /* ---------- MCP ---------- */
+    var mcpBox = el('div');
+    p.appendChild(mcpBox);
+    function saveMcp(arr){ setCfg({ mcp: arr }); }
+    function renderMcp(){
+      mcpBox.textContent = '';
+      var arr = (S.cfg.mcp || []).slice();
+      if (!arr.length) mcpBox.appendChild(el('div', { class: 'hint', text: '还没有 MCP 服务器。' }));
+      arr.forEach(function(m, idx){
+        var card = el('div', { class: 'sub-card' });
+        card.appendChild(el('div', { class: 'sc-h' }, [
+          el('span', { class: 'sc-name', text: m.name || m.url }),
+          el('span', { class: 'sc-chip', text: (m.tools || []).length + ' 个工具' }),
+          el('span', { class: 'sc-chip', text: m.last || '未探测' })
+        ]));
+        card.appendChild(el('div', { class: 'sc-desc', text: m.url }));
+        if ((m.tools || []).length) card.appendChild(el('pre', { text: (m.tools || []).join('\n') }));
+        var probe = el('button', { class: 'btn btn-sec rn-mini', text: '探测' });
+        probe.addEventListener('click', function(){
+          probe.disabled = true; probe.textContent = '探测中…';
+          NET.httpJSON({ url: m.url, method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize',
+              params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'SoloChat', version: 'v1.16' } } }),
+            parse: function(j){ return j; } }).then(function(j){
+            probe.disabled = false; probe.textContent = '探测';
+            var list2 = arr.slice();
+            if (j && j.result){
+              list2[idx] = { name: m.name, url: m.url, last: '已连通', tools: m.tools || [] };
+              UI.toast('连通：' + ((j.result.serverInfo && j.result.serverInfo.name) || 'MCP'));
+            } else {
+              list2[idx] = { name: m.name, url: m.url, last: '探测失败', tools: m.tools || [] };
+              UI.toast('探测失败（可能不是 streamable HTTP 或需要鉴权）', true);
+            }
+            saveMcp(list2); renderMcp();
+          });
+        });
+        var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+        del.addEventListener('click', function(){ var a2 = arr.slice(); a2.splice(idx, 1); saveMcp(a2); renderMcp(); });
+        card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [probe, del]));
+        mcpBox.appendChild(card);
+      });
+      var form = el('div', { class: 'sub-card' });
+      form.appendChild(el('div', { class: 'sc-name', text: '添加 MCP 服务器' }));
+      var nIn = el('input', { class: 'f-in', placeholder: '名称，如：filesystem' });
+      var uIn = el('input', { class: 'f-in', placeholder: 'HTTP 地址，如 http://127.0.0.1:8931/mcp' });
+      nIn.style.flex = '1'; uIn.style.flex = '2';
+      form.appendChild(el('div', { style: 'display:flex;gap:8px;margin:8px 0' }, [nIn, uIn]));
+      var add = el('button', { class: 'btn btn-primary', text: '添加' });
+      add.addEventListener('click', function(){
+        var u = (uIn.value || '').trim();
+        if (!u) { UI.toast('地址不能为空', true); return; }
+        var a2 = (S.cfg.mcp || []).slice();
+        a2.push({ name: (nIn.value || '').trim() || u, url: u, tools: [], last: '未探测' });
+        saveMcp(a2); renderMcp();
+      });
+      form.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0' }, [add]));
+      mcpBox.appendChild(form);
+    }
+
     function renderList(kind){
       list.textContent = '';
       var all = EXT.all(), shown = 0;
       all.forEach(function(it){
-        var k = (it.kind === 'builtin' || it.kind === 'tool') ? 'tools' : (it.kind === 'skill' ? 'skills' : (it.kind === 'agent' ? 'agents' : 'tools'));
+        var k = (it.kind === 'builtin' || it.kind === 'tool') ? 'tools' : (it.kind === 'skill' ? 'skills' : 'agents');
         if (k !== kind) return;
         shown++;
         var ck = el('input', { type: 'checkbox' }); ck.checked = it.on;
-        ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox2(); });
-        var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : (it.kind === 'agent' ? '子智能体' : '工具'));
+        ck.addEventListener('change', function(){ EXT.setOn(it.id, ck.checked); renderModeBox(); });
+        var kindName = it.kind === 'builtin' ? '内置' : (it.kind === 'skill' ? '技能' : '工具');
         var modeTxt = (it.modes || []).length ? it.modes.join(' / ') : '全部模式';
         var row = el('div', { class: 'f-row' }, [
           el('label', {}, [ck, ' ' + (it.title || it.name)]),
-          el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + (it.kind === 'agent' && it.writes ? ' · 可写(暂存)' : '') + ' · ' + (it.brief || it.desc || '') })
+          el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') })
         ]);
         if (it.kind !== 'builtin'){
           var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-          delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); });
+          delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); renderModeBox(); });
           row.appendChild(delBtn);
         }
         list.appendChild(row);
       });
-      if (kind === 'agents'){
-        MODE.personas().forEach(function(pp){
-          shown++;
-          var delBtn2 = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-          delBtn2.addEventListener('click', function(){ delPersona(pp.id); renderList(filter); });
-          var prow = el('div', { class: 'f-row' }, [
-            el('label', {}, [' ' + (pp.name || pp.id)]),
-            el('span', { class: 'hint', text: '自定义模式 · 底座 ' + pp.base + ' · ' + String(pp.prompt || '').slice(0, 40) })
-          ]);
-          prow.appendChild(delBtn2);
-          list.appendChild(prow);
-        });
-      }
-      if (!shown) list.appendChild(el('div', { class: 'sub', text: '这一类还没有内容。' }));
+      if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
     }
+
     function setFilter(k){
       filter = k;
       intro.textContent = INTRO[k] || '';
-      modeBox.style.display = (k === 'agents') ? '' : 'none';
+      var isAgents = (k === 'agents'), isMcp = (k === 'mcp');
+      modeBox.style.display = isAgents ? '' : 'none';
       arRow.style.display = (k === 'tools') ? '' : 'none';
-      agentBox.style.display = (k === 'agents') ? '' : 'none';
+      list.style.display = (isMcp || isAgents) ? 'none' : '';
+      agentBox.style.display = isAgents ? '' : 'none';
       addBox.style.display = (k === 'tools' || k === 'plugins') ? '' : 'none';
-      list.style.display = (k === 'agents') ? 'none' : '';
-      renderList(k);
+      mcpBox.style.display = isMcp ? '' : 'none';
+      if (isAgents) renderAgents();
+      if (isMcp) renderMcp();
+      if (!isMcp && !isAgents) renderList(k);
     }
     p._setFilter = setFilter;
     setFilter('tools');
   });
+
   page('about', '关于', function(p){
-      var ver = 'v1.15.0', ua = navigator.userAgent || '';
+      var ver = 'v1.16.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -6711,7 +6926,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
             el('button', { 'data-act': 'rmchip', 'data-id': a.id, title: '移除' }, [icon('close')])
           ]);
         } else {
-          chip = el('div', { class: 'chip' }, [
+          chip = el('div', { class: 'sc-chip' }, [
             el('img', { src: a.url, alt: a.name }),
             el('button', { 'data-act': 'rmchip', 'data-id': a.id, title: '移除' }, [icon('close')])
           ]);
@@ -7623,6 +7838,7 @@ function sendMessage(){
   function renderComposerCtl(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : 'Chat');
+    document.body.classList.toggle('m-chat', (S.cfg.mode || 'chat') === 'chat');
     var pb = $('#btn-panel');
     if (pb) pb.style.display = ((S.cfg.mode || 'chat') === 'chat') ? 'none' : '';
     if ((S.cfg.mode || 'chat') === 'chat' && document.body.classList.contains('rn-open')) document.body.classList.remove('rn-open');
@@ -8599,7 +8815,21 @@ function sendMessage(){
 /*  */
 (function(){
   /* 委托① 侧栏 */
-  $('#sidebar').addEventListener('click', function(e){
+  /* v1.16：收起后的图标轨 */
+(function(){
+  var rail = document.getElementById('sb-rail');
+  if (!rail) return;
+  rail.addEventListener('click', function(e){
+    var b = e.target.closest('[data-r]'); if (!b) return;
+    var r = b.getAttribute('data-r');
+    if (r === 'new'){ var n = document.getElementById('btn-new'); if (n) n.click(); return; }
+    if (r === 'settings'){ UI.openSettings(); return; }
+    if (r === 'expand'){ toggleSidebar('show'); return; }
+    if (r === 'search'){ toggleSidebar('show'); setTimeout(function(){ var q = document.getElementById('sb-q'); if (q) q.focus(); }, 120); return; }
+    if (r === 'history'){ toggleSidebar('show'); return; }
+  });
+})();
+$('#sidebar').addEventListener('click', function(e){
     var t = e.target;
     if (t.closest('#btn-new')) return void UI.newDraft();
     if (t.closest('#btn-settings')) return void UI.openSettings();
@@ -9763,7 +9993,9 @@ var MODE = (function(){
     '只有当任务能拆成互不依赖的几块（≥2 处并行检索或修改）时才用 ```agent explore|coder|review 派出去，' +
     '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。';
   /* v1.14：Work = 画布 + 沙箱脚本合并。核心约定：成品进工作区，正文只给结论 */
-  var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
+  var AGENT_W_P = '直接落地：先读要改的文件，然后用最小 diff 改完，改完说清改了哪些文件、怎么验证；不需要先出计划。';
+var AGENT_READ_P = '本轮只读：不要写盘、不要打补丁、不要跑改动型命令。';
+var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
     '1) 用户要文件、文档、网页、页面、脚本、表格、图、报告——一律用 ```vfs-write 写进会话的内存工作区（可多文件：index.html + style.css + script.js），' +
     '不碰真实磁盘，也不要在正文里贴整段代码或整篇文档。\n' +
     '2) 需要算数、批处理、跑一遍验证，就用 ```run 在沙箱里执行脚本、读它的输出，别在正文里手算。\n' +
@@ -9796,10 +10028,10 @@ var MODE = (function(){
     if (m === 'agent'){
       var am = S.cfg.agentMode || 'auto';
       if (am === 'write'){
-        out.push('直接落地：先读要改的文件，然后用最小 diff 改完，改完说清改了哪些文件、怎么验证；不需要先出计划。');
+        out.push(AGENT_W_P);
       } else {
         out.push(AGENT_P);
-        if (am === 'read') out.push('本轮只读：不要写盘、不要打补丁、不要跑改动型命令。');
+        if (am === 'read') out.push(AGENT_READ_P);
       }
     }
     return out.join('\n\n');
@@ -9864,6 +10096,7 @@ var MODE = (function(){
   }
   return { personas: personas, persona: persona, route: route, promptFor: promptFor, mountUI: mountUI,
            SUBS: SUBS, subList: subList, sub: sub, setSub: setSub, subPrompt: subPrompt, denied: denied,
+           texts: { work: WORK_P, agent: AGENT_P, research: RESEARCH_P, agentWrite: AGENT_W_P, agentRead: AGENT_READ_P },
            efforts: efforts };
 })();
 
