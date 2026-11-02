@@ -891,6 +891,13 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .orch-line.bad{color:var(--danger)}
 .orch-line.ok{color:var(--success)}
 .det-host{grid-column:1 / -1}
+/* v1.29.2：扩展条目右侧的展开箭头（替代「查看」按钮） */
+.exp-chev{flex:none;margin-left:auto;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+  border:0;background:none;border-radius:6px;color:var(--faint);cursor:pointer}
+.exp-chev:hover{background:var(--hover);color:var(--ink)}
+.exp-chev .ic{width:14px;height:14px;transition:transform .15s ease}
+.exp-chev.open{color:var(--primary)}
+.exp-chev.open .ic{transform:rotate(90deg)}
 .det-box{margin:8px 0 12px;padding:10px 12px;border:1px solid var(--hairline);border-radius:10px;background:var(--soft)}
 .det-title{font-size:12.5px;font-weight:600;margin-bottom:4px;color:var(--text)}
 .det-h{display:flex;align-items:center;gap:8px;margin:10px 0 4px}
@@ -5708,6 +5715,23 @@ function toggleDetail(host, build){
   try { d = build(); } catch(e){ UI.toast('打不开：' + (e && e.message || e), true); return; }
   host.appendChild(detailBox(d));
 }
+/* v1.29.2：右侧箭头 = 展开/收起这条的详情（替换原来的「查看」按钮） */
+function chevBtn(host, build){
+  var b = el('button', { class: 'exp-chev', type: 'button', title: '展开', 'aria-label': '展开', 'aria-expanded': 'false' });
+  b.appendChild(icon('chev-r'));
+  b.addEventListener('click', function(ev){
+    ev.preventDefault(); ev.stopPropagation();
+    toggleDetail(host, build);
+    var open = !!host.firstChild;
+    /* 同时只开一条：其余的箭头复位 */
+    var all = document.querySelectorAll('.exp-chev.open');
+    for (var i = 0; i < all.length; i++) if (all[i] !== b){ all[i].classList.remove('open'); all[i].setAttribute('aria-expanded', 'false'); all[i].title = '展开'; }
+    b.classList.toggle('open', open);
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    b.title = open ? '收起' : '展开';
+  });
+  return b;
+}
 function buildSettings(){
     var c = S.cfg;
     var main = el('div', { class: 'set-main' });
@@ -5943,6 +5967,15 @@ function buildSettings(){
 
     /* —— 页② 通用设置（v1.5.1：主题 / 代理 / 全局参数 / 数据 四合一） —— */
     page('general', '通用设置', function(p){
+  p.appendChild(el('div', { class: 'sub', text: '执行' }));
+  /* v1.29.2：从「扩展」页挪到通用设置（之前放错了页） */
+  var pgRow = el('div', { class: 'f-row' });
+  (function(){
+  var pgCk = el('input', { type: 'checkbox' }); pgCk.checked = S.cfg.planGate !== false;
+  pgCk.addEventListener('change', function(){ setCfg({ planGate: pgCk.checked }); });
+  pgRow.appendChild(el('label', {}, [pgCk, ' 计划门禁：每个会话第一次写入要手动确认一次（关掉则全自动）']));
+  })();
+  p.appendChild(pgRow);
       /* 外观与行为（原「主题」页） */
       p.appendChild(el('div', { class: 'sub', text: '外观与行为' }));
       var seg = el('div', { class: 'seg' });
@@ -6282,14 +6315,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     })();
     p.appendChild(arRow);
 
-    var pgRow = el('div', { class: 'f-row' });
-    (function(){
-      var pgCk = el('input', { type: 'checkbox' }); pgCk.checked = S.cfg.planGate !== false;
-      pgCk.addEventListener('change', function(){ setCfg({ planGate: pgCk.checked }); });
-      pgRow.appendChild(el('label', {}, [pgCk, ' 计划门禁：每个会话第一次写入要手动确认一次（关掉则全自动）']));
-    })();
-    p.appendChild(pgRow);
-
     var list = el('div', { class: 'f-grid' });
     p.appendChild(list);
 
@@ -6306,9 +6331,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         el('span', { class: 'sc-chip', text: '轮数 ≤ ' + (r.maxTurns || 3) })
       ]);
       var ahost = el('div', { class: 'det-host' });
-    var vA = el('button', { class: 'btn btn-ghost rn-mini', text: '查看' });
-    vA.addEventListener('click', function(){
-      toggleDetail(ahost, function(){
+    var vA = chevBtn(ahost, function(){
         return { title: (r.title ? r.title + ' · ' : '') + r.name, blocks: [
           { k: '说明', v: r.desc || '（无）' },
           { k: '可用工具', v: acl.length ? acl.join(' / ') : '（无）' },
@@ -6317,9 +6340,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
           { k: '来源', v: builtin ? '内置角色' : (r.pkg ? r.pkg : '（手工添加，无包）') },
           { k: '提示词正文', v: r.body || '' }
         ]};
-      });
     });
-    head.appendChild(vA);
     if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
       else {
         var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
@@ -6331,6 +6352,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
         head.appendChild(del);
       }
+    head.appendChild(vA);   /* v1.29.2：展开箭头放右端 */
       card.appendChild(head);
       card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
       card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
@@ -6487,7 +6509,7 @@ function renderPkgs(){
   order.forEach(function(p){
     var items = map[p];
     var card = el('div', { class: 'sub-card' });
-    card.appendChild(el('div', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') }));
+    var nameRow = el('div', { class: 'sc-h' }, [el('span', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') })]);
     var prThis = prAll.filter(function(x){ return x.pkg === p; });
     card.appendChild(el('div', { class: 'sub', text:
       items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); })
@@ -6507,16 +6529,16 @@ function renderPkgs(){
       } catch(e){ ex.disabled = false; UI.toast('导出失败：' + (e && e.message || e), true); }
     });
     var phost = el('div', { class: 'det-host' });
-    var pv = el('button', { class: 'btn btn-sec rn-mini', text: '查看' });
-    pv.addEventListener('click', function(){
-      toggleDetail(phost, function(){
-        var pack = EXT.exportFiles(p);
-        var blocks = [{ k: '文件结构（导出即长这样）', v: pack.files.map(function(f){ return f.rel; }).join('\n') }];
-        pack.files.forEach(function(f){ blocks.push({ k: f.rel, v: f.text }); });
-        return { title: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : ''), blocks: blocks };
-      });
+    /* v1.29.2：右侧箭头代替「查看」 */
+    var pv = chevBtn(phost, function(){
+      var pack = EXT.exportFiles(p);
+      var blocks = [{ k: '文件结构（导出即长这样）', v: pack.files.map(function(f){ return f.rel; }).join('\n') }];
+      pack.files.forEach(function(f){ blocks.push({ k: f.rel, v: f.text }); });
+      return { title: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : ''), blocks: blocks };
     });
-    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [pv, ex, rm]));
+    nameRow.appendChild(pv);
+    card.appendChild(nameRow);
+    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [ex, rm]));
     card.appendChild(phost);
     pkgsBox.appendChild(card);
   });
@@ -6624,9 +6646,8 @@ p.appendChild(addBox);
         ]);
         var dhost = el('div', { class: 'det-host' });
         var acts = el('div', { class: 'f-acts' });
-        var viewBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '查看' });
-        viewBtn.addEventListener('click', function(){ toggleDetail(dhost, function(){ return EXT.describe(it.id); }); });
-        acts.appendChild(viewBtn);
+        /* v1.29.2：右侧箭头代替「查看」 */
+    acts.appendChild(chevBtn(dhost, function(){ return EXT.describe(it.id); }));
         if (it.kind !== 'builtin'){
           var exBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
           exBtn.addEventListener('click', function(){
@@ -6697,7 +6718,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.1', ua = navigator.userAgent || '';
+      var ver = 'v1.29.2', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
