@@ -77,14 +77,14 @@ body.sb-collapsed #sidebar{width:56px;min-width:56px;padding:0;overflow:hidden}
 body.sb-collapsed #sidebar>*:not(.sb-rail){display:none}
 body.sb-collapsed #tb-title{display:none}
 .sb-rail{display:none;flex-direction:column;align-items:center;gap:4px;padding:4px 0;width:100%;
-  position:fixed;left:0;top:52px;bottom:120px;width:56px;z-index:24;box-sizing:border-box}
+  position:fixed;left:0;top:52px;bottom:var(--rn-b,120px);width:56px;z-index:24;box-sizing:border-box}
 body.sb-collapsed .sb-rail{display:flex}
 .rail-btn{width:40px;height:40px;border:0;background:none;border-radius:10px;display:flex;align-items:center;
   justify-content:center;color:var(--muted);cursor:pointer}
 .rail-btn:hover{background:var(--soft);color:var(--ink)}
 .rail-btn svg{width:18px;height:18px}
 .rail-sp{flex:1}
-#rn-rail{position:fixed;right:0;top:52px;bottom:0;width:46px;display:none;flex-direction:column;align-items:center;
+#rn-rail{position:fixed;right:0;top:52px;bottom:var(--rn-b,120px);width:46px;display:none;flex-direction:column;align-items:center;
   gap:6px;padding:10px 0;border-left:1px solid var(--hairline);background:var(--canvas);z-index:29}
 body.rn-open #rn-rail,body.m-chat #rn-rail{display:none}
 body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
@@ -514,6 +514,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
   background:var(--canvas);color:var(--muted);font-size:12px;
 }
 #empty .e-temp .ic{width:13px;height:13px}
+body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标轨 */
 #empty .e-temp:hover{background:var(--soft);color:var(--ink)}
 #empty .e-temp.on{background:color-mix(in srgb,var(--primary) 10%,var(--canvas));border-color:var(--ring-line);color:var(--primary)}
 .srch{font-size:12px;color:var(--muted)}
@@ -5837,7 +5838,8 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     });
 
     /* —— 页⑤ 提示词 —— */
-    page('prompt', '提示词', function(p){
+    /* v1.18：提示词并入扩展页（智能体/插件/技能/工具/提示词/MCP） */
+  function buildPromptPage(p){
     var userBox = el('div'), sysBox = el('div');
     sysBox.style.display = 'none';
     p.appendChild(pageTabs([['user', '用户自定义'], ['system', '系统提示词']], function(k){
@@ -5935,20 +5937,21 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       if (mcp.length) sysBox.appendChild(sec('MCP 服务器（登记）', mcp.map(function(m){ return '· ' + (m.name || m.url) + ' — ' + m.url + '（' + ((m.tools||[]).length) + ' 个工具）'; }).join('\n'), '只在「扩展 → MCP」里登记与探测'));
     }
     renderSys();
-  });
+  }
 
   /* —— 页⑥ 关于 —— */
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
-    var filter = 'tools';
+    var filter = 'agents';
     var INTRO = {
       tools: '内置能力默认全开，关掉后模型调用会被直接拒绝；下面还能加自己的声明式 http 工具。',
       agents: '子智能体：内置角色只读展示（含内部提示词），下面可以拼一个自己的组合智能体。',
       skills: '技能 = 一段说明，平时只占一行，模型需要时才用 \u0060\u0060\u0060skill 取全文。',
       plugins: '插件 = 一次导入多个工具/技能，导入后落在「工具」「技能」两页。',
-      mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
+      prompt: '提示词 = 模型这一轮看到的东西：左边是你自己的常用提示词，右边是实际拼接进系统提示词的全文（含模式、子智能体、技能、扩展与 MCP 登记）。',
+    mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
     };
-    p.appendChild(pageTabs([['tools', '工具'], ['agents', '智能体'], ['skills', '技能'], ['plugins', '插件'], ['mcp', 'MCP']], function(k){ setFilter(k); }));
+    p.appendChild(pageTabs([['agents', '智能体'], ['plugins', '插件'], ['skills', '技能'], ['tools', '工具'], ['prompt', '提示词'], ['mcp', 'MCP']], function(k){ setFilter(k); }));
 
     var intro = el('div', { class: 'sub' });
     p.appendChild(intro);
@@ -6086,6 +6089,11 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     /* ---------- MCP ---------- */
     var mcpBox = el('div');
     p.appendChild(mcpBox);
+  var promptBox = el('div');
+  promptBox.style.display = 'none';
+  p.appendChild(promptBox);
+  var promptBuilt = false;
+  function ensurePrompt(){ if (promptBuilt) return; promptBuilt = true; buildPromptPage(promptBox); }
     function saveMcp(arr){ setCfg({ mcp: arr }); }
     function renderMcp(){
       mcpBox.textContent = '';
@@ -6171,19 +6179,21 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     function setFilter(k){
       filter = k;
       intro.textContent = INTRO[k] || '';
-      var isAgents = (k === 'agents'), isMcp = (k === 'mcp');
+      var isAgents = (k === 'agents'), isMcp = (k === 'mcp'), isPrompt = (k === 'prompt');
       modeBox.style.display = isAgents ? '' : 'none';
       arRow.style.display = (k === 'tools') ? '' : 'none';
-      list.style.display = (isMcp || isAgents) ? 'none' : '';
+      list.style.display = (isMcp || isAgents || isPrompt) ? 'none' : '';
       agentBox.style.display = isAgents ? '' : 'none';
       addBox.style.display = (k === 'tools' || k === 'plugins') ? '' : 'none';
       mcpBox.style.display = isMcp ? '' : 'none';
+      promptBox.style.display = isPrompt ? '' : 'none';
       if (isAgents) renderAgents();
       if (isMcp) renderMcp();
-      if (!isMcp && !isAgents) renderList(k);
+      if (isPrompt) ensurePrompt();
+      if (!isMcp && !isAgents && !isPrompt) renderList(k);
     }
     p._setFilter = setFilter;
-    setFilter('tools');
+    setFilter('agents');
   });
 
   page('memory', '记忆', function(p){
@@ -6221,7 +6231,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.17.0', ua = navigator.userAgent || '';
+      var ver = 'v1.18.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8883,25 +8893,6 @@ function sendMessage(){
 (function(){
   var rail = document.getElementById('sb-rail');
   if (!rail) return;
-  function syncRailGeom(){
-    if (!document.body.classList.contains('sb-collapsed')) return;
-    var tb = document.getElementById('topbar'), cp = document.getElementById('composer');
-    var top = tb ? tb.getBoundingClientRect().bottom : 52;
-    var bot = cp ? (window.innerHeight - cp.getBoundingClientRect().top) : 120;
-    rail.style.top = Math.max(0, top) + 'px';
-    rail.style.bottom = Math.max(0, bot) + 'px';
-  }
-  window._syncRailGeom = syncRailGeom;
-  window.addEventListener('resize', function(){ syncRailGeom(); });
-  window.addEventListener('sc:rail-geom', function(){ syncRailGeom(); });
-  setTimeout(syncRailGeom, 0); setTimeout(syncRailGeom, 300); setTimeout(syncRailGeom, 1200);
-  if (window.ResizeObserver){
-    try {
-      var ro = new ResizeObserver(function(){ syncRailGeom(); });
-      var cp0 = document.getElementById('composer'); if (cp0) ro.observe(cp0);
-      var tb0 = document.getElementById('topbar'); if (tb0) ro.observe(tb0);
-    } catch(e){}
-  }
   rail.addEventListener('click', function(e){
     var b = e.target.closest('[data-r]'); if (!b) return;
     var r = b.getAttribute('data-r');
@@ -9477,8 +9468,7 @@ $('#sidebar').addEventListener('click', function(e){
   function toggleSidebar(force){
     var hide = force === 'hide' ? true : force === 'show' ? false : !document.body.classList.contains('sb-collapsed');
     document.body.classList.toggle('sb-collapsed', hide);
-    if (window._syncRailGeom) setTimeout(window._syncRailGeom, 0);
-    setCfg({ sbHidden: hide });
+      setCfg({ sbHidden: hide });
     var b = $('#btn-sb'); if (b) b.classList.toggle('on', !hide);
   }
   /* v1.4：两侧都是浮层，点主页面空白处收起 */
