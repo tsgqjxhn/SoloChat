@@ -6894,7 +6894,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.7', ua = navigator.userAgent || '';
+      var ver = 'v0.3.8', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7214,8 +7214,9 @@ p.appendChild(addBox);
     var head = el('div', { class: 'msg-head' }, [
       el('span', { class: 'msg-role', text: fsres ? '工具' : m.role === 'user' ? '你' : (m.role === 'system' ? '系统' : '助手') }),
       el('span', { class: 'msg-time', text: fmtTime(m.ts) }),
-      el('span', { class: 'msg-tokens', text: '~' + (m.tokens || tokEst(m.content)) + ' tok' })
+      el('span', { class: 'msg-tokens', text: '~' + (m.tokens || tokEst(m.content)) + ' tok' }),
     ]);
+  if (m.ms) head.appendChild(el('span', { class: 'msg-tokens', text: (m.ms / 1000).toFixed(1) + 's' })); // v0.3.8：本轮耗时
     if (S.cfg.msgFork !== false && !fsres && m.role !== 'system')
       head.appendChild(el('button', { class: 'msg-fork', title: '从这里新开一个分支会话', 'data-fork': m.id }, [icon('branch'), '分支']));
     n.appendChild(head);
@@ -7398,7 +7399,7 @@ p.appendChild(addBox);
       sid: msg.sid, msg: msg, node: node, body: body,
       acc: msg.content || '', rAcc: msg.reasoning || '',
       rNode: null, rBody: null, aborter: null, handle: null,
-      skel: node.querySelector('.skel') || null, lastLen: -1, lastMD: 0
+      skel: node.querySelector('.skel') || null, lastLen: -1, lastMD: 0, t0: Date.now()
     };
     st.flush = rafOnce(function(){ streamFrame(st); });
     S.streams[msg.sid] = st;              // v2.2：按会话登记
@@ -7477,6 +7478,7 @@ p.appendChild(addBox);
   (function(){ try { var _c = String(msg.content || ''); var _f = (_c.match(/\[fs-result\][^\n]*失败|工具失败|（失败）/g) || []).length; if (_f){ DIAG.toolFail += _f; diagSave(); } var _t = (_c.match(/超时/g) || []).length; if (_t){ DIAG.timeouts += _t; diagSave(); } } catch (e) {} })();
     if (st.rAcc) msg.reasoning = st.rAcc;
     msg.status = status;
+  if (st && st.t0) msg.ms = Date.now() - st.t0; // v0.3.8：本轮耗时（对标 Claude）
     if (errInfo) msg.errMsg = errInfo.msg;
     if (usage && usage.total_tokens) msg.tokens = usage.total_tokens;
     if (msg.content.length > LIMITS.MSG_TEXT){
