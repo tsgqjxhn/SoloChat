@@ -1006,8 +1006,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   <button class="rail-btn" id="btn-panel" title="面板：工作区 / 运行 / 终端（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
   <button class="rail-btn" data-rn="ws" title="工作区"><svg class="ic"><use href="#i-ws"/></svg></button>
   <button class="rail-btn" data-rn="view" title="运行 / 预览"><svg class="ic"><use href="#i-play"/></svg></button>
-  <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-ul"/></svg></button>
-      <button class="rail-btn" data-rn="src" title="研究来源（本会话）"><svg class="ic"><use href="#i-globe"/></svg></button>
+  <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-term"/></svg></button>
+      <button class="rail-btn" data-rn="src" title="研究来源（本会话）"><svg class="ic"><use href="#i-link"/></svg></button>
 </div>
 <aside id="runner" data-tab="ws" aria-label="工作区 / 运行 / 终端">
     <div class="rn-resize" id="rn-resize" title="拖动调整宽度（双击复位）"></div>
@@ -1091,6 +1091,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 <symbol id="i-max" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
 <symbol id="i-dl" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
 <symbol id="i-ul" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l3 2.8-3 2.8"/><path d="M13 15.2h4"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4.5 4.5 0 0 0 6.36 0l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L11.4 6.24"/><path d="M13.5 10.5a4.5 4.5 0 0 0-6.36 0L5.02 12.62a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"/></symbol>
 <symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
 <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
 <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
@@ -6809,7 +6811,8 @@ p.appendChild(addBox);
   page('memory', '记忆', function(p){
     var ck = el('input', { type: 'checkbox' }); ck.checked = S.cfg.memory !== false;
     ck.addEventListener('change', function(){ setCfg({ memory: ck.checked }); UI.toast(ck.checked ? '已开启记忆注入' : '已关闭记忆注入'); });
-    p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [ck, ' 发送时注入「当前任务 + 相似历史」（只注入，不修改对话）'])]));
+    p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [ck, ' 发送时注入「本会话目标 + 已产出文件」（只注入，不修改对话）'])]));
+  p.appendChild(el('div', { class: 'hint', text: 'v1.29.7 起只注入本会话内容；下方历史卡片仅作留档与清理，不再进入提示词。' }));
     var q = el('input', { class: 'f-in', placeholder: '搜索记忆…' });
     var list = el('div', { class: 'f-grid' });
     p.appendChild(el('div', { style: 'margin:10px 0 6px' }, [q]));
@@ -6840,7 +6843,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.29.6', ua = navigator.userAgent || '';
+      var ver = 'v1.29.7', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -11379,32 +11382,17 @@ var MEM = (function(){
   }
   /* 注入：当前任务卡 + 相似历史（不含本会话） */
   function promptFor(sid, msgs){
-    if (S.cfg.memory === false) return '';
-    var q = lastUser(msgs).slice(0, 400);
-    if (!q) return '';
-    var out = [];
-    return DB.taskGet(sid).then(function(t){
-      if (t && t.goal) out.push('本会话目标：' + t.goal + (t.artifacts && t.artifacts.length ? '；已有产物：' + t.artifacts.join('、') : ''));
-      return DB.memAll();
-    }).then(function(all){
-      var qt = uniq(toks(q)), scored = [];
-      for (var i = 0; i < (all || []).length; i++){
-        if (all[i].sid === sid) continue;
-        var sc = score(qt, all[i]);
-        if (sc > 0.18) scored.push({ c: all[i], s: sc });
-      }
-      scored.sort(function(a, b){ return b.s - a.s; });
-      scored = scored.slice(0, 3);
-      if (scored.length){
-        out.push('相似经历（仅供参考，别照抄）：');
-        scored.forEach(function(x){
-          out.push('· ' + x.c.goal + (x.c.artifacts && x.c.artifacts.length ? '（产物：' + x.c.artifacts.join('、') + '）' : '') + ' — ' + (x.c.status === 'fail' ? '上次失败' : '上次成功') + (x.c.lesson ? '；教训：' + x.c.lesson : ''));
-        });
-      }
-      return out.length ? '【记忆】\n' + out.join('\n') : '';
-    }).catch(function(){ return ''; });
-  }
-  function search(q){
+  /* v1.29.7：只注入本会话目标（会话内记忆）；不再检索其它会话的卡片 */
+  if (S.cfg.memory === false) return Promise.resolve('');
+  var q = lastUser(msgs).slice(0, 400);
+  if (!q) return Promise.resolve('');
+  return DB.taskGet(sid).then(function(t){
+    if (!t || !t.goal) return '';
+    return '【记忆】\n本会话目标：' + t.goal +
+      (t.artifacts && t.artifacts.length ? '；已有产物：' + t.artifacts.join('、') : '');
+  }).catch(function(){ return ''; });
+}
+function search(q){
     return DB.memAll().then(function(all){
       var qt = uniq(toks(q));
       var arr = (all || []).slice();
