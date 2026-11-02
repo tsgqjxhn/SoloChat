@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.34';
+var APP_VER = 'v0.3.35';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -5372,6 +5372,25 @@ var OCR = (function(){
   return { cfg: cfg, engine: engine, active: active, parsePdf: parsePdf, test: test };
 })();
 /*  */
+/* v0.3.35：会话导出为 Markdown（对标 ChatGPT 的导出对话） */
+function chatToMarkdown(msgs, s){
+  var t = (s && s.title) || '对话';
+  var out = ['# ' + t, '', '> 导出自 SoloChat ' + APP_VER + ' · ' + new Date().toLocaleString(), ''];
+  (msgs || []).forEach(function(m){
+    if (m.status && m.status !== 'ok') return;
+    var body = String(m.content || '').trim(); if (!body) return;
+    var who = m.role === 'user' ? '你' : (m.role === 'assistant' ? '助手' : (m.role === 'tool' ? '工具' : m.role));
+    out.push('## ' + who + (m.model ? '（' + m.model + '）' : ''));
+    out.push(''); out.push(body); out.push('');
+    if (m.srcs && m.srcs.length){
+      out.push('来源：');
+      m.srcs.forEach(function(x, k){ out.push((k + 1) + '. [' + String(x.t || x.u || '') + '](' + String(x.u || '') + ')'); });
+      out.push('');
+    }
+  });
+  return out.join('\n');
+}
+
 var UI = (function(){
   var lbEl = null;
   function lightbox(url){ /* v0.2.9：图片放大查看，点任意处/ESC 关闭 */
@@ -8040,6 +8059,15 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/export'){
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var csx = curSession(); var allm = csx && csx.id === S.sid ? S.msgs : [];
+      if (!allm.length){ UI.toast('当前会话没有可导出的消息', true); return; }
+      var md = chatToMarkdown(allm, csx);
+      UI.download('solochat-' + new Date().toISOString().slice(0, 10) + '.md', md, 'text/markdown');
+      UI.toast('已导出 Markdown（' + allm.length + ' 条）');
+      return;
+    }
     if (cmd === '/model'){
       var want = text.split(/\s+/).slice(1).join(' ').trim();
       var pool = (S.cfg.models || []).slice();
@@ -12664,6 +12692,7 @@ try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题
    hideHint: function(){ UI.hideRouteHint(); },
    fs: NET.fs,
    snaps: function(){ return SC_SNAPS; },
+  chatMd: function(msgs, s){ return chatToMarkdown(msgs, s); }, // v0.3.35：便于自测
   ver: APP_VER, // v0.3.16：唯一来源
    diag: function(){ return DIAG; },
    FS: FS, DB: DB,
