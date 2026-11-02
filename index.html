@@ -334,7 +334,20 @@ body.rn-open #runner{display:flex}
 .rn-tab .rn-kind:empty{display:none}
 .rn-body{flex:1;min-height:0;display:flex;flex-direction:column}
 .rn-pane{display:none;flex:1;min-height:0;flex-direction:column;position:relative}
-#runner[data-tab="ws"] #pane-ws,#runner[data-tab="view"] #pane-view,#runner[data-tab="out"] #pane-out{display:flex}
+#runner[data-tab="ws"] #pane-ws,#runner[data-tab="view"] #pane-view,#runner[data-tab="out"] #pane-out,#runner[data-tab="src"] #pane-src{display:flex}
+#rn-src-list{padding:6px 10px 10px;overflow:auto;flex:1;min-height:0}
+.src-grp{border-bottom:1px solid var(--hairline-soft);padding:8px 2px}
+.src-q{display:flex;align-items:baseline;gap:6px;font-size:12.5px;color:var(--text-1);margin-bottom:4px}
+.src-qt{font-weight:600;word-break:break-word}
+.src-bad{font-size:12px;color:var(--warning);padding:2px 0 4px}
+.src-row{display:flex;flex-direction:column;gap:1px;padding:3px 0}
+.src-t{font-size:12.5px;color:var(--primary);text-decoration:none;word-break:break-word}
+.src-t:hover{text-decoration:underline}
+.src-u{font-size:11.5px;color:var(--faint);word-break:break-all}
+.diag-box{border:1px solid var(--hairline);border-radius:var(--r-md);padding:6px 10px;margin:2px 0 8px}
+.diag-row{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12.5px}
+.diag-k{flex:1;min-width:0;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diag-v{flex:none;color:var(--text-1);font-variant-numeric:tabular-nums}
 #pane-ws{overflow:auto}
 /* 分栏相关按钮只在该分栏出现 */
 #rn-ws-zip{display:none}
@@ -965,6 +978,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   <button class="rail-btn" data-rn="ws" title="工作区"><svg class="ic"><use href="#i-ws"/></svg></button>
   <button class="rail-btn" data-rn="view" title="运行 / 预览"><svg class="ic"><use href="#i-play"/></svg></button>
   <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-ul"/></svg></button>
+      <button class="rail-btn" data-rn="src" title="研究来源（本会话）"><svg class="ic"><use href="#i-globe"/></svg></button>
 </div>
 <aside id="runner" data-tab="ws" aria-label="工作区 / 运行 / 终端">
     <div class="rn-resize" id="rn-resize" title="拖动调整宽度（双击复位）"></div>
@@ -973,6 +987,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <button type="button" class="rn-tab" data-rt="ws" role="tab" title="本会话的沙箱工作区文件">工作区<span class="rn-ws-count" id="rn-ws-count"></span></button>
         <button type="button" class="rn-tab" data-rt="view" role="tab" title="沙箱预览 / 文件预览">运行<span class="rn-kind" id="rn-kind"></span></button>
         <button type="button" class="rn-tab" data-rt="out" role="tab" title="控制台 / 程序输出">终端</button>
+          <button type="button" class="rn-tab" data-rt="src" role="tab" title="本会话搜到的来源与抓取状态">来源<span class="rn-ws-count" id="rn-src-count"></span></button>
       </div>
       <span class="rn-kind" id="rn-status" hidden></span>
       <span class="sp"></span>
@@ -998,6 +1013,9 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <iframe id="rn-frame" sandbox="allow-scripts" title="沙箱预览"></iframe>
         <pre class="rn-src" id="rn-src" hidden></pre>
         <div class="rn-empty" id="rn-empty">点代码块右上角的 ▶ 在这里运行；Work 产物可在「工作区」里预览或运行</div>
+      </div>
+      <div class="rn-pane" id="pane-src">
+        <div id="rn-src-list"></div>
       </div>
       <div class="rn-pane" id="pane-out">
         <div id="rn-out"></div>
@@ -1115,6 +1133,7 @@ var DEF_CFG = {
   personas: [],                 // v0.6.0：自定义模式（配方）[{id,name,base,prompt}]
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
+  planGate: true,     // v1.29.0：本会话第一次写入先手动确认一次（之后自动写入）
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -1609,6 +1628,23 @@ var DB = (function(){
   }
 })();
 /*  */
+/* v1.29.0：本地诊断计数（只存本机，可导出；不上传） */
+var DIAG = { ok: 0, fail: 0, stop: 0, toolFail: 0, timeouts: 0, undos: 0, gated: 0, prov: {} };
+try {
+  var _d = JSON.parse(localStorage.getItem('sc.diag') || '{}');
+  for (var _k in DIAG) if (_d && Object.prototype.hasOwnProperty.call(_d, _k)) DIAG[_k] = _d[_k];
+} catch (e) {}
+function diagSave(){ try { localStorage.setItem('sc.diag', JSON.stringify(DIAG)); } catch (e) {} }
+function D(k){ if (!Object.prototype.hasOwnProperty.call(DIAG, k) || typeof DIAG[k] !== 'number') return; DIAG[k]++; diagSave(); }
+function Dprov(ok, msg){
+  try {
+    var key = normBase(S.cfg.baseURL || '') + ' | ' + (S.cfg.currentModel || '');
+    var p = DIAG.prov[key] || (DIAG.prov[key] = { ok: 0, fail: 0, last: 0, msg: '' });
+    if (ok){ p.ok++; p.last = Date.now(); p.msg = ''; }
+    else { p.fail++; p.last = Date.now(); p.msg = String(msg || '').slice(0, 60); }
+    diagSave();
+  } catch (e) {}
+}
 var NET = (function(){
   /* 统一 SSE 增量解析器（§6.2） */
   function createParser(onDelta, onUsage){
@@ -3041,7 +3077,15 @@ var NET = (function(){
     modelCaps: modelCaps,
     reasonProfile: reasonProfile, // v0.2.5：UI 侧按模型名取思考档位
     estimate: estimate,
-    searchWeb: searchWeb,
+    searchWeb: function(raw, onStage, force){
+    return searchWeb(raw, onStage, force).then(function(r){
+      try { RUNNER.addSources((r && r.query) || String(raw || '').slice(0, 40), (r && r.items) || [], !!(r && r.block), (r && r.err) || (r && r.skip ? '模型判断无需联网' : '')); } catch (e) {}
+      return r;
+    }, function(e){
+      try { RUNNER.addSources(String(raw || '').slice(0, 40), [], false, (e && e.message) || String(e)); } catch (e2) {}
+      throw e;
+    });
+  },
     openExternal: openExternal, // v0.2.3：Work 的 play 工具用（应用内播放窗口）
     mediaDownload: mediaDownload, // v0.2.4：Work 的 download 工具
     fileGet: fileGet, fileText: fileText, // v0.2.8：get 工具（任意文件格式）
@@ -4137,10 +4181,11 @@ var RUNNER = (function(){
   /* v0.2.5：顶部分栏（工作区 / 运行 / 终端）——不再各区块单独折叠 */
   function setTab(name){
     var r = $('#runner'); if (!r) return;
-    if (['ws', 'view', 'out'].indexOf(name) < 0) name = 'ws';
+    if (['ws', 'view', 'out', 'src'].indexOf(name) < 0) name = 'ws';
     r.setAttribute('data-tab', name);
     try { localStorage.setItem('sc.rn.tab', name); } catch(e){}
     if (name === 'ws') renderWs();
+  if (name === 'src') renderSrc();
     if (name === 'out'){ var t = r.querySelector('.rn-tab[data-rt="out"]'); if (t) t.classList.remove('dot'); }
   }
   function open(){
@@ -4745,8 +4790,47 @@ function fitSide(){
     });
   }
 
+  /* v1.29.0：研究来源（本会话）—— 只记真实跑过的 search / web，失败也记 */
+  var SRCS = [];
+  function addSources(q, items, ok, err){
+    var arr = (items || []).map(function(x){
+      return { t: String((x && (x.t || x.title || x.name)) || ''), u: String((x && (x.u || x.url || x.link)) || ''), s: String((x && (x.snippet || x.desc)) || '') };
+    }).filter(function(x){ return x.u; });
+    SRCS.unshift({ q: String(q || ''), ts: Date.now(), ok: ok !== false, err: String(err || ''), items: arr });
+    if (SRCS.length > 40) SRCS.length = 40;
+    try { renderSrc(); } catch (e) {}
+  }
+  function renderSrc(){
+    var list = document.getElementById('rn-src-list'); if (!list) return;
+    var cnt = document.getElementById('rn-src-count');
+    if (cnt) cnt.textContent = SRCS.length ? ('（' + SRCS.reduce(function(a, b){ return a + b.items.length; }, 0) + '）') : '';
+    list.textContent = '';
+    if (!SRCS.length){
+      list.appendChild(el('div', { class: 'hint', text: '还没有来源。开着联网搜索，或在 Work / Agent 里让模型用 search / web 抓取后，这里会按查询列出每条来源和抓取状态。' }));
+      return;
+    }
+    SRCS.forEach(function(g){
+      var box = el('div', { class: 'src-grp' });
+      box.appendChild(el('div', { class: 'src-q' }, [
+        el('span', { class: 'src-qt', text: g.q || '（未命名查询）' }),
+        el('span', { class: 'hint', text: ' ' + new Date(g.ts).toLocaleTimeString() })
+      ]));
+      if (!g.ok) box.appendChild(el('div', { class: 'src-bad', text: '这次没拿到正文' + (g.err ? '：' + g.err : '') }));
+      if (!g.items.length && g.ok) box.appendChild(el('div', { class: 'hint', text: '搜索返回 0 条' }));
+      g.items.forEach(function(it){
+        var row = el('div', { class: 'src-row' });
+        var a = el('a', { class: 'src-t', href: '#', text: it.t || it.u, title: it.t || it.u });
+        a.addEventListener('click', function(ev){ ev.preventDefault(); try { NET.openExternal(it.u, 'window'); } catch (e) {} });
+        row.appendChild(a);
+        row.appendChild(el('span', { class: 'src-u', text: it.u.length > 64 ? it.u.slice(0, 64) + '…' : it.u }));
+        box.appendChild(row);
+      });
+      list.appendChild(box);
+    });
+  }
+
   return { run: run, runCapture: runCapture, close: close, open: open, reset: reset, download: download, runVfs: runVfs,
-    renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, open: open, close: close, curKind: function(){ return cur && cur.kind; },
+    renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, curKind: function(){ return cur && cur.kind; },
     previewTo: previewTo, previewSource: previewSource, pvKind: pvKind, previewRefreshIf: previewRefreshIf }; /* v2.5/v2.8 */
 })();
 
@@ -5933,7 +6017,45 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       ]));
       p.appendChild(el('div', { class: 'hint', text: '依次检查：代理 / 模型列表 / 能力目录 / OCR，失败项会给出建议。' }));
 
-      p.appendChild(el('div', { class: 'sub', text: '存储' }));
+      /* v1.29.0：本地诊断计数（不联网、不上传） */
+    p.appendChild(el('div', { class: 'sub', text: '本地诊断' }));
+    (function(){
+      var box = el('div', { class: 'diag-box' });
+      function row2(k, label){
+        box.appendChild(el('div', { class: 'diag-row' }, [
+          el('span', { class: 'diag-k', text: label }),
+          el('span', { class: 'diag-v', text: String(DIAG[k] || 0) })
+        ]));
+      }
+      row2('ok', '请求成功');
+      row2('fail', '请求失败');
+      row2('stop', '用户中止');
+      row2('toolFail', '工具失败（按正文标记估算）');
+      row2('timeouts', '超时标记');
+      row2('undos', '撤销写入');
+      row2('gated', '计划门禁拦截');
+      p.appendChild(box);
+      var pv = Object.keys(DIAG.prov || {}).sort(function(a, b){ return (DIAG.prov[b].last || 0) - (DIAG.prov[a].last || 0); }).slice(0, 5);
+      if (pv.length){
+        var pl = el('div', { class: 'diag-box' });
+        pv.forEach(function(k){
+          var it = DIAG.prov[k];
+          pl.appendChild(el('div', { class: 'diag-row' }, [
+            el('span', { class: 'diag-k', text: k, title: k }),
+            el('span', { class: 'diag-v', text: '成功 ' + (it.ok || 0) + ' / 失败 ' + (it.fail || 0) }),
+            el('span', { class: 'hint', text: it.msg ? ('最近：' + it.msg) : (it.last ? new Date(it.last).toLocaleString() : '') })
+          ]));
+        });
+        p.appendChild(pl);
+      }
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+        el('button', { class: 'btn btn-sec', 'data-m': 'diag-out', text: '导出诊断计数' }),
+        el('button', { class: 'btn btn-sec', 'data-m': 'diag-clear', text: '清空计数' })
+      ]));
+      p.appendChild(el('div', { class: 'hint', text: '只存在本机 localStorage，不含对话内容；用来判断是端点限流 / 模型不支持，还是用法问题。' }));
+    })();
+
+    p.appendChild(el('div', { class: 'sub', text: '存储' }));
       p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
         el('button', { class: 'btn btn-sec', 'data-m': 'storage', text: '查看用量与清理' }),
         el('button', { class: 'btn btn-sec', 'data-m': 'catalog-clear', text: '清空能力目录缓存' })
@@ -6158,6 +6280,14 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       arRow.appendChild(el('label', {}, [arCk, ' 自动选模式（按本轮输入切 Chat / Work / Agent；切换会在输入框上方明示，可一键切回）']));
     })();
     p.appendChild(arRow);
+
+    var pgRow = el('div', { class: 'f-row' });
+    (function(){
+      var pgCk = el('input', { type: 'checkbox' }); pgCk.checked = S.cfg.planGate !== false;
+      pgCk.addEventListener('change', function(){ setCfg({ planGate: pgCk.checked }); });
+      pgRow.appendChild(el('label', {}, [pgCk, ' 计划门禁：每个会话第一次写入要手动确认一次（关掉则全自动）']));
+    })();
+    p.appendChild(pgRow);
 
     var list = el('div', { class: 'f-grid' });
     p.appendChild(list);
@@ -6566,7 +6696,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.28.4', ua = navigator.userAgent || '';
+      var ver = 'v1.29.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -7145,6 +7275,7 @@ p.appendChild(addBox);
     if (st.dead) return; // v2.2：会话已删除/已清空 → 丢弃结果，避免落库复活
     var msg = st.msg, sid = msg.sid, shown = (sid === S.sid); // v2.2：后台会话只落库，不动当前 DOM
     msg.content = cleanAssistant(st.acc); // v0.2.1：模型有时自吐 <tool_call>/<analysis> 伪工具标记，落库前剥掉
+  (function(){ try { var _c = String(msg.content || ''); var _f = (_c.match(/\[fs-result\][^\n]*失败|工具失败|（失败）/g) || []).length; if (_f){ DIAG.toolFail += _f; diagSave(); } var _t = (_c.match(/超时/g) || []).length; if (_t){ DIAG.timeouts += _t; diagSave(); } } catch (e) {} })();
     if (st.rAcc) msg.reasoning = st.rAcc;
     msg.status = status;
     if (errInfo) msg.errMsg = errInfo.msg;
@@ -7799,6 +7930,14 @@ function sendMessage(){
     if (!bg) S.streamHandle = handle;
     function finish(err){
       if (readerRef && readerRef.cancel) try { readerRef.cancel(); } catch (e) {}
+      /* v1.29.0：本地计数 —— 成功 / 失败 / 用户中止 + 按模型记最近结果 */
+      (function(){
+        try {
+          if (err){ var _i = NET.classify(tmoErr && tmoErr.tmo ? tmoErr : err);
+            if (_i.code === 'abort') D('stop'); else { D('fail'); Dprov(false, _i.msg); } }
+          else { D('ok'); Dprov(true); }
+        } catch (e) {}
+      })();
       if (!err){
         endStream(st, 'ok', null, st.msg.tokens ? { total_tokens: st.msg.tokens } : null);
         FS.handleTurn(asst); // 文件 Agent 回合循环入口（v1.1）：扫 fs-* 标记并续跑
@@ -9705,6 +9844,14 @@ $('#sidebar').addEventListener('click', function(e){
     else if (m === 'snap-out') UI.exportSnapshot();
     else if (m === 'snap-in') UI.importSnapshot();
     else if (m === 'diag') UI.doExportDiag();
+  else if (m === 'diag-out'){
+    try { download('solochat-diag-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ ts: Date.now(), ver: ver, diag: DIAG }, null, 2), 'application/json'); UI.toast('已导出诊断计数'); }
+    catch (e) { UI.toast('导出失败', true); }
+  }
+  else if (m === 'diag-clear'){
+    DIAG.ok = DIAG.fail = DIAG.stop = DIAG.toolFail = DIAG.timeouts = DIAG.undos = DIAG.gated = 0;
+    DIAG.prov = {}; diagSave(); UI.toast('已清空诊断计数');
+  }
     else if (m === 'catalog-clear'){
       try { localStorage.removeItem('sc.cat.v1'); } catch (e) {}
       UI.toast('已清空能力目录缓存');
@@ -10066,7 +10213,9 @@ var FS = (function(){
       return '';
     }
     S._riskyWrites = {};
-    if (S.cfg.fsAutoWrite !== false)
+    /* v1.29.0：计划门禁 —— 本会话还没确认过写入时，先把这一批留在卡上等用户点一次「应用写入」 */
+    var gated = (S.cfg.fsAutoWrite !== false) && (S.cfg.planGate !== false) && !s0.planOk && writes.length > 0;
+    if (S.cfg.fsAutoWrite !== false && !gated)
       for (i = 0; i < writes.length; i++){
         if (isOutside(writes[i].path)) continue;
         var why = riskyWrite(writes[i].path);
@@ -10075,6 +10224,16 @@ var FS = (function(){
       }
     if (Object.keys(S._riskyWrites).length)
       UI.toast('有 ' + Object.keys(S._riskyWrites).length + ' 个写入需要确认（' + Object.keys(S._riskyWrites).map(function(k){ return S._riskyWrites[k]; })[0] + '）');
+      if (gated){
+        try { D('gated'); } catch (e) {}
+      UI.toast('计划门禁：本轮 ' + writes.length + ' 处写入先确认一次（点卡片上的「应用写入」），之后本会话自动写入', true);
+        try {
+          if (String(msg.content || '').indexOf('⏸ 计划门禁') < 0){
+            msg.content = String(msg.content || '') + '\n\n> ⏸ 计划门禁：本轮 ' + writes.length + ' 处写入要你先确认（点卡片「应用写入」）。确认一次后，本会话的写入自动应用。';
+            DB.putMessage(msg); UI.repaintMsg(msg.id);
+          }
+        } catch (e) {}
+      }
     for (i = 0; i < auto.length; i++) apply(msg.id, auto[i].path, null); // 自动应用（btn 为空）
     if (!reads.length) return;
     if (s0.turns >= LIMITS.FS_MAX_TURNS){ UI.toast('已达工具轮次上限（' + LIMITS.FS_MAX_TURNS + '）', true); return; }
@@ -10287,6 +10446,7 @@ var FS = (function(){
       }
       NET.fs('write', path, block.body, ws, outside).then(function(r){
         if (r && r.snap){ SC_SNAPS[path] = r.snap; saveSnaps(); }
+        try { stOf(msg.sid).planOk = true; } catch (e) {}   /* v1.29.0：确认过一次就解锁本会话自动写入 */
         markDone(msg, path, 'fs-done'); UI.toast('已写入 ' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
       }, function(err){
         if (btn){ btn.disabled = false; btn.textContent = '应用写入'; }
@@ -10310,6 +10470,7 @@ var FS = (function(){
       if (btn){ btn.disabled = true; btn.textContent = '撤销中…'; }
       NET.fs('restore', path, snap, curWs(), isOutside(path)).then(function(r){
         delete SC_SNAPS[path]; saveSnaps();
+        try { D('undos'); } catch (e) {}
         if (msg) markDone(msg, path, 'fs-back');
         UI.toast('已撤销：' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
       }, function(e){
@@ -12181,6 +12342,12 @@ try {
    hideHint: function(){ UI.hideRouteHint(); },
    fs: NET.fs,
    snaps: function(){ return SC_SNAPS; },
+   diag: function(){ return DIAG; },
+   FS: FS, DB: DB,
+   search: function(q){ return NET.searchWeb(q, null, true); },
+   src: function(){ return RUNNER.srcs(); },
+   addSrc: function(a, b, c, d){ RUNNER.addSources(a, b, c, d); },
+   renderSrc: function(){ RUNNER.renderSrc(); },
       cfg: function(){ return S.cfg; },
       setCfg: function(o){ setCfg(o); } };
   }
