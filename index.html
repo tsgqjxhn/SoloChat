@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.31';
+var APP_VER = 'v0.3.32';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -7243,6 +7243,14 @@ p.appendChild(addBox);
         el('summary', { text: '思考过程' }),
         el('div', { class: 'r-body', text: m.reasoning })
       ]));
+  if (m.srcs && m.srcs.length){
+    var sf = el('div', { class: 'msg-srcs' });
+    sf.appendChild(el('span', { class: 'msg-srcs-h', text: '来源' }));
+    m.srcs.forEach(function(x, k){
+      sf.appendChild(el('a', { class: 'msg-src', href: x.u || '#', target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
+    });
+    n.appendChild(sf);
+  } // v0.3.32：来源页脚（对标 Perplexity）
     var body = el('div', { class: 'msg-body md' });
     if (m.status === 'streaming' && !m.content){
       body.appendChild(el('div', { class: 'skel' }, [el('i'), el('i'), el('i')]));
@@ -8146,6 +8154,7 @@ function sendMessage(){
       id: uuid(), sid: s.id, role: 'assistant', content: '',
       status: 'streaming', ts: Date.now(), attachments: []
     };
+  try { if (searchMeta && searchMeta.items && searchMeta.items.length) asst.srcs = searchMeta.items.slice(0, 6).map(function(x){ return { t: x.t || x.title || '', u: x.u || x.url || '' }; }); } catch (e) {} // v0.3.32：本轮来源挂到消息上
     var st = bg ? beginStreamBG(asst, msgs) : beginStream(asst);
     notifyBusy(); // v2.2：告知宿主有生成在跑（隐藏/最小化时不要压内存挂起）
     if (!bg){
