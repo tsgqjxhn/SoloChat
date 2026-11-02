@@ -3171,6 +3171,10 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
 var SC_SNAPS = {};
 try { SC_SNAPS = JSON.parse(localStorage.getItem('sc.snaps') || '{}') || {}; } catch (e) { SC_SNAPS = {}; }
 function saveSnaps(){ try { localStorage.setItem('sc.snaps', JSON.stringify(SC_SNAPS)); } catch (e) {} }
+/* v0.4.0a：快照键 = 会话 + 工作区 + 路径，避免跨会话互相覆盖 */
+function snapKey(sid, ws, path){ return (sid || '') + '|' + (ws || '') + '|' + path; }
+function snapGet(sid, ws, path){ return SC_SNAPS[snapKey(sid, ws, path)] || SC_SNAPS[path] || ''; }
+function snapAny(path){ if (SC_SNAPS[path]) return true; for (var k in SC_SNAPS) if (k.slice(-1 - path.length) === '|' + path) return true; return false; }
 
 var MD = (function(){
   /* v2.1：轻量 LaTeX 子集 → HTML（零依赖）。目标是把常见公式渲染成可读文本，不是完整排版引擎。
@@ -3431,7 +3435,7 @@ var MD = (function(){
     if (c.lang === 'fs-write')
       h += '<button class="btn btn-primary" type="button" data-act="fs-apply" data-path="' + path + '">应用写入</button>' +
            '<button class="btn btn-sec" type="button" data-act="fs-reject" data-path="' + path + '">拒绝</button>';
-           if (c.lang === 'fs-done' && SC_SNAPS[path])
+           if (c.lang === 'fs-done' && snapAny(path))
              h += '<button class="btn btn-sec" type="button" data-act="fs-undo" data-path="' + path + '" title="把文件恢复成本次写入前的内容">撤销这次写入</button>';
     h += '</div>';
     if (c.lang === 'fs-write'){
@@ -6895,7 +6899,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.9', ua = navigator.userAgent || '';
+      var ver = 'v0.3.10', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10664,7 +10668,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         return;
       }
       NET.fs('write', path, block.body, ws, outside).then(function(r){
-        if (r && r.snap){ SC_SNAPS[path] = r.snap; saveSnaps(); }
+        if (r && r.snap){ SC_SNAPS[snapKey(msg.sid, ws, path)] = r.snap; saveSnaps(); }
         try { stOf(msg.sid).planOk = true; } catch (e) {}   /* v1.29.0：确认过一次就解锁本会话自动写入 */
         markDone(msg, path, 'fs-done'); UI.toast('已写入 ' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
       }, function(err){
@@ -10675,7 +10679,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
   }
   /* v1.28.4：撤销这次写入 —— 用写入前快照恢复，只覆盖 SoloChat 自己写过的那一份 */
   function undo(mid, path, btn){
-    var snap = SC_SNAPS[path];
+  var um = byId(mid);
+  var uws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(um && um.sid); // v0.4.0a：按消息所属会话
+  var uk = snapKey(um && um.sid, uws, path);
+    var snap = SC_SNAPS[uk] || SC_SNAPS[path];
     if (!snap){ UI.toast('没有可用的快照（可能已被清理）', true); return; }
     var msg = byId(mid);
     UI.confirmBox({
@@ -10687,8 +10694,8 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     }).then(function(ok){
       if (!ok) return;
       if (btn){ btn.disabled = true; btn.textContent = '撤销中…'; }
-      NET.fs('restore', path, snap, curWs(), isOutside(path)).then(function(r){
-        delete SC_SNAPS[path]; saveSnaps();
+      NET.fs('restore', path, snap, uws, isOutside(path)).then(function(r){
+        delete SC_SNAPS[uk]; delete SC_SNAPS[path]; saveSnaps();
         try { D('undos'); } catch (e) {}
         if (msg) markDone(msg, path, 'fs-back');
         UI.toast('已撤销：' + path + '（' + ((r && r.bytes) || 0) + ' 字节）');
