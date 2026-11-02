@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.17';
+var APP_VER = 'v0.3.18';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -7689,7 +7689,8 @@ p.appendChild(addBox);
   }
   /* v1.28.1：回合的文字流结束了，但工具链（子智能体 / 抓取 / 下载）还在跑 ——
      用计数器把「停止」状态挂住，别让按钮提前变回发送键。 */
-  function holdBusy(d){
+function holdBusy(d, sid){
+  if (sid){ S.pendBy = S.pendBy || {}; S.pendBy[sid] = Math.max(0, (S.pendBy[sid] || 0) + d); } // v0.3.18：按会话记 busy
     S.pend = Math.max(0, (S.pend || 0) + d);
     if (S.pend > 0){ if (!S.sending) setSending(true); }
     else if (!Object.keys(S.streams || {}).length) setSending(false);
@@ -7995,7 +7996,11 @@ function sendMessage(){
       DUAL.send(dt);
       return;
     }
-    if (S.sending){ quickPending = false; stopGeneration(); return; }
+  if (S.sending){
+    var _mine = isSending(S.sid) || ((S.pendBy || {})[S.sid] > 0);
+    if (!_mine){ S.pend = 0; setSending(false); } // v0.3.18：别的会话把状态卡住了，这里自愈
+    else { quickPending = false; stopGeneration(); return; }
+  }
     var text = $input.value.trim();
     if (!text && !S.pendAtts.length){ quickPending = false; return; }
     if (!NET.isMock() && !S.cfg.baseURL){ quickPending = false; openSettings(); toast('请先配置 Base URL，或填入 mock 试用', true); return; }
@@ -10469,7 +10474,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{1,2}/.test(p) || p.split(/[\\/]/).indexOf('..') >= 0;
   }
   function runReads(reads, sid0){
-    UI.holdBusy(1);
+    UI.holdBusy(1, sid0);
     var parts = [], done = 0, s0 = stOf(sid0);
     /* v0.3.3：后台会话用自己的工作区，不读当前显示会话的 */
     var ws0 = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(sid0);
@@ -10487,7 +10492,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     if (subs.length > 1){ rest.unshift({ op: 'suball', items: subs }); reads = rest; }
   })();
     (function next(){
-      if (s0.cancel){ UI.holdBusy(-1); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
+      if (s0.cancel){ UI.holdBusy(-1, sid0); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
       if (done >= reads.length){
         s0.turns++;
         /* v1.17：闭环自修 —— 有失败就把失败清单回注，让模型带着证据重试（每轮最多两次） */
@@ -10502,7 +10507,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
             '\n先修好再交付；修不了就直接说卡在哪一步、缺什么，不要假装成功。';
         }
         note('[fs-result]\n' + txt0.slice(0, LIMITS.FS_RESULT_CHARS), sid0);
-        UI.holdBusy(-1);
+        UI.holdBusy(-1, sid0);
         UI.startStreamFor(sid0); // 结果回灌后自动续跑一轮（目标会话，v2.2）
         return;
       }
@@ -12272,7 +12277,7 @@ var WORK = (function(){
     runCalls(calls, msg.sid);
   }
   function runCalls(calls, sid0){
-    UI.holdBusy(1);
+    UI.holdBusy(1, sid0);
     var parts = [], events = [], imgs = [], done = 0, w0 = stOf(sid0);
       /* v1.28.3：一条回复里的多个 agent/sub 先聚成一批并行跑，剩下的工具照原样串行 */
       (function hoistSubs(){
@@ -12292,14 +12297,14 @@ var WORK = (function(){
     function add(text, ev){ parts.push(text); if (ev) events.push(ev); }
   function addImg(dataUrl){ if (dataUrl && imgs.length < 4) imgs.push(dataUrl); }
     function finish(extra){
-      UI.holdBusy(-1);
+      UI.holdBusy(-1, sid0);
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
       if (!/^\[(run-result|vfs|web|search|preview|play|download|get)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
-      if (w0.cancel){ UI.holdBusy(-1); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
+      if (w0.cancel){ UI.holdBusy(-1, sid0); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
       if (done >= calls.length){
         w0.turns++;
         finish();
