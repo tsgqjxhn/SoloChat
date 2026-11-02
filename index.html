@@ -1901,6 +1901,8 @@ var NET = (function(){
       }
       else if (d.t === 'file.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '抓取失败')); else if (p.onError) p.onError(new Error(d.message || '抓取失败')); }
       else if (d.t === 'media.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '下载失败')); else if (p.onError) p.onError(new Error(d.message || '下载失败')); }
+      else if (d.t === 'pkg.done'){ delete bridge.pend[d.id]; var pkd = (d.data && typeof d.data === 'object') ? d.data : null; if (!pkd) { try { pkd = JSON.parse(d.data); } catch(e){ pkd = {}; } } if (p.resolve) p.resolve(pkd); else if (p.onDone) p.onDone(pkd); }
+      else if (d.t === 'pkg.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '导出失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
       else if (d.t === 'cmd.done'){
@@ -1972,6 +1974,14 @@ var NET = (function(){
       });
     },
     reveal: function(path){ if (this.ok && path) this.send({ t: 'reveal', path: path }); },
+    pkg: function(name, files, where){ /* v1.23：扩展包导出到磁盘（宿主落盘，仅限桌面/下载下同名文件夹） */
+      if (!this.ok) return Promise.reject(new Error('需要 exe 宿主版才能写入磁盘'));
+      var id = 'pk' + (++this.seq);
+      return new Promise(function(res, rej){
+        bridge.pend[id] = { resolve: res, reject: rej };
+        bridge.send({ t: 'pkg', id: id, name: name, where: where || 'desktop', files: files || [] });
+      });
+    },
     vault: function(op, name, value){ // F4：密钥保险库（DPAPI），get→string|null / set→void
       if (!this.ok) return Promise.resolve(null);
       var id = 'v' + (++this.seq);
@@ -3000,6 +3010,7 @@ var NET = (function(){
     fileGet: fileGet, fileText: fileText, // v0.2.8：get 工具（任意文件格式）
     isBinaryUrl: isBinaryUrl,
     revealPath: revealPath,
+    pkgSave: function(name, files, where){ return bridge.pkg(name, files, where); },
     safeUrl: safeUrl,          // v0.2.1：Work 的 web 工具复用
     fetchPageText: fetchPageText, // v0.2.1：Work 的 web 工具复用（桥优先 → 无 CORS 限制）
     classify: classify,
@@ -6079,7 +6090,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
 var addBox = el('div');
 addBox.appendChild(el('div', { class: 'sub', text: '扩展包 = 一个文件夹：skills/*.md（技能）、tools/*.json（声明式 HTTP 工具）、agents/*.md（智能体）、prompts/*.md（提示词），可放 manifest.json 写名称与版本。单个 .md / .json 文件也能直接导入。' }));
 var fiFiles = el('input', { type: 'file', multiple: '', accept: '.json,.md,.markdown,.txt', style: 'display:none' });
-var fiDir = el('input', { type: 'file', style: 'display:none' });
+var fiDir = el('input', { type: 'file', multiple: '', style: 'display:none' });
 fiDir.setAttribute('webkitdirectory', ''); fiDir.setAttribute('directory', '');
 var bFiles = el('button', { class: 'btn btn-sec', text: '导入文件…' });
 var bDir = el('button', { class: 'btn btn-primary', text: '导入文件夹…' });
@@ -6142,6 +6153,7 @@ var pkgsBox = el('div', { class: 'pkg-list' });
 function renderPkgs(){
   pkgsBox.textContent = '';
   var map = {}, order = [];
+  var prAll = (S.cfg.prompts || []).filter(function(x){ return x.pkg; });
   EXT.all().forEach(function(it){
     if (!it.pkg) return;
     if (!map[it.pkg]){ map[it.pkg] = []; order.push(it.pkg); }
@@ -6152,14 +6164,28 @@ function renderPkgs(){
     var items = map[p];
     var card = el('div', { class: 'sub-card' });
     card.appendChild(el('div', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') }));
+    var prThis = prAll.filter(function(x){ return x.pkg === p; });
     card.appendChild(el('div', { class: 'sub', text:
-      items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); }).join('、') }));
+      items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); })
+        .concat(prThis.map(function(x){ return '提示词·' + x.name; })).join('、') }));
     var rm = el('button', { class: 'btn btn-danger rn-mini', text: '移除整包' });
     rm.addEventListener('click', function(){
-      items.forEach(function(x){ EXT.del(x.id); });
+      EXT.delPkg(p);
       renderPkgs(); renderList(filter); renderModeBox(); UI.toast('已移除「' + p + '」');
     });
-    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [rm]));
+    var ex = el('button', { class: 'btn btn-sec rn-mini', text: '导出到桌面' });
+    ex.addEventListener('click', function(){
+      try {
+        var pack = EXT.exportFiles(p);
+        ex.disabled = true;
+        NET.pkgSave(pack.name, pack.files, 'desktop').then(function(r){
+          ex.disabled = false;
+          UI.toast('已导出 ' + r.files + ' 个文件：' + r.dir);
+          NET.revealPath(r.dir);
+        }, function(e){ ex.disabled = false; UI.toast('导出失败：' + (e && e.message || e), true); });
+      } catch(e){ ex.disabled = false; UI.toast('导出失败：' + (e && e.message || e), true); }
+    });
+    card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [ex, rm]));
     pkgsBox.appendChild(card);
   });
 }
@@ -6329,7 +6355,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.22.0', ua = navigator.userAgent || '';
+      var ver = 'v1.23.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10068,6 +10094,14 @@ var EXT = (function(){
     setCfg({ ext: u }); save();
     return item.name;
   }
+  function delPkg(pkg){
+    if (!pkg) return 0;
+    var u = userItems().filter(function(x){ return x.pkg !== pkg; });
+    var ps = (S.cfg.prompts || []).filter(function(x){ return x.pkg !== pkg; });
+    var n = (userItems().length - u.length) + ((S.cfg.prompts || []).length - ps.length);
+    setCfg({ ext: u, prompts: ps }); save();
+    return n;
+  }
   function del(id){
     var u = userItems().filter(function(x){ return x.id !== id && x.name !== id; });
     setCfg({ ext: u }); save();
@@ -10155,12 +10189,12 @@ function freeName(base){
   }
   return base.slice(0, 14) + '-' + Date.now().toString(36).slice(-4);
 }
-function addPromptItem(name, text){
+function addPromptItem(name, text, pkg, ver){
   var ps = (S.cfg.prompts || []).slice();
   var nm = String(name || '提示词').trim().slice(0, 40) || '提示词';
   var base = nm, i = 2;
   while (ps.some(function(x){ return x.name === nm; })){ nm = base + ' ' + i; i++; }
-  ps.push({ name: nm, text: String(text || '') });
+  ps.push({ name: nm, text: String(text || ''), pkg: pkg || '', pkgVer: ver || '' });
   setCfg({ prompts: ps });
   return nm;
 }
@@ -10209,7 +10243,7 @@ function importOne(j, pkg, ver, rep){
     if (kind === 'prompt'){
       var pb = String(fm.body || '').trim() || String(m.text || '').trim();
       if (!pb) throw new Error('提示词为空');
-      addPromptItem(m.name || base, pb);
+      addPromptItem(m.name || base, pb, pkg, ver);
       rep.prompts++;
       return;
     }
@@ -10275,6 +10309,48 @@ function importGroup(root, entries, rep){
       rep.pkgs.push({ name: pkg, version: ver, count: rep.added - n0, total: jobs.length });
     });
   });
+}
+function exportFiles(pkg){
+  var items = userItems().filter(function(x){ return x.pkg === pkg; });
+  if (!items.length) throw new Error('这个包没有条目');
+  var man = { name: pkg, version: (items[0] && items[0].pkgVer) || '1.0.0', desc: '由 SoloChat 导出' };
+  var out = [], skills = [], tools = [], agents = [];
+  items.forEach(function(it){
+    if (it.kind === 'skill'){
+      var rel = 'skills/' + it.name + '.md';
+      out.push({ rel: rel, text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
+        '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' });
+      skills.push(rel);
+    } else if (it.kind === 'tool'){
+      var rel2 = 'tools/' + it.name + '.json';
+      var obj = { name: it.name, title: it.title, desc: it.desc, type: 'http', method: it.method || 'GET', url: it.url };
+      if (it.headers) obj.headers = it.headers;
+      if (it.bodyTpl) obj.body = it.bodyTpl;
+      obj.modes = it.modes || ['work'];
+      out.push({ rel: rel2, text: JSON.stringify(obj, null, 2) + '\n' });
+      tools.push(rel2);
+    } else if (it.kind === 'agent'){
+      var rel3 = 'agents/' + it.name + '.md';
+      out.push({ rel: rel3, text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
+        '\ntools: [' + (it.tools || []).join(', ') + ']\nmaxTurns: ' + (it.maxTurns || 4) + '\nmaxTokens: ' + (it.maxTokens || 1600) +
+        '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' });
+      agents.push(rel3);
+    }
+  });
+  var prompts = [];
+  (S.cfg.prompts || []).forEach(function(pr, i){
+    if (pr.pkg !== pkg) return;
+    var slug = pkgName(pr.name, 'prompt-' + (i + 1));
+    var rel4 = 'prompts/' + slug + '.md';
+    out.push({ rel: rel4, text: '---\nname: ' + pr.name + '\n---\n\n' + (pr.text || '') + '\n' });
+    prompts.push(rel4);
+  });
+  if (prompts.length) man.prompts = prompts;
+  if (skills.length) man.skills = skills;
+  if (tools.length) man.tools = tools;
+  if (agents.length) man.agents = agents;
+  out.unshift({ rel: 'manifest.json', text: JSON.stringify(man, null, 2) + '\n' });
+  return { name: pkg, files: out };
 }
 function importFiles(list){
   var files = Array.prototype.slice.call(list || []).filter(function(f){ return f && f.size > 0; });
@@ -10343,7 +10419,7 @@ function importFiles(list){
     isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt,
-    importFiles: importFiles, addPromptItem: addPromptItem };
+    importFiles: importFiles, exportFiles: exportFiles, addPromptItem: addPromptItem, delPkg: delPkg };
 })();
 
 /* v0.6.0：模式层 —— 自动路由 + 自定义模式（配方）

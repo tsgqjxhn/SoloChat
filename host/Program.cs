@@ -685,6 +685,12 @@ namespace SoloChatHost
                 var reqCopy2 = root.Clone();
                 Task.Run(() => RunMediaAsync(reqCopy2, idCopy2));
             }
+            else if (t == "pkg") /* v1.23：扩展包导出（页面给文件名+文本，宿主落到桌面/下载） */
+            {
+                var pkgCopy = root.Clone();
+                var pkgId = id;
+                Task.Run(() => RunPkgAsync(pkgCopy, pkgId));
+            }
             else if (t == "reveal") /* 在资源管理器中定位下载的文件 */
             {
                 string rp = root.TryGetProperty("path", out JsonElement rpEl) ? rpEl.GetString() : "";
@@ -1739,6 +1745,43 @@ namespace SoloChatHost
                     throw new Exception("路径经过符号链接/联接点，已拒绝：" + acc);
             }
             return full;
+        }
+
+        /* v1.23：扩展包导出 —— 只接受「相对路径 + 文本」，限制在目标文件夹内，不覆盖目录外文件 */
+        void RunPkgAsync(JsonElement req, string id)
+        {
+            try
+            {
+                string name = req.TryGetProperty("name", out JsonElement nm) ? (nm.GetString() ?? "") : "";
+                string where = req.TryGetProperty("where", out JsonElement wh) ? (wh.GetString() ?? "desktop") : "desktop";
+                foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '-');
+                name = name.Trim().TrimEnd('.', ' ');
+                if (name.Length == 0) name = "扩展包";
+                string baseDir = where == "downloads"
+                    ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
+                    : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                string root = Path.Combine(baseDir, name);
+                string rootFull = Path.GetFullPath(root);
+                Directory.CreateDirectory(rootFull);
+                int count = 0;
+                if (req.TryGetProperty("files", out JsonElement arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement f in arr.EnumerateArray())
+                    {
+                        string rel = f.GetProperty("rel").GetString() ?? "";
+                        string text = f.TryGetProperty("text", out JsonElement tx) ? (tx.GetString() ?? "") : "";
+                        if (string.IsNullOrWhiteSpace(rel)) continue;
+                        string full = Path.GetFullPath(Path.Combine(rootFull, rel.Replace('/', Path.DirectorySeparatorChar)));
+                        if (!full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+                        string dir = Path.GetDirectoryName(full);
+                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                        File.WriteAllText(full, text, new UTF8Encoding(false));
+                        count++;
+                    }
+                }
+                PostFs(id, "pkg.done", JsonSerializer.Serialize(new { dir = rootFull, files = count }), null);
+            }
+            catch (Exception ex) { PostFs(id, "pkg.error", null, ex.Message); }
         }
 
         void RunFsAsync(string op, JsonElement req, string id)
