@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.33';
+var APP_VER = 'v0.3.34';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -7250,7 +7250,7 @@ p.appendChild(addBox);
       var _hr = /^https?:\/\//i.test(String(x.u || '')) ? x.u : '#'; // v0.3.33：只放行 http(s)，避免 javascript: 之类被点开
       sf.appendChild(el('a', { class: 'msg-src', href: _hr, target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
     });
-    n.appendChild(sf);
+    var _sf = sf; // v0.3.34：先建后挂，保证顺序是正文→来源
   } // v0.3.32：来源页脚（对标 Perplexity）
     var body = el('div', { class: 'msg-body md' });
     if (m.status === 'streaming' && !m.content){
@@ -7263,6 +7263,7 @@ p.appendChild(addBox);
       body.textContent = m.content;
     }
     n.appendChild(body);
+  if (typeof _sf !== 'undefined' && _sf) n.appendChild(_sf);
     /* v1.28.4：证据条 —— 已生成 / 已保存 / 已运行 / 已验证；没有 verify 就标「未验证」 */
     if (m.role === 'assistant' && m.content){
       var _ev = null;
@@ -8033,19 +8034,27 @@ function sendMessage(){
       $input.value = ''; $input.style.height = '';
       var cs0 = curSession();
       if (!cs0 || !S.msgs.length){ UI.toast('当前会话没有可压缩的内容', true); return; }
+      S.compacting = true; S.compactTried = Date.now(); // v0.3.34：避免同时再触发一次自动压缩
       UI.toast('正在压缩上下文…');
-      compactCtx(cs0, S.msgs.slice(), function(ok){ UI.toast(ok ? '已压缩（不再发送历史全文）' : '压缩失败，保持原样', !ok); });
+      compactCtx(cs0, S.msgs.slice(), function(ok){ S.compacting = false; UI.toast(ok ? '已压缩（不再发送历史全文）' : '压缩失败，保持原样', !ok); });
       return;
     }
-    if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文'); return; }
+    if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
     if (cmd === '/model'){
       var want = text.split(/\s+/).slice(1).join(' ').trim();
       var pool = (S.cfg.models || []).slice();
       if (!want){ UI.toast('当前模型：' + (S.cfg.currentModel || '未选择') + (pool.length ? ' · 可选：' + pool.slice(0, 6).join(', ') : '')); return; }
       $input.value = ''; $input.style.height = ''; UI.autosize();
-      if (pool.indexOf(want) < 0){ setCfg({ models: pool.concat([want]), currentModel: want }); UI.toast('已加入模型池并切换：' + want); }
-      else { setCfg({ currentModel: want }); UI.toast('已切换模型：' + want); }
-      try { UI.renderComposerCtl(); } catch (e) {}
+      /* v0.3.34：配置组才是权威（loadCfg 用它回填），顶层只是镜像 */
+      var aps = S.cfg.presets || [], apx = null;
+      for (var ix = 0; ix < aps.length; ix++) if (aps[ix].id === S.cfg.activePreset) apx = aps[ix];
+      if (!apx) apx = aps[0] || null;
+      if (apx){ apx.models = apx.models || []; if (apx.models.indexOf(want) < 0) apx.models.push(want); apx.currentModel = want; }
+      setCfg({ models: (apx && apx.models) || pool.concat([want]), currentModel: want });
+      try { UI.applyCtx(); } catch (e) {}
+      try { UI.renderPool(); UI.renderComposerCtl(); } catch (e) {}
+      UI.toast((pool.indexOf(want) < 0 ? '已加入模型池并切换：' : '已切换模型：') + want);
+      return;
       return;
     }
     /* 未知命令照常当消息发出去，不拦 */
@@ -8326,7 +8335,7 @@ function sendMessage(){
     if (!m.variants || !m.variants.length){ m.variants = [m.content || '']; m.vi = 0; }
     m.variants = m.variants.slice(0, m.vi + 1); // 当前版往后截断，再追加新版
     m.variants.push('');
-    m.vi = m.variants.length - 1; m.content = '';
+    m.vi = m.variants.length - 1; m.content = ''; delete m.srcs; // v0.3.34：重新生成不再挂上一轮的来源
     inPlaceStream(m, i, '', S.msgs.slice(0, i));
   }
   /* 版本切换：content 同步 variants[vi] */
