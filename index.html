@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.19';
+var APP_VER = 'v0.3.20';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1562,7 +1562,7 @@ var DB = (function(){
     putSessions: function(list){
       return tx(['sessions'], 'readwrite', function(t){
         var st = t.objectStore('sessions');
-        for (var i = 0; i < list.length; i++) st.put(list[i]);
+        for (var i = 0; i < list.length; i++){ if (isTemp(list[i] && list[i].id)) continue; st.put(list[i]); } // v0.3.20：临时会话不落库
       });
     },
     allSessions: function(){
@@ -1596,7 +1596,11 @@ var DB = (function(){
     putMessages: function(list){
       return tx(['messages'], 'readwrite', function(t){
         var st = t.objectStore('messages');
-        for (var i = 0; i < list.length; i++) st.put(list[i]);
+        for (var i = 0; i < list.length; i++){
+          var mm0 = list[i];
+          if (mm0 && isTemp(mm0.sid)){ tempUpsert(TEMP.msgs, mm0, 'id'); continue; } // v0.3.20：临时会话消息只留内存
+          st.put(mm0);
+        }
       });
     },
     msgsBySid: function(sid){
