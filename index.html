@@ -1183,6 +1183,7 @@ var DEF_CFG = {
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
   planGate: true,     // v1.29.0：本会话第一次写入先手动确认一次（之后自动写入）
+  permMode: 'ask',    // v0.3.6：ask 每次确认 / auto 自动应用 / readonly 只读（不写入、不执行命令）
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -6140,9 +6141,12 @@ function buildSettings(){
   /* v1.29.2：从「扩展」页挪到通用设置（之前放错了页） */
   var pgRow = el('div', { class: 'f-row' });
   (function(){
-  var pgCk = el('input', { type: 'checkbox' }); pgCk.checked = S.cfg.planGate !== false;
-  pgCk.addEventListener('change', function(){ setCfg({ planGate: pgCk.checked }); });
-  pgRow.appendChild(el('label', {}, [pgCk, ' 计划门禁：每个会话第一次写入要手动确认一次（关掉则全自动）']));
+  var pmSel = el('select', { class: 'f-in' });
+  [['ask', '每次确认（本会话第一次写入要手动确认）'], ['auto', '自动应用（工作区内直接写）'], ['readonly', '只读（不写文件、不执行命令）']].forEach(function(o){
+    pmSel.appendChild(el('option', { value: o[0], text: o[1], selected: ((S.cfg.permMode || (S.cfg.planGate === false ? 'auto' : 'ask')) === o[0]) ? '' : null }));
+  });
+  pmSel.addEventListener('change', function(){ setCfg({ permMode: pmSel.value, planGate: pmSel.value !== 'auto' }); });
+  pgRow.appendChild(el('label', {}, ['权限模式：', pmSel]));
   })();
   p.appendChild(pgRow);
       /* 外观与行为（原「主题」页） */
@@ -6888,7 +6892,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.5', ua = navigator.userAgent || '';
+      var ver = 'v0.3.6', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -10408,7 +10412,20 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     }
     S._riskyWrites = {};
     /* v1.29.0：计划门禁 —— 本会话还没确认过写入时，先把这一批留在卡上等用户点一次「应用写入」 */
-    var gated = (S.cfg.fsAutoWrite !== false) && (S.cfg.planGate !== false) && !s0.planOk && writes.length > 0;
+    var permMode = S.cfg.permMode || (S.cfg.planGate === false ? 'auto' : 'ask');
+  if (permMode === 'readonly'){
+    /* v0.3.6：只读模式 —— 不写文件、不执行 cmd/git，只保留读类工具 */
+    reads = reads.filter(function(c){ return c.op !== 'cmd' && c.op !== 'git' && c.op !== 'fs-write'; });
+    if (writes.length){
+      try {
+        msg.content = String(msg.content || '') + '\n\n> 🔒 只读模式：本轮 ' + writes.length + ' 处写入未执行（设置 → 通用设置 → 权限）';
+        DB.putMessage(msg); UI.repaintMsg(msg.id);
+      } catch (e) {}
+      UI.toast('只读模式：' + writes.length + ' 处写入已跳过', true);
+      writes = [];
+    }
+  }
+  var gated = (permMode === 'ask') && (S.cfg.fsAutoWrite !== false) && !s0.planOk && writes.length > 0;
     if (S.cfg.fsAutoWrite !== false && !gated)
       for (i = 0; i < writes.length; i++){
         if (isOutside(writes[i].path)) continue;
