@@ -10084,6 +10084,7 @@ $('#sidebar').addEventListener('click', function(e){
           DB.clearAll().then(function(){
             UI.killStreams(); // v2.2：终止全部后台流（防结果落库复活）
             S.sessions = []; S.sid = null; S.msgs = []; S.drafts = {};
+      S._mem = {}; SC_SNAPS = {}; saveSnaps(); // v0.3.13：清空数据时记忆缓存与写入快照也要清，否则撤销能把旧内容写回来
             RUNNER.reset(); // 拆沙箱清运行态（v2.0 零遗留）
             UI.resetQuick(); // 快速条标记复位（v2.0）
             UI.reloadSessions(); UI.renderMsgs(); UI.closeModal();
