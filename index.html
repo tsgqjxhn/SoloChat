@@ -3380,6 +3380,9 @@ var MD = (function(){
              !/^\uE002\d+\uE002$/.test(lines[i].trim())){
         para.push(lines[i]); i++;
       }
+      if (!para.length){ /* v0.3.5：所有分支都不认这一行（如只有 '## ' 的标题符），强制前进，否则死循环 */
+        html += '<p>' + inl(lines[i]) + '</p>'; i++; continue;
+      }
       html += '<p>' + para.map(inl).join('<br>') + '</p>';
     }
     return html;
@@ -6885,7 +6888,7 @@ p.appendChild(addBox);
   });
 
   page('about', '关于', function(p){
-      var ver = 'v0.3.4', ua = navigator.userAgent || '';
+      var ver = 'v0.3.5', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -8330,6 +8333,7 @@ function sendMessage(){
     });
   }
   function deleteMsg(id){
+  if (S.sending){ UI.toast('回复生成中，先停止再删除', true); return; } // v0.3.5：否则收尾时会把消息写回库
     var i = findMsg(id);
     if (i < 0) return;
     var m = S.msgs[i];
@@ -9530,7 +9534,7 @@ function sendMessage(){
       try { o = JSON.parse(txt); } catch (e) { return toast('不是合法的 JSON', true); }
       if (!o || !o.cfg) return toast('快照格式不正确', true);
       for (var k in o.cfg){
-        if (/(apiKey|token|secret|password)/i.test(k)) continue;
+        if (/(apiKey|token|secret|password|^presets$|^maxTokens$)/i.test(k)) continue;
         S.cfg[k] = o.cfg[k];
       }
       saveCfg(); applyTheme(); applyAccent(); applyFontScale();
@@ -10489,7 +10493,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         var raw = String(c.path || '').trim();
         if (!raw){ parts.push('[cmd] 命令为空'); next(); return; }
         if (c.op === 'git') raw = 'git ' + raw;
-        var ws = curWs();
+        var ws = ws0; /* v0.3.5：后台会话的命令要在自己的工作区跑 */
         UI.confirmBox({ title: '执行命令？', text: raw + (ws ? '\n工作目录：' + ws : '\n（未绑定工作区，将无法执行）'), okText: '执行', danger: true })
           .then(function(ok){
             if (!ok){ parts.push('[cmd] 用户拒绝了：' + raw); next(); return; }
@@ -11957,7 +11961,7 @@ var SENSITIVE = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'cmd', 'g
         }
         if (EXT.hasTool(op)) return EXT.runTool(op, String(c.arg || '')).catch(function(e){ return '工具失败：' + (e && e.message || e); });
         var u = NET.safeUrl(c.arg);
-        if (!u) return Promise.resolve('（参数不是合法 URL）');
+        if (!u && op !== 'search') return Promise.resolve('（参数不是合法 URL）'); /* v0.3.5：search 的词不是 URL，别被守卫拦死 */
         if (op === 'web') return NET.fetchPageText(u, 4000).then(function(x){ return String(x || '').slice(0, 4000); });
         if (op === 'search') return NET.searchWeb(c.arg, null, true).then(function(r){
       /* v0.3.2：searchWeb 返回 {block,n,items:[{t,u}]}，原来当数组用会 TypeError */
