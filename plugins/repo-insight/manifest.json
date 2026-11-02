@@ -1,0 +1,16 @@
+{
+  "name": "仓库速览",
+  "version": "1.0.0",
+  "desc": "读一个 GitHub 仓库：定位、活跃度、关键文件导读",
+  "author": "SoloChat",
+  "license": "MIT",
+  "skills": [
+    "skills/repo-brief.md"
+  ],
+  "tools": [
+    "tools/github-repo.json"
+  ],
+  "prompts": [
+    "prompts/仓库速览.md"
+  ]
+}

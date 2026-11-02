@@ -1,0 +1,71 @@
+{
+  "schema": "solochat-plugin-market/1",
+  "name": "SoloChat 插件市场",
+  "version": "1.0.0",
+  "updated": "2026-11-02",
+  "home": "https://github.com/tsgqjxhn/SoloChat/tree/Plugin",
+  "raw": "https://raw.githubusercontent.com/tsgqjxhn/SoloChat/Plugin/",
+  "plugins": [
+    {
+      "id": "repo-insight",
+      "name": "仓库速览",
+      "version": "1.0.0",
+      "desc": "给一个 GitHub 仓库地址，输出定位、活跃度与关键文件导读",
+      "author": "SoloChat",
+      "license": "MIT",
+      "path": "plugins/repo-insight",
+      "tags": [
+        "github",
+        "dev",
+        "read-only"
+      ],
+      "minApp": "v1.28.0",
+      "items": {
+        "tools": 1,
+        "skills": 1,
+        "agents": 0,
+        "prompts": 1
+      }
+    },
+    {
+      "id": "release-notes",
+      "name": "更新日志",
+      "version": "1.0.0",
+      "desc": "拉最近的 Release，按「新增 / 修复 / 破坏性变更」写成人话更新日志",
+      "author": "SoloChat",
+      "license": "MIT",
+      "path": "plugins/release-notes",
+      "tags": [
+        "github",
+        "docs"
+      ],
+      "minApp": "v1.28.0",
+      "items": {
+        "tools": 1,
+        "skills": 1,
+        "agents": 1,
+        "prompts": 1
+      }
+    },
+    {
+      "id": "weather-brief",
+      "name": "出行简报",
+      "version": "1.0.0",
+      "desc": "查城市天气，给一份能直接照着出门的简报（穿衣 / 伞 / 通风）",
+      "author": "SoloChat",
+      "license": "MIT",
+      "path": "plugins/weather-brief",
+      "tags": [
+        "weather",
+        "daily"
+      ],
+      "minApp": "v1.28.0",
+      "items": {
+        "tools": 1,
+        "skills": 1,
+        "agents": 0,
+        "prompts": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "出行简报",
+  "version": "1.0.0",
+  "desc": "查城市天气，给一份照着出门的简报",
+  "author": "SoloChat",
+  "license": "MIT",
+  "skills": [
+    "skills/trip-brief.md"
+  ],
+  "tools": [
+    "tools/wttr.json"
+  ],
+  "prompts": [
+    "prompts/出行简报.md"
+  ]
+}

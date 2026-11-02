@@ -1,0 +1,17 @@
+{
+  "name": "gh-releases",
+  "title": "最近发布",
+  "desc": "GET api.github.com/repos/{owner}/{repo}/releases，取最近 5 条",
+  "type": "http",
+  "method": "GET",
+  "url": "https://api.github.com/repos/{arg}/releases?per_page=5",
+  "headers": {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "SoloChat"
+  },
+  "modes": [
+    "work",
+    "agent"
+  ],
+  "timeout": 30000
+}

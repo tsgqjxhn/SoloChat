@@ -1,0 +1,17 @@
+{
+  "name": "github-repo",
+  "title": "仓库概览",
+  "desc": "GET api.github.com/repos/{owner}/{repo}，返回 stars / forks / issues / 语言 / 更新时间",
+  "type": "http",
+  "method": "GET",
+  "url": "https://api.github.com/repos/{arg}",
+  "headers": {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "SoloChat"
+  },
+  "modes": [
+    "work",
+    "agent"
+  ],
+  "timeout": 30000
+}

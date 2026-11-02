@@ -1,0 +1,16 @@
+{
+  "name": "wttr",
+  "title": "天气查询",
+  "desc": "GET wttr.in/{城市}?format=j1，返回当前天气与三日预报",
+  "type": "http",
+  "method": "GET",
+  "url": "https://wttr.in/{arg}?format=j1",
+  "headers": {
+    "User-Agent": "SoloChat"
+  },
+  "modes": [
+    "work",
+    "agent"
+  ],
+  "timeout": 30000
+}

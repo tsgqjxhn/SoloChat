@@ -1,0 +1,19 @@
+{
+  "name": "更新日志",
+  "version": "1.0.0",
+  "desc": "拉最近 Release，写成能直接发给人看的更新日志",
+  "author": "SoloChat",
+  "license": "MIT",
+  "skills": [
+    "skills/changelog.md"
+  ],
+  "tools": [
+    "tools/gh-releases.json"
+  ],
+  "agents": [
+    "agents/releaser.md"
+  ],
+  "prompts": [
+    "prompts/发布说明.md"
+  ]
+}
