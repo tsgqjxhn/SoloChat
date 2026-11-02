@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.42';
+var APP_VER = 'v0.3.43';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10809,6 +10809,8 @@ if (r && r.snap){ var sk = snapKey(msg.sid, ws, path); var arr = SC_SNAPS[sk]; i
     if (S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭：切到 Agent 模式才能应用写入', true); return; } // v0.3.29
     var msg = byId(mid); if (!msg) return;
     var seen = {}, n = 0;
+    var _outside = []; scan(msg.content).forEach(function(c){ if (c.op === 'fs-write' && isOutside(c.path) && _outside.indexOf(c.path) < 0) _outside.push(c.path); });
+    if (_outside.length){ UI.toast('有 ' + _outside.length + ' 处写入在工作区外，确认框只能一次弹一个，请逐个点卡片上的「应用写入」', true); return; } // v0.3.43：避免多个 confirm 只落定最后一个
     scan(msg.content).forEach(function(c){
       if (c.op !== 'fs-write' || seen[c.path]) return;
       seen[c.path] = 1; n++;
