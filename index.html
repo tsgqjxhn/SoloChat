@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.25';
+var APP_VER = 'v0.3.26';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -2814,7 +2814,8 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     if (s.indexOf('qwen') >= 0){
       if (/long/.test(s)) return 10000000; // qwen-long：千万级
       if (/(vl|omni|audio|ocr|asr|tts|embed|rerank)/.test(s)) return 131072; // 多模态/非对话按 128k 档
-      if (/(turbo|flash|plus|coder|3[.\-]?[0-9])/.test(s)) return 1000000;   // 主力文本系百万档（qwen3.8max、qwen-turbo、qwen-plus、qwen3-coder…）
+  var sd = s.replace(/20\d\d[-.]\d\d([-.]\d\d)?/g, ''); // v0.3.26：先剥掉日期快照，否则 2025-03-01 会命中 3-0 被当成百万窗口
+    if (/(turbo|flash|plus|coder|3[.\-][0-9])/.test(sd)) return 1000000;
       if (/max/.test(s)) return 262144; // qwen-max / qwen3-max 档
       return 131072;
     }
