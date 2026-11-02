@@ -99,8 +99,6 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 .brand{display:flex;align-items:center;gap:8px;padding:2px 4px 12px;color:var(--ink)}
 .brand .ic{width:18px;height:18px}
 .brand b{font-family:var(--font-display);font-size:16px;font-weight:600;letter-spacing:var(--tracking-display)}
-.sb-collapse{margin-left:auto;width:26px;height:26px;color:var(--muted)}
-.sb-collapse svg{width:15px;height:15px}
 #btn-new{width:100%;justify-content:center}
 .sb-search{padding:8px 12px}
 .sb-search .wrap{position:relative}
@@ -869,8 +867,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <button class="rail-btn" data-r="settings" title="设置" aria-label="设置"><svg class="ic"><use href="#i-gear2"/></svg></button>
     </div>
     <div class="sb-top">
-      <div class="brand"><svg class="ic fill" aria-hidden="true"><use href="#i-logo"/></svg><b>SoloChat</b>
-        <button class="icon-btn sb-collapse" id="btn-sb-hide" title="收起侧边栏（Ctrl+B）"><svg class="ic"><use href="#i-chev-l"/></svg></button></div>
+      <div class="brand"><svg class="ic fill" aria-hidden="true"><use href="#i-logo"/></svg><b>SoloChat</b></div>
       <button id="btn-new" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>新建会话</button>
     </div>
     <div class="sb-search"><div class="wrap">
@@ -6239,7 +6236,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   });
 
   page('about', '关于', function(p){
-      var ver = 'v1.20.0', ua = navigator.userAgent || '';
+      var ver = 'v1.21.0', ua = navigator.userAgent || '';
       var wv = /Edg\/([\d.]+)/.exec(ua) || /Chrome\/([\d.]+)/.exec(ua);
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '版本' }), el('b', { text: ver })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
@@ -9491,8 +9488,6 @@ $('#sidebar').addEventListener('click', function(e){
   window.addEventListener('DOMContentLoaded', function(){
     var home = $('#btn-home');
     if (home) home.addEventListener('click', function(){ NET.openExternal('https://github.com/tsgqjxhn/SoloChat', 'browser'); });
-    var hide = $('#btn-sb-hide');
-    if (hide) hide.addEventListener('click', function(){ toggleSidebar('hide'); });
   });
 
   function runShortcut(name){
