@@ -329,13 +329,13 @@ body.rn-open #runner{display:flex}
 .rn-tab{position:relative;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--faint);
   padding:5px 9px;border-radius:var(--r-sm);cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .rn-tab:hover{background:var(--soft);color:var(--body)}
-#runner[data-tab="ws"] .rn-tab[data-rt="ws"],#runner[data-tab="view"] .rn-tab[data-rt="view"],#runner[data-tab="out"] .rn-tab[data-rt="out"]{color:var(--ink);background:var(--soft)}
+#runner[data-tab="web"] .rn-tab[data-rt="web"],#runner[data-tab="ws"] .rn-tab[data-rt="ws"],#runner[data-tab="view"] .rn-tab[data-rt="view"],#runner[data-tab="out"] .rn-tab[data-rt="out"]{color:var(--ink);background:var(--soft)}
 .rn-tab.dot::after{content:'';position:absolute;right:3px;top:3px;width:5px;height:5px;border-radius:50%;background:var(--primary)}
 .rn-tab .rn-kind{margin-left:2px}
 .rn-tab .rn-kind:empty{display:none}
 .rn-body{flex:1;min-height:0;display:flex;flex-direction:column}
 .rn-pane{display:none;flex:1;min-height:0;flex-direction:column;position:relative}
-#runner[data-tab="ws"] #pane-ws,#runner[data-tab="view"] #pane-view,#runner[data-tab="out"] #pane-out,#runner[data-tab="src"] #pane-src{display:flex}
+#runner[data-tab="web"] #pane-web,#runner[data-tab="ws"] #pane-ws,#runner[data-tab="view"] #pane-view,#runner[data-tab="out"] #pane-out,#runner[data-tab="src"] #pane-src{display:flex}
 #rn-src-list{padding:6px 10px 10px;overflow:auto;flex:1;min-height:0}
 .src-grp{border-bottom:1px solid var(--hairline-soft);padding:8px 2px}
 .src-q{display:flex;align-items:baseline;gap:6px;font-size:12.5px;color:var(--text-1);margin-bottom:4px}
@@ -371,6 +371,10 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .rn-sec-t{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:var(--body);letter-spacing:.01em}
 .rn-view{flex:1;min-height:0;position:relative;background:var(--code-bg);overflow:hidden}
 #rn-frame{width:100%;height:100%;border:0;background:#fff;display:block}
+#pane-web{position:relative;display:flex;flex-direction:column;height:100%}
+#pane-web .rn-pvbar{position:static;height:34px;flex:none;border-bottom:1px solid var(--line)}
+#web-url{flex:1;min-width:0;height:24px;border:1px solid var(--line);border-radius:6px;padding:0 8px;font:inherit;font-size:12px;background:var(--bg);color:var(--text)}
+#web-frame{flex:1;width:100%;border:0;background:#fff;display:block;min-height:0}
 .rn-src{position:absolute;inset:0;margin:0;overflow:auto;padding:12px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre;color:var(--code-ink);background:var(--code-bg)}
 /* 空态只是提示文字：不吃指针事件（否则会盖在 iframe 上吞掉滚轮 → 预览无法滚动） */
 .rn-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--code-muted);font-size:12px;text-align:center;padding:24px;line-height:1.8;pointer-events:none}
@@ -1015,6 +1019,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
       <div class="rn-tabs" id="rn-tabs" role="tablist">
         <button type="button" class="rn-tab" data-rt="ws" role="tab" title="本会话的沙箱工作区文件">工作区<span class="rn-ws-count" id="rn-ws-count"></span></button>
         <button type="button" class="rn-tab" data-rt="view" role="tab" title="沙箱预览 / 文件预览">运行<span class="rn-kind" id="rn-kind"></span></button>
+        <button type="button" class="rn-tab" data-rt="web" role="tab" title="在侧栏里打开网页（不弹新窗口）">网页</button>
         <button type="button" class="rn-tab" data-rt="out" role="tab" title="控制台 / 程序输出">终端</button>
           <button type="button" class="rn-tab" data-rt="src" role="tab" title="本会话搜到的来源与抓取状态">来源<span class="rn-ws-count" id="rn-src-count"></span></button>
       </div>
@@ -1042,6 +1047,14 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <iframe id="rn-frame" sandbox="allow-scripts" title="沙箱预览"></iframe>
         <pre class="rn-src" id="rn-src" hidden></pre>
         <div class="rn-empty" id="rn-empty">点代码块右上角的 ▶ 在这里运行；Work 产物可在「工作区」里预览或运行</div>
+      </div>
+      <div class="rn-pane" id="pane-web">
+        <div class="rn-pvbar">
+          <input id="web-url" class="rn-inp" placeholder="输入网址后回车" spellcheck="false">
+          <button class="btn btn-ghost rn-mini" id="web-go">打开</button>
+          <button class="icon-btn rn-mini" id="web-pop" title="在独立窗口打开（有些网站禁止被嵌入）"><svg class="ic"><use href="#i-link"/></svg></button>
+        </div>
+        <iframe id="web-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" title="侧栏网页"></iframe>
       </div>
       <div class="rn-pane" id="pane-src">
         <div id="rn-src-list"></div>
@@ -1144,7 +1157,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.87';
+var APP_VER = 'v0.3.88';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -4351,7 +4364,8 @@ var RUNNER = (function(){
   /* v0.2.5：顶部分栏（工作区 / 运行 / 终端）——不再各区块单独折叠 */
   function setTab(name){
     var r = $('#runner'); if (!r) return;
-    if (['ws', 'view', 'out', 'src'].indexOf(name) < 0) name = 'ws';
+    if (['ws', 'view', 'out', 'src', 'web'].indexOf(name) < 0) name = 'ws';
+  if (name === 'web'){ var _wf = $('#web-frame'); if (_wf && !_wf.getAttribute('src')){ var _wu = $('#web-url'); if (_wu) _wu.focus(); } }
     r.setAttribute('data-tab', name);
     try { localStorage.setItem('sc.rn.tab', name); } catch(e){}
     if (name === 'ws') renderWs();
@@ -4365,6 +4379,29 @@ var RUNNER = (function(){
     renderWs();
   }
   function close(){ document.body.classList.remove('rn-open'); }
+/* v0.3.88：网页在侧栏里打开，不再另起窗口；被网站拒绝嵌入时给一键切窗口的出口 */
+function openWeb(url){
+  var u = String(url || '').trim();
+  if (!u) return false;
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  open(); setTab('web');
+  var f = $('#web-frame'), inp = $('#web-url');
+  if (!f) return false;
+  f.setAttribute('src', u);
+  if (inp) inp.value = u;
+  try { $('#runner').setAttribute('data-web', u); } catch (e) {}
+  return true;
+}
+function bindWeb(){
+  var go = $('#web-go'), inp = $('#web-url'), pop = $('#web-pop');
+  function run(){ var v = inp && inp.value.trim(); if (!v) return; openWeb(v); }
+  if (go) go.addEventListener('click', run);
+  if (inp) inp.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); run(); } });
+  if (pop) pop.addEventListener('click', function(){
+    var u = ($('#web-url') || {}).value || '';
+    if (u) try { NET.openExternal(u, 'window'); } catch (e) {}
+  });
+}
 
   var agentPath = ''; var agentRootFor = '';   // v1.13：Agent 文件夹浏览的当前子路径
 
@@ -4677,6 +4714,7 @@ var RUNNER = (function(){
   }
 
   function bindOnce(){
+  setTimeout(function(){ try { bindWeb(); } catch (e) {} }, 0);
     if (bound) return; bound = true;
     frame = $('#rn-frame'); out = $('#rn-out'); srcEl = $('#rn-src');
     emptyEl = $('#rn-empty'); kindEl = $('#rn-kind'); statusEl = $('#rn-status');
@@ -5003,7 +5041,7 @@ function fitSide(){
   }
 
   return { run: run, runCapture: runCapture, close: close, open: open, reset: reset, download: download, runVfs: runVfs,
-    renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, curKind: function(){ return cur && cur.kind; },
+    openWeb: openWeb, renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, curKind: function(){ return cur && cur.kind; },
     previewTo: previewTo, previewSource: previewSource, pvKind: pvKind, previewRefreshIf: previewRefreshIf }; /* v2.5/v2.8 */
 })();
 
@@ -10912,7 +10950,8 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (c.op === 'browser'){
       var bu2 = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
       if (!bu2){ parts.push('[browser] 地址无效（需 http/https 绝对地址）'); next(); return; }
-      var bo2 = NET.openExternal(bu2, 'window');
+      var bo2 = false; try { bo2 = (typeof RUNNER !== 'undefined' && RUNNER.openWeb && RUNNER.openWeb(bu2)); } catch (e) { bo2 = false; }
+      if (!bo2) bo2 = NET.openExternal(bu2, 'window'); // v0.3.88：优先侧栏，失败再开窗口
       parts.push('[browser] ' + (bo2 ? '已在应用内窗口打开：' : '打开失败：') + bu2);
       next(); return;
     }
