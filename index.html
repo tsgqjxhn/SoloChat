@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.62';
+var APP_VER = 'v0.3.63';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10215,8 +10215,8 @@ $('#sidebar').addEventListener('click', function(e){
     else if (m === 'snap-in') UI.importSnapshot();
     else if (m === 'diag') UI.doExportDiag();
   else if (m === 'diag-out'){
-    try { download('solochat-diag-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ ts: Date.now(), ver: ver, diag: DIAG }, null, 2), 'application/json'); UI.toast('已导出诊断计数'); }
-    catch (e) { UI.toast('导出失败', true); }
+      var _blob = new Blob([JSON.stringify({ ts: Date.now(), ver: APP_VER, diag: DIAG }, null, 2)], { type: 'application/json' }); // v0.3.63：这个作用域里没有 download()，也没有 ver；改用 Blob + a 标签 + APP_VER
+      var _a = document.createElement('a'); _a.href = URL.createObjectURL(_blob); _a.download = 'solochat-diag-' + new Date().toISOString().slice(0, 10) + '.json'; document.body.appendChild(_a); _a.click(); _a.remove(); setTimeout(function(){ URL.revokeObjectURL(_a.href); }, 3000); UI.toast('已导出诊断计数');
   }
   else if (m === 'diag-clear'){
     DIAG.ok = DIAG.fail = DIAG.stop = DIAG.toolFail = DIAG.timeouts = DIAG.undos = DIAG.gated = 0;
