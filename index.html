@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.57';
+var APP_VER = 'v0.3.58';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1751,6 +1751,7 @@ var NET = (function(){
     }
     return {
       feed: function(text){
+      try { if (window.__scRaw != null) window.__scRaw = (window.__scRaw + text).slice(-9000); } catch (e) {} // v0.3.58：原始流抓取（调试用，平时为 null）
         buf += text;
         var i;
         while ((i = buf.indexOf('\n')) >= 0){
@@ -7557,6 +7558,8 @@ p.appendChild(addBox);
   var _uu = (st && st.msg && st.msg.usage) || usage || null; if (_uu){ if (_uu.prompt_tokens) msg.tokIn = _uu.prompt_tokens; if (_uu.completion_tokens) msg.tokOut = _uu.completion_tokens; if (_uu.total_tokens) msg.tokens = _uu.total_tokens; } // v0.3.29：明细在 msg.usage 里
   if (!String(msg.content || '').trim() && String(msg.reasoning || '').trim()){ /* v0.3.57：只拿到推理时，把它当正文显示，别让用户对着空泡 */
     msg.content = String(msg.reasoning).trim() + '\n\n> 以上是模型的推理内容：这一轮没有单独的正文返回（常见于 reasoning 模型或上游只回 reasoning_content）。';
+  }
+  if (!String(msg.content || '').trim()){ /* v0.3.58：两个分支必须分开——之前把 0.3.56 的占位符塞进了 0.3.57 的 if 里，互相覆盖 */
     var _r = String(msg.reasoning || '').trim();
     var _tok = (usage && usage.completion_tokens) || msg.tokens || 0;
     msg.content = '（这一轮没有返回正文' + (_tok ? '，但计费了 ' + _tok + ' tokens' : '') + (_r ? '；只拿到推理过程，见下方「思考」折叠' : '') + '）\n\n> 常见原因：模型只输出 reasoning / 接口不是 OpenAI 的 delta.content 格式 / 上游把回复截断。可以换个模型或看「思考」里的内容。';
