@@ -7,10 +7,10 @@
     <AssemblyName>SoloChatHost</AssemblyName>
     <RootNamespace>SoloChatHost</RootNamespace>
     <!-- 对外版本号（exe 属性 → 详情里可见） -->
-    <Version>0.3.63</Version>
-    <AssemblyVersion>0.3.63.0</AssemblyVersion>
-    <FileVersion>0.3.63.0</FileVersion>
-    <InformationalVersion>0.3.63</InformationalVersion>
+    <Version>0.3.64</Version>
+    <AssemblyVersion>0.3.64.0</AssemblyVersion>
+    <FileVersion>0.3.64.0</FileVersion>
+    <InformationalVersion>0.3.64</InformationalVersion>
     <Product>SoloChat</Product>
     <AssemblyTitle>SoloChat 本地 AI 客户端</AssemblyTitle>
     <Company>SoloChat</Company>
