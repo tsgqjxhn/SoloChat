@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.73';
+var APP_VER = 'v0.3.74';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8101,6 +8101,21 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/doc'){ /* v0.3.74：会话 + 产物清单导出成一份文档（对标 Notion AI） */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _cs3 = curSession();
+      if (!_cs3 || !(S.msgs || []).length){ UI.toast('当前会话没有内容', true); return; }
+      var _md3 = chatToMarkdown(S.msgs, _cs3);
+      DB.workfsBySid(S.sid).then(function(fsx){
+        if (fsx && fsx.length){
+          _md3 += '\n## 附件（沙箱工作区）\n\n';
+          fsx.forEach(function(f){ _md3 += '- `' + f.path + '`（' + String(f.content || '').length + ' B）\n'; });
+        }
+        UI.download('solochat-doc-' + new Date().toISOString().slice(0, 10) + '.md', _md3, 'text/markdown');
+        UI.toast('已导出文档（' + S.msgs.length + ' 条消息' + (fsx && fsx.length ? ' + ' + fsx.length + ' 个附件' : '') + '）');
+      });
+      return;
+    }
     if (cmd === '/stats'){ /* v0.3.73：会话用量概览（对标 Gemini 的上下文用量） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _ms2 = S.msgs || [], _tok2 = 0, _u2 = 0, _ch2 = 0;
