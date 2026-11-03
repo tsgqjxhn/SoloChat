@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.80';
+var APP_VER = 'v0.3.81';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8101,6 +8101,26 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/check'){ /* v0.3.81：产物自检——index.html 引用的本地文件是否存在（对标 Figma AI 的交付前检查） */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!S.sid){ UI.toast('先开始一个会话', true); return; }
+      DB.workfsBySid(S.sid).then(function(fs6){
+        if (!fs6 || !fs6.length){ UI.toast('沙箱里还没有文件', true); return; }
+        var names = {}; fs6.forEach(function(f){ names[f.path.replace(/^\.\//, '')] = 1; });
+        var miss = [];
+        fs6.forEach(function(f){
+          var c6 = String(f.content || '');
+          var re6 = /(?:src|href)=["'](?!#|https?:|data:)([^"']+)["']/g, m6;
+          while ((m6 = re6.exec(c6))){
+            var p6 = String(m6[1]).replace(/^\.\//, '');
+            if (!names[p6] && miss.indexOf(p6) < 0) miss.push(p6);
+          }
+        });
+        if (!miss.length){ UI.toast('自检通过：' + fs6.length + ' 个文件，没有缺失引用'); return; }
+        UI.toast('缺 ' + miss.length + ' 个引用：' + miss.slice(0, 4).join(', ') + (miss.length > 4 ? ' …' : ''), true);
+      });
+      return;
+    }
     if (cmd === '/presets'){ /* v0.3.80：看预设与当前用的是哪个（对标 Le Chat 的自定义助手） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _pl = (S.cfg.presets || []).slice();
