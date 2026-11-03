@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.50';
+var APP_VER = 'v0.3.51';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8075,6 +8075,16 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/files'){
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!S.sid){ UI.toast('先开始一个会话', true); return; }
+      DB.workfsBySid(S.sid).then(function(fs){
+        if (!fs.length){ UI.toast('沙箱工作区还没有文件'); return; }
+        var t = 0; fs.forEach(function(f){ t += String(f.content || '').length; });
+        UI.toast('沙箱：' + fs.length + ' 个文件 · ' + sizeFmt(t) + ' · ' + fs.slice(0, 3).map(function(f){ return f.path; }).join(', ') + (fs.length > 3 ? ' …' : ''));
+      });
+      return;
+    } // v0.3.51：/files 看沙箱产物（对标 Replit 的文件概览）
     if (cmd === '/title'){
       var nt = text.slice(6).trim();
       var csy = curSession();
