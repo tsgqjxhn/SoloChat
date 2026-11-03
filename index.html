@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.81';
+var APP_VER = 'v0.3.82';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8101,6 +8101,24 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/find'){ /* v0.3.82：在沙箱产物里全文搜索（对标 Webflow 的全站搜索） */
+      var _q7 = text.slice(5).trim();
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!_q7){ UI.toast('用法：/find 关键词', true); return; }
+      if (!S.sid){ UI.toast('先开始一个会话', true); return; }
+      DB.workfsBySid(S.sid).then(function(fs7){
+        if (!fs7 || !fs7.length){ UI.toast('沙箱里还没有文件', true); return; }
+        var hits = [];
+        fs7.forEach(function(f){
+          var c7 = String(f.content || ''), low = c7.toLowerCase(), q7 = _q7.toLowerCase(), n7 = 0, at7 = low.indexOf(q7);
+          while (at7 >= 0 && n7 < 99){ n7++; at7 = low.indexOf(q7, at7 + q7.length); }
+          if (n7) hits.push(f.path + '×' + n7);
+        });
+        if (!hits.length){ UI.toast('没找到「' + _q7 + '」'); return; }
+        UI.toast('命中 ' + hits.length + ' 个文件：' + hits.slice(0, 4).join(', ') + (hits.length > 4 ? ' …' : ''));
+      });
+      return;
+    }
     if (cmd === '/check'){ /* v0.3.81：产物自检——index.html 引用的本地文件是否存在（对标 Figma AI 的交付前检查） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       if (!S.sid){ UI.toast('先开始一个会话', true); return; }
