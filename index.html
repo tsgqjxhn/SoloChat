@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.77';
+var APP_VER = 'v0.3.78';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8101,6 +8101,13 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/models'){ /* v0.3.78：看模型池与当前模型（对标 Copilot 的模型选择） */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _mp = (S.cfg.models || []).slice();
+      if (!_mp.length){ UI.toast('模型池是空的，去设置里添加', true); return; }
+      UI.toast('模型池 ' + _mp.length + ' 个：' + _mp.slice(0, 5).join(', ') + (_mp.length > 5 ? ' …' : '') + ' · 当前 ' + (S.cfg.currentModel || '未选'));
+      return;
+    }
     if (cmd === '/skills'){ /* v0.3.77：看当前模式可用的技能（对标 OpenHands 的技能清单） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _sk = []; try { _sk = EXT.skillNames(S.cfg.mode) || []; } catch (e) { _sk = []; }
