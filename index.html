@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.48';
+var APP_VER = 'v0.3.49';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -3468,12 +3468,12 @@ var MD = (function(){
 /* v1.29.3：```ask 围栏 → 提问卡片（问题 + 可选项 + 自由回答） */
 function askCard(c){
   var body = String(c.code || '');
-  var lines = body.split('\n'), q = (lines[0] || '').trim(), note = '', opts = [];
+  var lines = body.split('\n'), q = (lines[0] || '').trim(), note = '', opts = [], stopOpts = false;
   for (var i = 1; i < lines.length; i++){
     var t = lines[i].trim();
     if (!t) continue;
-    if (/^[-*•]\s+/.test(t)) opts.push(t.replace(/^[-*•]\s+/, ''));
-    else if (!note) note = t;
+    if (/^[-*•]\s+/.test(t)){ if (!stopOpts) opts.push(t.replace(/^[-*•]\s+/, '')); }
+    else { if (opts.length) stopOpts = true; if (!note) note = t; } // v0.3.49：遇到第二个问题就停止收集选项，别把两题的选项混成一列
   }
   var askSid = (typeof S !== 'undefined' && S.sid) ? S.sid : 'draft';
   var rawKey = askSid + '|' + q.slice(0, 80) + '|' + opts.join(',');
