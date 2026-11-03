@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.51';
+var APP_VER = 'v0.3.52';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10514,6 +10514,20 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (kNew >= 0 && kOld >= 0){ call.oldText = bd.slice(kOld + 8, kNew); call.newText = bd.slice(kNew + 9).replace(/\n$/, ''); } // v0.3.42：new 段末尾那一个换行是围栏前的，不该算进内容
       }
       out.push(call);
+  /* v0.3.52：用户扩展工具（围栏名动态）——FS 侧此前完全不认，模型调用后空等 */
+  try {
+    var _cu = EXT.toolsFor(S.cfg.mode);
+    if (_cu && _cu.length){
+      var _re2 = /```([a-z][a-z0-9-]{1,24})(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, _m2;
+      while ((_m2 = _re2.exec(content || ""))){
+        var _hit = null;
+        for (var _ci = 0; _ci < _cu.length; _ci++) if (_cu[_ci].name === _m2[1]) _hit = _cu[_ci];
+        if (!_hit) continue;
+        var _nl2 = _m2[2].indexOf('\n');
+        out.push({ op: _m2[1], arg: (_nl2 >= 0 ? _m2[2].slice(0, _nl2) : _m2[2]).trim(), body: _nl2 >= 0 ? _m2[2].slice(_nl2 + 1) : '' });
+      }
+    }
+  } catch (e) {}
     }
     return out;
   }
@@ -10748,6 +10762,12 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         }, function(e){ parts.push('[agent] ' + sRole + ' 失败：' + (e && e.message || e)); }).then(next);
         return;
       }
+    if (EXT.hasTool(c.op)){ /* v0.3.52：扩展工具在 Agent/FS 模式也要能跑，别再静默吞掉 */
+      EXT.runTool(c.op, String(c.arg || '') + (c.body ? '\n' + c.body : '')).then(function(out){
+        parts.push('[工具 ' + c.op + ']\n' + String(out || '').slice(0, 4000));
+      }, function(e){ parts.push('[工具 ' + c.op + '] 失败：' + (e && e.message || e)); }).then(next);
+      return;
+    }
       NET.fs(c.op === 'fs-list' ? 'list' : 'read', c.path, null, ws0).then(
         function(r){
           if (c.op === 'fs-edit') return applyEdit(c, r, ws0).then(function(t){ parts.push(t); });
