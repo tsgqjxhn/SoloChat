@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.85';
+var APP_VER = 'v0.3.86';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8101,6 +8101,17 @@ function sendMessage(){
       return;
     }
     if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/undo'){ /* v0.3.86：撤销最近一次写入（对标 Aider 的 /undo） */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _nb = null, _ns = document.querySelectorAll('#msg-list .msg');
+      for (var _i6 = _ns.length - 1; _i6 >= 0 && !_nb; _i6--){
+        var _bs3 = _ns[_i6].querySelectorAll('button');
+        for (var _j6 = 0; _j6 < _bs3.length; _j6++){ if (/撤销/.test(_bs3[_j6].textContent || '')){ _nb = _bs3[_j6]; break; } }
+      }
+      if (!_nb){ UI.toast('没有可撤销的写入', true); return; }
+      _nb.click(); UI.toast('已撤销最近一次写入');
+      return;
+    }
     if (cmd === '/perm'){ /* v0.3.85：用命令切权限（对标 Cline 的逐级授权） */
       var _pv = text.slice(5).trim().toLowerCase();
       $input.value = ''; $input.style.height = ''; UI.autosize();
