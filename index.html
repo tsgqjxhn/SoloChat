@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.66';
+var APP_VER = 'v0.3.67';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -4366,7 +4366,7 @@ var RUNNER = (function(){
   }
   function close(){ document.body.classList.remove('rn-open'); }
 
-  var agentPath = '';   // v1.13：Agent 文件夹浏览的当前子路径
+  var agentPath = ''; var agentRootFor = '';   // v1.13：Agent 文件夹浏览的当前子路径
 
   /* ---- v2.1：运行面板内的「工作区」区（Work 沙箱文件：列表 / 单文件下载 / 打包 zip）---- */
   /* v0.2.5：切会话/重开应用后恢复工作区 —— 该会话有产物就打开面板并切到「工作区」 */
@@ -4383,6 +4383,8 @@ var RUNNER = (function(){
   function renderAgentWs(){
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
+  if (root && agentPath && agentRootFor && agentRootFor !== root){ agentPath = ''; } // v0.3.67：换会话/换根就回到根目录，别把上一个工作区的子路径带过来
+  agentRootFor = root;
     var root = agentRoot();
     list.textContent = '';
     if (cnt) cnt.textContent = '';
