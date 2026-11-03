@@ -482,6 +482,27 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .cmp-item .x{flex:none;padding:2px 5px;border-radius:var(--r-sm);color:var(--faint)}
 .cmp-item .x:hover{color:var(--danger)}
 .cmp-title{font-size:11px;color:var(--faint);padding:4px 8px}
+.pk-pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:40;width:280px;max-height:320px;overflow:auto;background:var(--surface-2,#15161a);border:1px solid var(--hairline,#26272c);border-radius:12px;padding:6px}
+.pk-hd{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12px;color:var(--muted)}
+.pk-hd b{color:var(--ink);font-weight:600}
+.pk-hd .pk-clear{margin-left:auto;font-size:11px;color:var(--faint);cursor:pointer}
+.pk-hd .pk-clear:hover{color:var(--danger)}
+.pk-it{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink)}
+.pk-it:hover{background:var(--soft,#1c1d22)}
+.pk-it .bx{width:14px;height:14px;border:1px solid var(--hairline,#2a2b31);border-radius:4px;flex:none}
+.pk-it.on .bx{background:var(--primary);border-color:var(--primary)}
+.pk-it .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-badge{position:absolute;top:-2px;right:-2px;min-width:14px;height:14px;line-height:14px;text-align:center;font-size:10px;border-radius:7px;background:var(--primary);color:var(--on-primary,#fff);padding:0 3px}
+.pk-btn{position:relative}
+.pk-tiles{display:flex;gap:6px;flex-wrap:wrap;padding:4px 2px 8px;border-bottom:1px solid var(--hairline,#26272c);margin-bottom:6px}
+.pk-tile{display:flex;flex-direction:column;align-items:center;gap:3px;width:64px;padding:8px 4px;border:1px solid var(--hairline,#26272c);border-radius:10px;cursor:pointer;font-size:11px;color:var(--muted)}
+.pk-tile:hover{border-color:var(--primary);color:var(--ink)}
+.pk-sec{border-top:1px solid var(--hairline,#26272c)}
+.pk-sec:first-of-type{border-top:0}
+.pk-sh{display:flex;align-items:center;gap:6px;padding:8px;cursor:pointer;font-size:12px;color:var(--ink);font-weight:600}
+.pk-sh .n{margin-left:auto;font-weight:400;color:var(--faint);font-size:11px}
+.pk-body{display:none;padding:0 0 4px}
+.pk-sec.open .pk-body{display:block}
 
 /* 侧栏项目组：项目=工作区文件夹 */
 .ss-proj{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:var(--r-md);cursor:pointer;color:var(--body);font-weight:500}
@@ -991,6 +1012,12 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
           <div class="czone cz-l">
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
+        <button class="icon-btn pk-btn" data-pk="agent" title="智能体：本轮指定使用哪些"><svg class="ic"><use href="#i-agent"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="plugin" title="插件：本轮指定使用哪些"><svg class="ic"><use href="#i-panel"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="skill" title="技能：本轮指定使用哪些"><svg class="ic"><use href="#i-tune"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="tool" title="工具：本轮指定使用哪些"><svg class="ic"><use href="#i-gear"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="prompt" title="提示词：本轮指定使用哪些"><svg class="ic"><use href="#i-edit"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="mcp" title="MCP：本轮指定使用哪些"><svg class="ic"><use href="#i-link"/></svg><span class="pk-badge" hidden></span></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
@@ -1157,7 +1184,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.91';
+var APP_VER = 'v0.3.92';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1824,7 +1851,7 @@ var NET = (function(){
   /* 构造请求体：上下文裁剪（§4.3） */
   function buildBody(session, msgs, attsData, attsText, searchBlock){
   /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜，猜中才切（顶栏会跟着变，不会偷偷改） */
-  if (S.cfg.autoRoute && !S.cfg.modePin && msgs && msgs.length){
+  if (S.cfg.autoRoute && !((S.cfg.picks && S.cfg.picks.agent) || []).length && !S.cfg.modePin && msgs && msgs.length){
     var lastU = '';
     for (var li = msgs.length - 1; li >= 0; li--){ if (msgs[li].role === 'user'){ lastU = String(msgs[li].content || ''); break; } }
     if (lastU){
@@ -7013,7 +7040,19 @@ p.appendChild(addBox);
     ]));
   /* v0.3.91：导航顺序按用户要求重排；「数据与维护」并入「关于」 */
   (function(){
-    var order = ['general', 'conn', 'ext', 'memory', 'keys', 'about'];
+    var pgs0 = body.querySelectorAll('.set-page');
+    var order = ['general', 'conn', 'ext', 'keys', 'about'];
+    var gpage = null, mpage = null;
+    for (var gi = 0; gi < pgs0.length; gi++){
+      if (pgs0[gi].getAttribute('data-page') === 'general') gpage = pgs0[gi];
+      if (pgs0[gi].getAttribute('data-page') === 'memory') mpage = pgs0[gi];
+    }
+    if (mpage && gpage){
+      gpage.appendChild(el('div', { class: 'sub', style: 'margin-top:22px', text: '记忆（全部为会话内，不跨会话）' }));
+      while (mpage.firstChild) gpage.appendChild(mpage.firstChild);
+      mpage.remove();
+    }
+    if (btns.memory) btns.memory.remove();
     var btns = {};
     var navBtns = nav.querySelectorAll('button[data-sp]');
     for (var bi = 0; bi < navBtns.length; bi++) btns[navBtns[bi].getAttribute('data-sp')] = navBtns[bi];
@@ -9997,6 +10036,109 @@ function sendMessage(){
       applyAccent(); applyFontScale();
       document.body.classList.toggle('nowrap-code', !!S.cfg.codeNoWrap);
       $('#btn-web').classList.toggle('on', !!S.cfg.webSearch); // 刷新后恢复开关视觉态
+/* v0.3.92：输入区扩展选择（智能体/插件/技能/工具/提示词/MCP）+ 「/」唤起面板 */
+(function(){
+  var KEY = { agent: '智能体', plugin: '插件', skill: '技能', tool: '工具', prompt: '提示词', mcp: 'MCP' };
+  function picks(){ if (!S.cfg.picks) setCfg({ picks: { agent: [], plugin: [], skill: [], tool: [], prompt: [], mcp: [] } }); return S.cfg.picks || {}; }
+  function list(kind){
+    var out = [];
+    try {
+      if (kind === 'agent'){ out = SUB.profiles(S.cfg.mode || 'chat').map(function(p){ return { id: p.name, t: p.title || p.name }; }); }
+      else if (kind === 'mcp'){ out = (S.cfg.mcp || []).map(function(m, ix){ return { id: m.url || ('mcp-' + ix), t: m.name || m.url }; }); }
+      else { var k = kind; out = (EXT.all() || []).filter(function(x){ return x.kind === k; }).map(function(x){ return { id: x.name || x.id, t: x.title || x.name || x.id }; }); }
+    } catch (e) {}
+    return out;
+  }
+  function refreshBadges(){
+    var ps = picks();
+    var bs = document.querySelectorAll('.pk-btn');
+    for (var b = 0; b < bs.length; b++){
+      var k = bs[b].getAttribute('data-pk'), n = (ps[k] || []).length, sp = bs[b].querySelector('.pk-badge');
+      if (sp){ sp.hidden = !n; sp.textContent = String(n); }
+      bs[b].classList.toggle('on', !!n);
+    }
+  }
+  function toggle(kind, id){
+    var ps = picks(); var arr = (ps[kind] || []).slice(); var at = arr.indexOf(id);
+    if (at >= 0) arr.splice(at, 1); else arr.push(id);
+    var nxt = {}; nxt[kind] = arr;
+    var merged = {}; for (var k in ps) merged[k] = ps[k]; merged[kind] = arr;
+    setCfg({ picks: merged }); refreshBadges();
+  }
+  function row(kind, it, multi){
+    var ps = picks(); var on = (ps[kind] || []).indexOf(it.id) >= 0;
+    var r = el('div', { class: 'pk-it' + (on ? ' on' : '') }, [ el('span', { class: 'bx' }), el('span', { class: 'nm', text: it.t }) ]);
+    r.addEventListener('click', function(){ toggle(kind, it.id); r.classList.toggle('on'); });
+    return r;
+  }
+  function panel(kind){
+    var box = el('div', { class: 'pk-pop' });
+    var items = list(kind);
+    var hd = el('div', { class: 'pk-hd' }, [ el('b', { text: KEY[kind] }), el('span', { text: '（' + items.length + '）' }), el('span', { class: 'pk-clear', text: '清空' }) ]);
+    hd.querySelector('.pk-clear').addEventListener('click', function(){ var ps = picks(); var merged = {}; for (var k in ps) merged[k] = ps[k]; merged[kind] = []; setCfg({ picks: merged }); refreshBadges(); box.remove(); });
+    box.appendChild(hd);
+    if (!items.length){ box.appendChild(el('div', { class: 'pk-it', text: '（这个模式下没有可用项）' })); return box; }
+    items.forEach(function(it){ box.appendChild(row(kind, it)); });
+    return box;
+  }
+  function closeAll(){ var ps = document.querySelectorAll('.pk-pop'); for (var i = 0; i < ps.length; i++) ps[i].remove(); }
+  document.addEventListener('click', function(e){
+    if (e.target.closest && (e.target.closest('.pk-pop') || e.target.closest('.pk-btn'))) return;
+    closeAll();
+  });
+  document.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('.pk-btn'); if (!b) return;
+    var open = b.querySelector('.pk-pop');
+    closeAll();
+    if (open) return;
+    var pop = panel(b.getAttribute('data-pk')); b.appendChild(pop);
+  });
+  refreshBadges();
+  /* 「/」唤起：五个分区默认折叠，图块进入 */
+  function slashPanel(){
+    var box = el('div', { class: 'pk-pop', id: 'pk-slash', style: 'width:320px' });
+    var tiles = el('div', { class: 'pk-tiles' });
+    ['plugin','skill','tool','prompt','mcp'].forEach(function(k){
+      var t = el('div', { class: 'pk-tile' }, [ el('span', { text: KEY[k] }), el('span', { style: 'font-size:10px;color:var(--faint)', text: String(list(k).length) }) ]);
+      t.addEventListener('click', function(){
+        var sec = box.querySelector('.pk-sec[data-k="' + k + '"]');
+        if (!sec) return;
+        var all = box.querySelectorAll('.pk-sec');
+        for (var i = 0; i < all.length; i++) all[i].classList.toggle('open', all[i] === sec && !all[i].classList.contains('open'));
+      });
+      tiles.appendChild(t);
+    });
+    box.appendChild(tiles);
+    ['plugin','skill','tool','prompt','mcp'].forEach(function(k){
+      var sec = el('div', { class: 'pk-sec', 'data-k': k });
+      var it = list(k);
+      var sh = el('div', { class: 'pk-sh' }, [ el('span', { text: KEY[k] }), el('span', { class: 'n', text: it.length + ' 项' }) ]);
+      sh.addEventListener('click', function(){ sec.classList.toggle('open'); });
+      var bd = el('div', { class: 'pk-body' });
+      if (!it.length) bd.appendChild(el('div', { class: 'pk-it', text: '（暂无）' }));
+      it.forEach(function(x){ bd.appendChild(row(k, x)); });
+      sec.appendChild(sh); sec.appendChild(bd);
+      box.appendChild(sec);
+    });
+    return box;
+  }
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){ closeAll(); }
+  });
+  window.addEventListener('load', function(){
+    var inp = document.getElementById('input'); if (!inp) return;
+    inp.addEventListener('input', function(){
+      if (inp.value === '/'){
+        closeAll();
+        var host = document.querySelector('.cwrap') || document.body;
+        var p = slashPanel();
+        p.style.bottom = 'calc(100% + 10px)'; p.style.left = '0'; p.style.position = 'absolute';
+        host.appendChild(p);
+        inp.value = '';
+      }
+    });
+  });
+})();
       applyCtx(); // v1.6：启动即按已缓存的窗口映射/模型名规则刷新上下文上限（全自动，无需手动设置）
       metaLazy(); // v2.9：启动时用目录缓存补全当前模型能力（不联网）
       renderComposerCtl();
