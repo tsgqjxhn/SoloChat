@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.52';
+var APP_VER = 'v0.3.53';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -10787,6 +10787,12 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var _ext = String(c.path || '').split('.').pop().toLowerCase();
     var _bad = String(S.cfg.dangerExt == null ? 'exe,bat,cmd,ps1,dll,msi,scr' : S.cfg.dangerExt).split(',').map(function(x){ return x.trim().toLowerCase(); }).filter(Boolean);
     if (_bad.indexOf(_ext) >= 0) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：.' + _ext + ' 属于高风险类型，请改用 fs-write 走人工确认）'); // v0.3.44：fs-edit 不能绕过危险扩展名检查
+    var _dirs = String(S.cfg.writeDirs || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
+    if (_dirs.length){
+      var _p2 = String(c.path || ''), _hit = false;
+      for (var _di = 0; _di < _dirs.length; _di++) if (_p2.toLowerCase().indexOf(_dirs[_di].toLowerCase()) >= 0) { _hit = true; break; }
+      if (!_hit) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：不在写入白名单目录内，请改用 fs-write 走人工确认）'); // v0.3.53：fs-edit 也要守白名单
+    }
     if (isOutside(c.path)) return Promise.resolve('[fs-result] edit ' + c.path + '（失败：工作区外编辑需人工确认，请改用 fs-write）');
     var next = text.slice(0, at) + n + text.slice(at + o.length);
     return NET.fs('write', c.path, next, wsIn || curWs(), false).then(function(w){
