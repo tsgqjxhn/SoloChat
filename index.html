@@ -1144,7 +1144,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.3.60';
+var APP_VER = 'v0.3.61';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -3488,9 +3488,10 @@ function askCard(c){
   }
   var askSid = (typeof S !== 'undefined' && S.sid) ? S.sid : 'draft';
   var rawKey = askSid + '|' + q.slice(0, 80) + '|' + opts.join(',');
-  var key = rawKey.replace(/"/g, '&quot;');
+var key = rawKey.replace(/"/g, '&quot;');
+var keyAttr = encodeURIComponent(rawKey); // v0.3.61：属性里放编码值，读回来再解码，避免 HTML 实体解码后对不上
   var done = (typeof S !== 'undefined' && S._asked && S._asked[key]) || '';
-  var h = '<div class="ask-card' + (done ? ' done' : '') + '" data-askkey="' + key + '">' +
+  var h = '<div class="ask-card' + (done ? ' done' : '') + '" data-askkey="' + keyAttr + '">' +
     '<div class="ask-h"><span class="ask-badge">提问</span><span class="ask-q">' + q + '</span></div>';
   if (done) return h + '<div class="ask-body"><div class="ask-done">已回答：' + done + '</div></div></div>';
   if (note) h += '<div class="ask-note">' + note + '</div>';
@@ -3507,7 +3508,7 @@ function askCard(c){
 function askAnswer(card, text){
   if (!card || !text) return;
   if (S.sending){ UI.toast('等这轮回复结束再回答，或先点停止', true); return; } // v0.3.2：发不出去还会掐断生成
-  var key = card.getAttribute('data-askkey') || '';
+var key = card.getAttribute('data-askkey') || ''; try { key = decodeURIComponent(key); } catch (e) {} // v0.3.61：与写入时的编码对齐
   S._asked = S._asked || {};
   if (Object.keys(S._asked).length > 200) S._asked = {};
   S._asked[key] = text;
