@@ -7,10 +7,10 @@
     <AssemblyName>SoloChatHost</AssemblyName>
     <RootNamespace>SoloChatHost</RootNamespace>
     <!-- 对外版本号（exe 属性 → 详情里可见） -->
-    <Version>0.3.93</Version>
-    <AssemblyVersion>0.3.93.0</AssemblyVersion>
-    <FileVersion>0.3.93.0</FileVersion>
-    <InformationalVersion>0.3.93</InformationalVersion>
+    <Version>0.4.0</Version>
+    <AssemblyVersion>0.4.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
+    <InformationalVersion>0.4.0.0</InformationalVersion>
     <Product>SoloChat</Product>
     <AssemblyTitle>SoloChat 本地 AI 客户端</AssemblyTitle>
     <Company>SoloChat</Company>
@@ -31,6 +31,8 @@
   <ItemGroup>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Security" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
   <!-- 单文件模式：托管依赖 + native loader + 页面全部嵌入 exe（磁盘存在同名文件时自动优先磁盘，开发态不受影响） -->
   <ItemGroup>

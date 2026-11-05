@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "updated": "2026-11-05",
+  "plugins": [
+    {
+      "id": "python-3.11",
+      "kind": "runtime",
+      "name": "Python 3.11",
+      "version": "3.11.9",
+      "description": "便携式 Python 3.11.9 运行时，含 uv。安装后可在 Agent 模式执行 Python 脚本。",
+      "file": "plugins/python-3.11.9-runtime.zip",
+      "sha256": "3ab929da23d57ec8ce581d3b6d7297a8d069b2b1661425c6c26008d11113b28f",
+      "size": 26128140
+    }
+  ]
+}

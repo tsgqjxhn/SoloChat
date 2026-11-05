@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -114,17 +115,23 @@ namespace SoloChatHost
 
         readonly string appDir;
         WebView2 wv;
+        WebView2 webPanel;   // v0.9.8：右侧栏内嵌浏览器（独立控件，不受 X-Frame-Options 限制）
+        string webPendingUrl = ""; // v1.1.8：初始化期间的最近一次 URL，避免开第二个网页被第一个覆盖
+        bool webPanelWanted;       // v1.1.8：页面是否仍要求显示（hide 后迟到的初始化不能再把它弹出来）
         CoreWebView2Environment env; // v0.2.3：播放窗口复用同一环境（共享 cookie/登录态）
         QuickBarForm quickBar;
         NotifyIcon tray;
         bool realExit;
-        bool hotReg;
         int lastHotTick; // v0.2.0：热键去抖（一次按键只处理一次）
         bool memLow;
         bool busy; // v2.2：页面有生成在跑（busy 消息），期间不进低内存态
         IntPtr hotHwnd;
         const int WM_HOTKEY = 0x0312;
-        const int HOTKEY_ID = 0x5C1;
+        const int HOTKEY_ID = 0x5C1;      // 快速输入条
+        const int HOTKEY_SHOW = 0x5C2;    // 显示主窗
+        const int HOTKEY_NEW = 0x5C3;     // 新建会话
+        const int HOTKEY_TEMP = 0x5C4;    // 新建临时会话
+        readonly Dictionary<int, bool> hotRegs = new Dictionary<int, bool>();
         readonly ConcurrentDictionary<string, CancellationTokenSource> inflight =
             new ConcurrentDictionary<string, CancellationTokenSource>();
         static readonly HttpClient Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -219,6 +226,7 @@ namespace SoloChatHost
         public MainForm(string appDir)
         {
             this.appDir = appDir;
+            try { SyncPluginsFolder(); } catch { }
             LoadHostCfg();
             FormBorderStyle = FormBorderStyle.None; // v1.2：去原生标题栏，窗控移入页面顶栏右上角
             Text = "SoloChat · AI 对话";
@@ -249,6 +257,7 @@ namespace SoloChatHost
             s.IsGeneralAutofillEnabled = false;
             s.IsPasswordAutosaveEnabled = false;
             s.AreDevToolsEnabled = DevMode;
+            s.AreDefaultContextMenusEnabled = false;    // v0.5.1：右键菜单改由页面自绘（不要 WebView2 的刷新/打印）
             s.AreBrowserAcceleratorKeysEnabled = true;  // 必须开：关掉会连 Ctrl+C/V/X/A 一起失效（回答复制不了）
 
             var core = wv.CoreWebView2;
@@ -266,9 +275,19 @@ namespace SoloChatHost
                 {
                     e.Cancel = true;
                 }
+                /* v1.1.8：主页面刷新/重载时 DOM 已重置，原生网页控件必须先收起，否则会悬在新页面之上 */
+                try
+                {
+                    webPanelWanted = false;
+                    if (webPanel != null) webPanel.Visible = false;
+                }
+                catch { }
             };
             wv.Source = new Uri("https://app.local/index.html");
             quickBar = new QuickBarForm(this); // 可见性由页面 cfg（quickbar 消息）驱动
+            /* v0.4.1：主窗一被激活就把快捷条收起来 —— 它是「在别的应用里随手问」的浮窗，
+               留在主窗顶上会挡住顶栏（用户看到的「界面花掉」就是这个浮窗叠在上面） */
+            Activated += (actSender, actArgs) => { try { if (quickBar != null && quickBar.Visible) quickBar.Hide(); } catch { } };
         }
 
         /* 无边框但保留缩放边（WS_THICKFRAME）：四边仍可拉伸，无标题栏 */
@@ -333,7 +352,8 @@ namespace SoloChatHost
                 return;
             }
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-            if (hotReg) UnregisterHotKey(Handle, HOTKEY_ID);
+            foreach (var kv in hotRegs) if (kv.Value) UnregisterHotKey(Handle, kv.Key);
+            hotRegs.Clear();
             base.OnFormClosing(e);
         }
 
@@ -385,28 +405,38 @@ namespace SoloChatHost
             catch (Exception ex) { Log("memtarget err: " + ex.Message); }
         }
 
-        /* ---- 全局热键：召唤快速输入条（组合键由页面 cfg 下发） ---- */
-        public void ApplyHotkey(string combo)
+        /* ---- 全局热键：四路（快速条 / 显示主窗 / 新建会话 / 临时会话），组合键由页面 cfg 下发 ---- */
+        public void ApplyHotkey(string combo) { ApplyHotkeys(combo, null, null, null); }
+
+        public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess)
+        {
+            hotHwnd = Handle;
+            ApplyOne(HOTKEY_ID, quick, "quickbar");
+            ApplyOne(HOTKEY_SHOW, showMain, "showMain");
+            ApplyOne(HOTKEY_NEW, newSess, "newSession");
+            ApplyOne(HOTKEY_TEMP, tempSess, "tempSession");
+        }
+
+        void ApplyOne(int id, string combo, string key)
         {
             try
             {
-                if (hotReg) { UnregisterHotKey(Handle, HOTKEY_ID); hotReg = false; }
-                hotHwnd = Handle;
+                bool was;
+                if (hotRegs.TryGetValue(id, out was) && was) UnregisterHotKey(Handle, id);
+                hotRegs[id] = false;
+                if (string.IsNullOrWhiteSpace(combo))
+                {
+                    PostRaw(JsonSerializer.Serialize(new { t = "hotkey.result", ok = true, key, combo = "", err = 0 }));
+                    return;
+                }
                 uint mods, vk;
-                hotReg = TryParseCombo(combo, out mods, out vk) && RegisterHotKey(Handle, HOTKEY_ID, mods, vk);
-                if (!hotReg)
-                {
-                    var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                    MainForm.Log("hotkey '" + combo + "' FAILED err=" + err + " (1409=已被占用)");
-                    PostRaw(JsonSerializer.Serialize(new { t = "hotkey.result", ok = false, combo = combo ?? "", err = err }));
-                }
-                else
-                {
-                    MainForm.Log("hotkey '" + combo + "' registered");
-                    PostRaw(JsonSerializer.Serialize(new { t = "hotkey.result", ok = true, combo = combo ?? "" }));
-                }
+                bool ok = TryParseCombo(combo, out mods, out vk) && RegisterHotKey(Handle, id, mods, vk);
+                hotRegs[id] = ok;
+                int err = ok ? 0 : System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                MainForm.Log("hotkey[" + key + "] '" + combo + "' " + (ok ? "registered" : "FAILED err=" + err + " (1409=已被占用)"));
+                PostRaw(JsonSerializer.Serialize(new { t = "hotkey.result", ok, key, combo = combo ?? "", err }));
             }
-            catch (Exception ex) { MainForm.Log("hotkey err: " + ex.Message); }
+            catch (Exception ex) { MainForm.Log("hotkey[" + key + "] err: " + ex.Message); }
         }
 
         static bool TryParseCombo(string combo, out uint mods, out uint vk)
@@ -535,7 +565,7 @@ namespace SoloChatHost
                 SyncCaptionForMax();
                 return;
             }
-            if (m.Msg == WM_HOTKEY && m.WParam.ToInt64() == HOTKEY_ID)
+            if (m.Msg == WM_HOTKEY)
             {
                 /* 一次按键可能收到两条 WM_HOTKEY（键盘软件、重复注册、长按自动重复）：
                    250ms 内的后续消息直接吞掉，否则「显示→立刻隐藏」，看起来就是按了没反应 */
@@ -543,7 +573,11 @@ namespace SoloChatHost
                 if (unchecked(now - lastHotTick) >= 250)
                 {
                     lastHotTick = now;
-                    if (quickBar != null) quickBar.Toggle();
+                    int hid = (int)m.WParam.ToInt64();
+                    if (hid == HOTKEY_ID) { if (quickBar != null) quickBar.Toggle(); }
+                    else if (hid == HOTKEY_SHOW) ShowMainWindow();
+                    else if (hid == HOTKEY_NEW) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"new\"}");
+                    else if (hid == HOTKEY_TEMP) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"temp\"}");
                 }
             }
             if (m.Msg == 0x0018 && IsHandleCreated)
@@ -555,9 +589,33 @@ namespace SoloChatHost
             base.WndProc(ref m);
         }
 
+        /* 全局热键：显示主窗（托盘/最小化时也能叫出来） */
+        void ShowMainWindow()
+        {
+            try
+            {
+                Show();
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                Activate();
+            }
+            catch { }
+        }
+
         void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
             e.Handled = true;
+            /* v1.1.9：页面里的 target=_blank / window.open 不再直接甩给系统浏览器，
+               先让页面把它开进右侧「网页」侧栏；Chat 模式没有侧栏时才回退外部浏览器。 */
+            try
+            {
+                if (Uri.TryCreate(e.Uri, UriKind.Absolute, out Uri u) &&
+                    (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+                {
+                    PostRaw(JsonSerializer.Serialize(new { t = "open.web", url = u.AbsoluteUri }));
+                    return;
+                }
+            }
+            catch { }
             OpenExternal(e.Uri);
         }
 
@@ -641,7 +699,19 @@ namespace SoloChatHost
                     {
                         var idCopy = id;
                         var reqCopy = root.Clone(); // 独立副本，脱离 using 作用域；避免二次 Parse 的 ArrayPool 泄漏
-                        Task.Run(() => RunHttpAsync(reqCopy, idCopy));
+                        bool wantCookies = root.TryGetProperty("cookies", out JsonElement ckEl) && ckEl.ValueKind == JsonValueKind.True;
+                        if (wantCookies)
+                        {
+                            var httpUrl = root.TryGetProperty("url", out JsonElement hUrl) ? hUrl.GetString() : "";
+                            /* v1.1.15：把侧栏 WebView2 的 cookie（含 Cloudflare clearance / 登录态）带给宿主 HttpClient，
+                               否则浏览器能打开的章节，爬虫会 403。仅爬虫/网页抓取请求做这件事，不拖慢模型 API。 */
+                            BeginInvoke((Action)(async () =>
+                            {
+                                string ck = await GetWebCookies(httpUrl);
+                                _ = RunHttpAsync(reqCopy, idCopy, ck);
+                            }));
+                        }
+                        else Task.Run(() => RunHttpAsync(reqCopy, idCopy));
                     }
                     else if (t == "copy") /* v1.11：页面复制走宿主剪贴板（WebView2 的 clipboard API 会卡死） */
             {
@@ -658,6 +728,12 @@ namespace SoloChatHost
                         var idCopy = id;
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
+                    }
+                    else if (t == "runtime") /* v1.1.26：运行时插件（Python 等）安装/执行 */
+                    {
+                        var idCopyRt = id;
+                        var reqCopyRt = root.Clone();
+                        Task.Run(() => RunRuntimeAsync(reqCopyRt, idCopyRt));
                     }
                     else if (t == "cmd.audit") /* v1.0.1：命令审计回读 */
                     {
@@ -720,11 +796,78 @@ namespace SoloChatHost
                     else BeginInvoke((Action)(() => OpenExternal(ouCopy)));
                 }
             }
+            else if (t == "shot") /* v1.0.1：截当前内置浏览器，回 PNG base64 */
+            {
+                string shotId = id ?? ("shot" + Environment.TickCount);
+                var selfShot = this;
+                BeginInvoke((Action)(async () =>
+                {
+                    try
+                    {
+                        CoreWebView2 ctl = (webPanel != null && webPanel.Visible && webPanel.CoreWebView2 != null)
+                            ? webPanel.CoreWebView2
+                            : (wv != null ? wv.CoreWebView2 : null);
+                        if (ctl == null) { selfShot.Post(shotId, "shot.done", null, "浏览器未就绪", 0); return; }
+                        using (var ms = new System.IO.MemoryStream())
+                        {
+                            await ctl.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, ms);
+                            selfShot.Post(shotId, "shot.done", Convert.ToBase64String(ms.ToArray()), null, 0);
+                        }
+                    }
+                    catch (Exception ex) { selfShot.Post(shotId, "shot.done", null, ex.Message, 0); }
+                }));
+            }
+            else if (t == "webview") /* v0.9.8：侧栏内嵌真浏览器 */
+            {
+                string wop = root.TryGetProperty("op", out JsonElement wopEl) ? wopEl.GetString() : "show";
+                Log("webview op=" + wop);
+                if (wop == "reload")
+                {
+                    BeginInvoke((Action)(() =>
+                    {
+                        try { if (webPanel != null && webPanel.CoreWebView2 != null) webPanel.CoreWebView2.Reload(); } catch { }
+                    }));
+                }
+                else if (wop == "hide")
+                {
+                    webPanelWanted = false;
+                    webPendingUrl = "";
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (webPanel != null)
+                        {
+                            webPanel.Visible = false;
+                            webPanel.Bounds = new Rectangle(0, 0, 1, 1);   /* 彻底让开：只 Visible=false 在某些布局下会被撑回去 */
+                        }
+                    }));
+                }
+                else
+                {
+                    string wurl = root.TryGetProperty("url", out JsonElement wuEl) ? wuEl.GetString() : "";
+                    int rx = 0, ry = 0, rw = 0, rh = 0;
+                    if (root.TryGetProperty("rect", out JsonElement rcEl) && rcEl.ValueKind == JsonValueKind.Object)
+                    {
+                        if (rcEl.TryGetProperty("x", out JsonElement vx)) rx = vx.GetInt32();
+                        if (rcEl.TryGetProperty("y", out JsonElement vy)) ry = vy.GetInt32();
+                        if (rcEl.TryGetProperty("w", out JsonElement vw3)) rw = vw3.GetInt32();
+                        if (rcEl.TryGetProperty("h", out JsonElement vh3)) rh = vh3.GetInt32();
+                    }
+                    var selfW = this;
+                    BeginInvoke((Action)(() => selfW.ShowWebPanel(wurl, rx, ry, rw, rh)));
+                }
+            }
             else if (t == "hotkey")
                     {
                         string combo = root.TryGetProperty("combo", out JsonElement cEl) ? cEl.GetString() : "";
+                        string hShow = "", hNew = "", hTemp = "";
+                        if (root.TryGetProperty("combos", out JsonElement hcs) && hcs.ValueKind == JsonValueKind.Object)
+                        {
+                            if (hcs.TryGetProperty("showMain", out JsonElement e1)) hShow = e1.GetString() ?? "";
+                            if (hcs.TryGetProperty("newSession", out JsonElement e2)) hNew = e2.GetString() ?? "";
+                            if (hcs.TryGetProperty("tempSession", out JsonElement e3)) hTemp = e3.GetString() ?? "";
+                        }
                         var f = this;
-                        BeginInvoke((Action)(() => f.ApplyHotkey(combo)));
+                        BeginInvoke((Action)(() => f.ApplyHotkeys(combo, hShow, hNew, hTemp)));
                     }
                     else if (t == "quickbar")
                     {
@@ -829,7 +972,115 @@ namespace SoloChatHost
             try { var p = Path.Combine(Path.GetTempPath(), "solo-host.log"); if (File.Exists(p)) File.Delete(p); } catch { }
         }
 
-        async Task RunHttpAsync(JsonElement req, string id)
+        /* v0.9.8：把右侧栏那块区域交给一个真的 WebView2 —— 百度/知乎这类禁止被 iframe 嵌入的站也能开
+           v1.1.8：只覆盖 iframe 区域（页面侧 webRect 已改成 #web-frame），地址栏/关闭按钮不会再被盖住 */
+        void ShowWebPanel(string url, int x, int y, int w, int h)
+        {
+            try
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out Uri target) ||
+                    (target.Scheme != Uri.UriSchemeHttp && target.Scheme != Uri.UriSchemeHttps))
+                {
+                    Log("webpanel rejected url: " + url);
+                    return;
+                }
+                webPendingUrl = url;
+                webPanelWanted = true;
+                if (webPanel == null)
+                {
+                    webPanel = new WebView2 { Visible = false };
+                    Controls.Add(webPanel);
+                    var self2 = this;
+                    _ = webPanel.EnsureCoreWebView2Async(env).ContinueWith(t2 =>
+                    {
+                        if (t2.IsFaulted)
+                        {
+                            Log("webpanel init failed: " + t2.Exception?.GetBaseException().Message);
+                            try { self2.BeginInvoke((Action)(() => { if (webPanel != null) webPanel.Visible = false; })); } catch { }
+                            return;
+                        }
+                        try
+                        {
+                            self2.BeginInvoke((Action)(() =>
+                            {
+                                if (webPanel == null) return;
+                                var c = webPanel.CoreWebView2;
+                                c.Settings.AreDefaultContextMenusEnabled = true;
+                                c.Settings.IsStatusBarEnabled = false;
+                                c.Settings.AreDevToolsEnabled = false;
+                                /* v1.1.12：侧栏内跳转后把真实 URL 同步回地址栏，关面板再开才不会退回旧页 */
+                                c.SourceChanged += (o, se) =>
+                                {
+                                    try
+                                    {
+                                        var su = c.Source ?? "";
+                                        if (!string.IsNullOrEmpty(su))
+                                            PostRaw(JsonSerializer.Serialize(new { t = "webview.url", url = su }));
+                                    }
+                                    catch { }
+                                };
+                                /* 站内 target=_blank 不弹新窗口，留在当前面板里 */
+                                c.NewWindowRequested += (o, ev) =>
+                                {
+                                    /* v1.1.9：侧栏浏览器的 target=_blank 留在同一面板，不再弹独立浏览器窗口 */
+                                    ev.Handled = true;
+                                    try
+                                    {
+                                        if (Uri.TryCreate(ev.Uri, UriKind.Absolute, out Uri nu) &&
+                                            (nu.Scheme == Uri.UriSchemeHttp || nu.Scheme == Uri.UriSchemeHttps))
+                                            c.Navigate(nu.AbsoluteUri);
+                                    }
+                                    catch { }
+                                };
+                                if (webPanelWanted && !string.IsNullOrEmpty(webPendingUrl))
+                                {
+                                    try { c.Navigate(webPendingUrl); } catch { }
+                                }
+                            }));
+                        }
+                        catch { }
+                    });
+                }
+                float sc = DeviceDpi / 96f;
+                webPanel.Bounds = new Rectangle((int)(x * sc), (int)(y * sc),
+                    Math.Max(80, (int)(w * sc)), Math.Max(80, (int)(h * sc)));
+                if (webPanelWanted)
+                {
+                    webPanel.Visible = true;
+                    webPanel.BringToFront();
+                }
+                if (webPanel.CoreWebView2 != null && webPanelWanted && !string.IsNullOrEmpty(webPendingUrl))
+                {
+                    string cur = "";
+                    try { cur = webPanel.CoreWebView2.Source ?? ""; } catch { }
+                    if (!string.Equals(cur, webPendingUrl, StringComparison.OrdinalIgnoreCase))
+                        webPanel.CoreWebView2.Navigate(webPendingUrl);
+                }
+            }
+            catch (Exception ex) { Log("webpanel: " + ex.Message); }
+        }
+
+        async Task<string> GetWebCookies(string url)
+        {
+            try
+            {
+                if (webPanel == null || webPanel.CoreWebView2 == null) return "";
+                if (!Uri.TryCreate(url, UriKind.Absolute, out Uri u) ||
+                    (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)) return "";
+                var list = await webPanel.CoreWebView2.CookieManager.GetCookiesAsync(u.AbsoluteUri);
+                var sb = new StringBuilder();
+                foreach (var c in list)
+                {
+                    if (string.IsNullOrEmpty(c.Name)) continue;
+                    if (sb.Length > 0) sb.Append("; ");
+                    sb.Append(c.Name).Append('=').Append(c.Value);
+                }
+                return sb.ToString();
+            }
+            catch { return ""; }
+        }
+
+        async Task RunHttpAsync(JsonElement req, string id, string cookie = null)
         {
             var cts = new CancellationTokenSource();
             inflight[id] = cts;
@@ -856,6 +1107,8 @@ namespace SoloChatHost
                                 m.Headers.TryAddWithoutValidation(p.Name, v);
                         }
                     }
+                    if (!string.IsNullOrEmpty(cookie) && !m.Headers.Contains("Cookie"))
+                        m.Headers.TryAddWithoutValidation("Cookie", cookie);
                     /* v1.5：bodyB64 + contentType 支持二进制上传（文档 OCR 等）；body 仍为 JSON 文本 */
                     var ct = req.TryGetProperty("contentType", out JsonElement ctEl) ? ctEl.GetString() : null;
                     string b64 = null;
@@ -1482,6 +1735,26 @@ namespace SoloChatHost
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage", "host.json"); }
         }
 
+        /* v1.1.26：运行时插件（便携式 Python 等）安装目录 */
+        static string RuntimeRoot
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenPage", "runtimes"); }
+        }
+        static string RuntimeManifestPath
+        {
+            get { return Path.Combine(RuntimeRoot, "runtimes.json"); }
+        }
+        class RuntimeRec
+        {
+            public string id { get; set; }
+            public string name { get; set; }
+            public string version { get; set; }
+            public string entry { get; set; }
+            public string path { get; set; }
+            public long size { get; set; }
+            public long installedAt { get; set; }
+        }
+
         static void LoadHostCfg()
         {
             try
@@ -1568,9 +1841,10 @@ namespace SoloChatHost
                 foreach (JsonElement x in aEl.EnumerateArray())
                     if (x.ValueKind == JsonValueKind.String) args.Add(x.GetString());
             string cwd = req.TryGetProperty("cwd", out JsonElement wEl) ? wEl.GetString() : null;
-            int timeoutMs = 60000;
-            if (req.TryGetProperty("timeoutMs", out JsonElement tEl) && tEl.TryGetInt32(out int tv))
-                timeoutMs = Math.Min(Math.Max(tv, 1000), 300000);
+            /* v1.1.24：0 = 不限制；调用方显式传正数才设超时（最多 24h） */
+            int timeoutMs = 0;
+            if (req.TryGetProperty("timeoutMs", out JsonElement tEl) && tEl.TryGetInt32(out int tv) && tv > 0)
+                timeoutMs = Math.Min(tv, 24 * 60 * 60 * 1000);
 
             if (string.IsNullOrWhiteSpace(cmd))
             {
@@ -1631,7 +1905,9 @@ namespace SoloChatHost
                 }
                 p.BeginOutputReadLine();
                 p.BeginErrorReadLine();
-                bool exited = p.WaitForExit(timeoutMs);
+                bool exited;
+                if (timeoutMs > 0) exited = p.WaitForExit(timeoutMs);
+                else { p.WaitForExit(); exited = true; }
                 if (!exited)
                 {
                     Audit(cwdFull, cmd + " " + string.Join(" ", args.ToArray()), "timeout>" + timeoutMs + "ms");
@@ -1806,6 +2082,7 @@ namespace SoloChatHost
                     case "read": FsRead(req, id); break;
                     case "list": FsList(req, id); break;
                     case "write": FsWrite(req, id); break;
+                    case "writeb64": FsWriteB64(req, id); break; /* v1.1.22：原样写图片/PDF/Office 等二进制附件 */
       case "restore": FsRestore(req, id); break;   /* v1.28.4：撤销上次写入 */
                     case "delete": FsDelete(req, id); break; /* v1.13：面板里删文件（只限工作区内、非空目录不删） */
                     default:
@@ -1981,6 +2258,290 @@ namespace SoloChatHost
             PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, bytes = n, snap = snap }), null);
         }
 
+        void FsWriteB64(JsonElement req, string id)
+        {
+            string rel = req.GetProperty("path").GetString() ?? "";
+            string p = GuardPath(ReqRoot(req), rel);
+            string b64 = req.TryGetProperty("data", out JsonElement dEl) ? (dEl.GetString() ?? "") : "";
+            int comma = b64.IndexOf(',');
+            if (b64.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && comma >= 0) b64 = b64.Substring(comma + 1);
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(b64); }
+            catch { PostFs(id, "fs.error", null, "base64 解码失败"); return; }
+            if (bytes.Length > 50 * 1024 * 1024) { PostFs(id, "fs.error", null, "内容超过 50MB，拒绝写入"); return; }
+            string dir = Path.GetDirectoryName(p);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllBytes(p, bytes);
+            Log("fs writeb64 ok: " + rel + " bytes=" + bytes.Length);
+            PostFs(id, "fs.done", JsonSerializer.Serialize(new { path = rel, bytes = bytes.Length }), null);
+        }
+
+        void SyncPluginsFolder()
+        {
+            string src = Path.Combine(AppContext.BaseDirectory, "plugins");
+            string dst = Path.Combine(appDir, "plugins");
+            if (!Directory.Exists(src)) return;
+            string sf = Path.GetFullPath(src).TrimEnd('\\');
+            string df = Path.GetFullPath(dst).TrimEnd('\\');
+            if (string.Equals(sf, df, StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var f in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+            {
+                string rel = f.Substring(sf.Length).TrimStart('\\');
+                string to = Path.Combine(df, rel);
+                try
+                {
+                    var fi = new FileInfo(f);
+                    var ti = new FileInfo(to);
+                    if (ti.Exists && ti.Length == fi.Length && ti.LastWriteTimeUtc >= fi.LastWriteTimeUtc) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(to));
+                    File.Copy(f, to, true);
+                }
+                catch { }
+            }
+        }
+
+        /* ================= v1.1.26 运行时插件 ================= */
+        List<RuntimeRec> LoadRuntimes()
+        {
+            try
+            {
+                if (!File.Exists(RuntimeManifestPath)) return new List<RuntimeRec>();
+                return JsonSerializer.Deserialize<List<RuntimeRec>>(File.ReadAllText(RuntimeManifestPath, Encoding.UTF8)) ?? new List<RuntimeRec>();
+            }
+            catch { return new List<RuntimeRec>(); }
+        }
+        void SaveRuntimes(List<RuntimeRec> list)
+        {
+            Directory.CreateDirectory(RuntimeRoot);
+            File.WriteAllText(RuntimeManifestPath, JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        }
+        static void ExtractZipSafe(string zipPath, string destDir)
+        {
+            string root = Path.GetFullPath(destDir);
+            Directory.CreateDirectory(root);
+            using (var z = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var e in z.Entries)
+                {
+                    string target = Path.GetFullPath(Path.Combine(root, e.FullName));
+                    string prefix = root.EndsWith("\\", StringComparison.Ordinal) ? root : root + "\\";
+                    if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !target.Equals(root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("压缩包路径越界：" + e.FullName);
+                    if (string.IsNullOrEmpty(e.Name)) { Directory.CreateDirectory(target); continue; }
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    e.ExtractToFile(target, true);
+                }
+            }
+        }
+        static async Task DownloadToFile(string url, string dest)
+        {
+            using (var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+            {
+                resp.EnsureSuccessStatusCode();
+                using (var fs = File.Create(dest))
+                using (var s = await resp.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    await s.CopyToAsync(fs).ConfigureAwait(false);
+            }
+        }
+        static string Sha256File(string path)
+        {
+            using (var sha = SHA256.Create())
+            using (var fs = File.OpenRead(path))
+                return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+        }
+        /* B1-3：p.Kill() 只结束 python.exe 本身，脚本 fork 出来的子进程会残留并继续占住
+           重定向管道；超时后必须用 taskkill /T 连整棵进程树一起清掉。 */
+        static void KillProcessTree(int pid)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "taskkill",
+                    Arguments = "/PID " + pid + " /T /F",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var k = new Process { StartInfo = psi })
+                {
+                    k.Start();
+                    k.WaitForExit(5000);
+                }
+            }
+            catch { }
+        }
+        void RunRuntimeAsync(JsonElement req, string id)
+        {
+            try
+            {
+                string op = req.TryGetProperty("op", out JsonElement opEl) ? (opEl.GetString() ?? "list") : "list";
+                var list = LoadRuntimes();
+                if (op == "list")
+                {
+                    list.RemoveAll(x => x == null || string.IsNullOrEmpty(x.path) || !File.Exists(Path.Combine(x.path, x.entry ?? "python.exe")));
+                    Post(id, "runtime.done", JsonSerializer.Serialize(list), null, 200);
+                    return;
+                }
+                if (op == "install")
+                {
+                    string rid = req.TryGetProperty("runtimeId", out JsonElement ridEl) ? (ridEl.GetString() ?? "") : "";
+                    string file = req.TryGetProperty("file", out JsonElement fileEl) ? (fileEl.GetString() ?? "") : "";
+                    string url = req.TryGetProperty("url", out JsonElement urlEl) ? (urlEl.GetString() ?? "") : "";
+                    string wantSha = req.TryGetProperty("sha256", out JsonElement shaEl) ? (shaEl.GetString() ?? "") : "";
+                    if (string.IsNullOrWhiteSpace(rid)) throw new Exception("缺少运行时 id");
+                    string zip = "";
+                    string tmp = Path.Combine(Path.GetTempPath(), "SoloChat", "runtime_" + Guid.NewGuid().ToString("N") + ".zip");
+                    Directory.CreateDirectory(Path.GetDirectoryName(tmp));
+                    if (!string.IsNullOrWhiteSpace(file))
+                    {
+                        string baseDir = Path.GetFullPath(appDir);
+                        string p = Path.GetFullPath(Path.Combine(baseDir, file));
+                        string prefix = baseDir.EndsWith("\\", StringComparison.Ordinal) ? baseDir : baseDir + "\\";
+                        if (!p.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new Exception("插件包路径越界");
+                        if (!File.Exists(p)) throw new Exception("插件包不存在：" + file);
+                        zip = p;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        DownloadToFile(url, tmp).GetAwaiter().GetResult();
+                        zip = tmp;
+                    }
+                    else throw new Exception("缺少插件包 file 或 url");
+                    if (!string.IsNullOrWhiteSpace(wantSha))
+                    {
+                        string got = Sha256File(zip);
+                        if (!string.Equals(got, wantSha, StringComparison.OrdinalIgnoreCase))
+                            throw new Exception("SHA256 校验失败（期望 " + wantSha + "，实际 " + got + "）");
+                    }
+                    string work = Path.Combine(Path.GetTempPath(), "SoloChat", "rt_" + Guid.NewGuid().ToString("N"));
+                    if (Directory.Exists(work)) Directory.Delete(work, true);
+                    Directory.CreateDirectory(work);
+                    ExtractZipSafe(zip, work);
+                    string mf = Path.Combine(work, "plugin.json");
+                    if (!File.Exists(mf)) throw new Exception("插件包缺少 plugin.json");
+                    var rec = JsonSerializer.Deserialize<RuntimeRec>(File.ReadAllText(mf, Encoding.UTF8));
+                    if (rec == null || string.IsNullOrWhiteSpace(rec.id)) throw new Exception("plugin.json 缺少 id");
+                    if (!string.IsNullOrWhiteSpace(rid) && !string.Equals(rid, rec.id, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("插件 id 不匹配：" + rec.id);
+                    if (string.IsNullOrWhiteSpace(rec.entry)) rec.entry = "python.exe";
+                    string dest = Path.Combine(RuntimeRoot, rec.id);
+                    Directory.CreateDirectory(RuntimeRoot);
+                    if (Directory.Exists(dest)) Directory.Delete(dest, true);
+                    try { Directory.Move(work, dest); }
+                    catch { CopyDir(work, dest); try { Directory.Delete(work, true); } catch { } }
+                    rec.path = dest;
+                    rec.installedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    long total = 0;
+                    try { foreach (var f in Directory.GetFiles(dest, "*", SearchOption.AllDirectories)) total += new FileInfo(f).Length; } catch { }
+                    rec.size = total;
+                    if (!File.Exists(Path.Combine(dest, rec.entry))) throw new Exception("运行时入口不存在：" + rec.entry);
+                    list.RemoveAll(x => x != null && string.Equals(x.id, rec.id, StringComparison.OrdinalIgnoreCase));
+                    list.Add(rec);
+                    SaveRuntimes(list);
+                    if (File.Exists(tmp)) { try { File.Delete(tmp); } catch { } }
+                    Post(id, "runtime.done", JsonSerializer.Serialize(rec), null, 200);
+                    return;
+                }
+                if (op == "remove")
+                {
+                    string rid = req.TryGetProperty("runtimeId", out JsonElement ridEl2) ? (ridEl2.GetString() ?? "") : "";
+                    if (string.IsNullOrWhiteSpace(rid)) throw new Exception("缺少运行时 id");
+                    string dest = Path.Combine(RuntimeRoot, rid);
+                    if (Directory.Exists(dest)) Directory.Delete(dest, true);
+                    list.RemoveAll(x => x != null && string.Equals(x.id, rid, StringComparison.OrdinalIgnoreCase));
+                    SaveRuntimes(list);
+                    Post(id, "runtime.done", "{\"removed\":true}", null, 200);
+                    return;
+                }
+                if (op == "run")
+                {
+                    string rid = req.TryGetProperty("runtimeId", out JsonElement ridEl3) ? (ridEl3.GetString() ?? "") : "";
+                    string code = req.TryGetProperty("code", out JsonElement codeEl) ? (codeEl.GetString() ?? "") : "";
+                    string cwd = req.TryGetProperty("cwd", out JsonElement cwdEl) ? (cwdEl.GetString() ?? "") : "";
+                    var rec = list.Find(x => x != null && string.Equals(x.id, rid, StringComparison.OrdinalIgnoreCase));
+                    if (rec == null) throw new Exception("运行时未安装：" + rid + "（请到 设置 → 扩展 → 插件市场安装）");
+                    if (!File.Exists(Path.Combine(rec.path, rec.entry))) throw new Exception("运行时文件缺失，请重新安装");
+                    string workDir = string.IsNullOrWhiteSpace(cwd) ? Path.GetTempPath() : FsRootFull(cwd);
+                    string py = Path.Combine(rec.path, rec.entry);
+                    string script = Path.Combine(Path.GetTempPath(), "SoloChat", "run_" + Guid.NewGuid().ToString("N") + ".py");
+                    Directory.CreateDirectory(Path.GetDirectoryName(script));
+                    File.WriteAllText(script, code, new UTF8Encoding(false));
+                    try
+                    {
+                        /* B1-3：默认 120s，上限 24h；请求可显式覆盖（正数）。cmd 工具的 0=不限时另算，不动。 */
+                        int timeoutMs = 120000;
+                        if (req.TryGetProperty("timeoutMs", out JsonElement rtTmoEl) && rtTmoEl.TryGetInt32(out int rtTmoVal) && rtTmoVal > 0)
+                            timeoutMs = Math.Min(rtTmoVal, 24 * 60 * 60 * 1000);
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = py,
+                            Arguments = "-u " + QuoteArg(script),
+                            WorkingDirectory = workDir,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            StandardOutputEncoding = Encoding.UTF8,
+                            StandardErrorEncoding = Encoding.UTF8
+                        };
+                        psi.EnvironmentVariables["PYTHONPATH"] = workDir;
+                        psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+                        var t0 = DateTime.UtcNow;
+                        using (var p = new Process { StartInfo = psi })
+                        {
+                            /* 超时分支里异步读任务可能收不到 EOF；最多等 3s，拿不到就按空串返回，绝不卡住宿主 */
+                            Func<Task<string>, string> takeOutput = delegate (Task<string> t)
+                            {
+                                try { return t.Wait(3000) ? (t.Result ?? "") : ""; }
+                                catch { return ""; }
+                            };
+                            p.Start();
+                            var soTask = p.StandardOutput.ReadToEndAsync();
+                            var seTask = p.StandardError.ReadToEndAsync();
+                            bool exited = p.WaitForExit(timeoutMs);
+                            if (!exited)
+                            {
+                                Audit(workDir, "runtime.run " + rid, "timeout>" + timeoutMs + "ms");
+                                try { p.Kill(); } catch { }
+                                KillProcessTree(p.Id); // taskkill /T /F：连脚本 fork 出的子进程一起清，管道才会闭合
+                                string tout = takeOutput(soTask), terr = takeOutput(seTask);
+                                Post(id, "runtime.done",
+                                    JsonSerializer.Serialize(new { code = -1, stdout = tout, stderr = terr, timeout = true }),
+                                    "超时（>" + timeoutMs + "ms）", 200);
+                                return;
+                            }
+                            string stdout = soTask.GetAwaiter().GetResult();
+                            string stderr = seTask.GetAwaiter().GetResult();
+                            var data = JsonSerializer.Serialize(new { code = p.ExitCode, stdout = stdout, stderr = stderr, ms = (long)(DateTime.UtcNow - t0).TotalMilliseconds, timeout = false });
+                            Post(id, "runtime.done", data, null, 200);
+                        }
+                    }
+                    finally
+                    {
+                        /* B1-3：无论正常/超时/异常，临时脚本都要删掉 */
+                        try { if (File.Exists(script)) File.Delete(script); } catch { }
+                    }
+                    return;
+                }
+                throw new Exception("未知运行时操作：" + op);
+            }
+            catch (Exception ex)
+            {
+                Post(id, "runtime.error", null, ex.Message, 400);
+            }
+        }
+        static void CopyDir(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (var f in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+            {
+                string rel = f.Substring(src.TrimEnd('\\').Length).TrimStart('\\');
+                string to = Path.Combine(dst, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(to));
+                File.Copy(f, to, true);
+            }
+        }
+
         void PickRoot(string id)
         {
             try
@@ -2058,24 +2619,25 @@ namespace SoloChatHost
         }
     }
 
-    /* 任务栏快速输入条：常驻置顶的小输入窗（方案 A，原生控件，约 +1~3MB） */
+    /* 任务栏快速输入条：常驻置顶的小输入窗
+       v0.4.3：胶囊造型（对齐主界面 .seg 的 pill 语言）、圆形按钮、聚焦光晕；
+                左侧只留联网开关、固定 Chat、整条空白处可拖动；
+                占位提示常驻到真正开始输入为止（不再一点击就消失） */
     public class QuickBarForm : Form
     {
         readonly MainForm main;
         readonly TextBox input;
-        readonly RichTextBox answer; // v1.8：原 TextBox 显示裸 Markdown（**星号**），改 RTF 渲染
+        readonly Label hint;        // 占位提示（叠在输入框上）
+        readonly RichTextBox answer;   // RTF 渲染，不出现裸 Markdown
         readonly Panel pad;
-        readonly Panel tools;          // 左侧与原「问」同大的 44×44 框，四格各占 1/4（22×22）
-        readonly Button bFile, bWeb, bMore;
-        readonly Button clearBtn;      // 回答区右侧「清空」图标按钮（v1.4.1）
-        readonly Panel ansPanel;       // 回答区容器（Dock Bottom，含 answer + clearBtn）
-        readonly Label grip;           // 第四格：拖动把手（原「问」按钮的拖动职责移交至此）
-        readonly ComboBox mode;        // 右侧模式选择：Chat / Agent（选 Agent 自动弹文件夹选择）
-        readonly ContextMenuStrip moreMenu;
-        const string PH = "快捷提问，Enter 发送，Esc 隐藏";
-        bool ph;
-        bool syncState, webOn, agentOn; // syncState：页面回写状态时抑制 SelectedIndexChanged 上抛
-        int filesN;
+        readonly Panel tools;          // 左侧 46×50，只放联网开关
+        readonly Panel sendPad;        // 右侧 46×50，放发送键
+        readonly Button bWeb, bSend;
+        readonly Button clearBtn;      // 回答区右侧「清空」
+        readonly Panel ansPanel;       // 回答区容器（Dock Bottom）
+        const string PH = "问点什么…   Enter 发送 · Esc 收起";
+        bool ph = true, webOn, focusIn, webHot, sendHot, darkMode;
+        string lastAns = "";
         readonly ToolTip tip = new ToolTip();
 
         public QuickBarForm(MainForm main)
@@ -2085,119 +2647,66 @@ namespace SoloChatHost
             TopMost = true;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            Size = new Size(560, 44);
+            Size = new Size(560, 50);
+            Padding = new Padding(1);      // 1px 边框圈
+            Opacity = 1;                   // 不透明
+            DoubleBuffered = true;
             try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             input = new TextBox();
             input.BorderStyle = BorderStyle.None;
-            input.Font = new Font("Microsoft YaHei UI", 10.5f);
+            input.Font = new Font("Microsoft YaHei UI", 11f);
             input.Dock = DockStyle.Fill;
-            /* net48 的 TextBox 无 PlaceholderText，用占位标记模拟 */
-            SetPh();
-            input.Enter += (s, e) => { if (ph) { ph = false; input.Text = ""; input.ForeColor = ThemeFg(); } };
-            input.Leave += (s, e) => { if (ph || input.Text.Length == 0) SetPh(); };
+
+            /* net48 的 TextBox 没有 PlaceholderText：提示用一层 Label 画，
+               光标就不会压在提示文字上，也不用往输入框里塞假文字 */
+            hint = new Label
+            {
+                Dock = DockStyle.Fill, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Microsoft YaHei UI", 11f), Text = PH,
+                Cursor = Cursors.IBeam, BackColor = Color.Transparent
+            };
+            hint.Click += (s, e) => { input.Focus(); };
+
+            input.Enter += (s, e) => { focusIn = true; ph = input.Text.Length == 0; hint.Visible = ph; SyncBorder(); };
+            input.Leave += (s, e) => { focusIn = false; ph = input.Text.Length == 0; hint.Visible = ph; SyncBorder(); };
+            input.TextChanged += (s, e) =>
+            {
+                ph = input.Text.Length == 0;
+                hint.Visible = ph;
+                PaintState();
+            };
             input.KeyDown += (s, e) =>
             {
                 if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Send(); }
                 else if (e.KeyCode == Keys.Escape) { RequestHide(); }
             };
 
-            /* —— 左侧 44×44 框：四格（文件 / 联网搜索 / 更多 / 拖动把手），各 22×22 = 问框面积的 1/4。
-               v1.4.1：全部改 GDI+ 矢量图标（等价 SVG 路径输出），不再用文字字符 —— */
-            tools = new Panel { Dock = DockStyle.Left, Width = 44 };
-            bFile = NewCell(0, 0, "file");
-            bWeb = NewCell(22, 0, "web");
-            bMore = NewCell(0, 22, "more");
-            grip = new Label
-            {
-                Bounds = new Rectangle(22, 22, 22, 22),
-                Text = "",
-                Cursor = Cursors.SizeAll
-            };
-            tools.Controls.Add(bFile); tools.Controls.Add(bWeb); tools.Controls.Add(bMore); tools.Controls.Add(grip);
+            /* —— 左侧：只保留联网搜索一个开关 —— */
+            tools = new Panel { Dock = DockStyle.Left, Width = 46 };
+            bWeb = RoundButton();
+            bWeb.Bounds = new Rectangle(7, 8, 32, 32);
+            bWeb.Click += (s, e) => Cmd("web");
+            bWeb.MouseEnter += (s, e) => { webHot = true; PaintState(); };
+            bWeb.MouseLeave += (s, e) => { webHot = false; PaintState(); };
+            tools.Controls.Add(bWeb);
 
-            bFile.Click += (s, e) => Cmd("attach");   // 打开文件选择（页面 #file-input）
-            bWeb.Click += (s, e) => Cmd("web");       // 联网搜索开关
-            bMore.Click += (s, e) =>
-            {
-                moreMenu.Show(bMore, new Point(0, bMore.Height)); // 更多：小菜单（新建/主窗/设置）
-            };
+            /* —— 右侧：发送 —— */
+            sendPad = new Panel { Dock = DockStyle.Right, Width = 46 };
+            bSend = RoundButton();
+            bSend.Bounds = new Rectangle(7, 8, 32, 32);
+            bSend.Click += (s, e) => Send();
+            bSend.MouseEnter += (s, e) => { sendHot = true; PaintState(); };
+            bSend.MouseLeave += (s, e) => { sendHot = false; PaintState(); };
+            sendPad.Controls.Add(bSend);
 
-            /* 拖动把手：与原「问」按钮同一套按下-移动-松开逻辑 */
-            Point mouse0 = Point.Empty, form0 = Point.Empty;
-            bool dragHit = false, dragged = false;
-            grip.MouseDown += (s, e) =>
-            {
-                if (e.Button != MouseButtons.Left) return;
-                dragHit = true; dragged = false;
-                mouse0 = Control.MousePosition; form0 = Location;
-            };
-            grip.MouseMove += (s, e) =>
-            {
-                if (!dragHit) return;
-                var m2 = Control.MousePosition;
-                int dx = m2.X - mouse0.X, dy = m2.Y - mouse0.Y;
-                if (!dragged && Math.Abs(dx) + Math.Abs(dy) < 6) return;
-                dragged = true;
-                Location = new Point(form0.X + dx, form0.Y + dy);
-            };
-            grip.MouseUp += (s, e) =>
-            {
-                if (!dragHit) return;
-                dragHit = false;
-                if (dragged) main.SaveQuickbarPos(Location);
-            };
-
-            /* —— 右侧模式选择：Chat / Agent（原「问」按钮位置） —— */
-            mode = new ComboBox
-            {
-                Dock = DockStyle.Right, Width = 88,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                FlatStyle = FlatStyle.Flat, Font = new Font("Microsoft YaHei UI", 9.5f),
-                Cursor = Cursors.SizeAll // 该区也可按住拖动
-            };
-            mode.Items.AddRange(new object[] { "Chat", "Agent" });
-            mode.SelectedIndex = 0;
-            mode.SelectedIndexChanged += (s, e) =>
-            {
-                if (syncState) return;
-                bool ag = mode.SelectedIndex == 1;
-                if (ag == agentOn) return;
-                Cmd(ag ? "agent" : "chat"); // 选 Agent：页面回开文件夹选择提示框（默认文件夹免确认）
-            };
-            Point mm0 = Point.Empty, mf0 = Point.Empty;
-            bool mHit = false, mDrag = false;
-            mode.MouseDown += (s, e) =>
-            {
-                if (e.Button != MouseButtons.Left) return;
-                mHit = true; mDrag = false; mm0 = Control.MousePosition; mf0 = Location;
-            };
-            mode.MouseMove += (s, e) =>
-            {
-                if (!mHit) return;
-                var m2 = Control.MousePosition;
-                int dx = m2.X - mm0.X, dy = m2.Y - mm0.Y;
-                if (!mDrag && Math.Abs(dx) + Math.Abs(dy) < 6) return;
-                mDrag = true;
-                Location = new Point(mf0.X + dx, mf0.Y + dy);
-            };
-            mode.MouseUp += (s, e) => { if (mHit) { mHit = false; if (mDrag) main.SaveQuickbarPos(Location); } };
-
-            /* 更多菜单（v1.4：替代原「问」按钮的次要动作） */
-            moreMenu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9.5f) };
-            moreMenu.Items.Add("新建会话", null, (s, e) => Cmd("new"));
-            moreMenu.Items.Add("打开主窗", null, (s, e) => OpenMain());
-            moreMenu.Items.Add("设置", null, (s, e) => Cmd("settings"));
-            moreMenu.Items.Add(new ToolStripSeparator());
-            moreMenu.Items.Add("隐藏快速条 (Esc)", null, (s, e) => RequestHide());
-
-            pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 11, 6, 11) };
+            pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2, 12, 2, 12) };
             pad.Controls.Add(input);
+            pad.Controls.Add(hint);
+            hint.BringToFront();
 
-            /* 简要回答区：页面流式回传直接显示在此，不切回主窗。
-               v1.4.1：回答区外层 ansPanel（Dock Bottom），右侧带「清空」矢量图标按钮，一键回到原状态 */
-            /* v1.8：回答区改 RichTextBox（只读），配合 MdToRtf 做轻量 Markdown 渲染：
-               标题/粗斜体/行内码/代码块/列表/引用/表格/链接，不再出现裸星号 */
+            /* 简要回答区：页面流式回传直接显示在此，不切回主窗 */
             answer = new RichTextBox();
             answer.ReadOnly = true;
             answer.BorderStyle = BorderStyle.None;
@@ -2220,75 +2729,134 @@ namespace SoloChatHost
             ansPanel.Controls.Add(answer);
             ansPanel.Controls.Add(clearBtn); // 最后加入 → 先参与 Dock（右侧 22px）
 
-            Opacity = 0.5; // 输入条整体半透明（有回答时提高到 0.98 便于阅读）
-            /* Dock 顺序：最后加入的最先参与布局 —— ansPanel 底 → tools 左 → mode 右 → pad 填充中间 */
+            /* Dock 顺序：最后加入的最先参与布局 —— ansPanel 底 → tools 左 → sendPad 右 → pad 填充 */
             Controls.Add(pad);
-            Controls.Add(mode);
+            Controls.Add(sendPad);
             Controls.Add(tools);
             Controls.Add(ansPanel);
             ApplyTheme("light");
         }
 
-        Button NewCell(int x, int y, string kind)
+        static Button RoundButton()
         {
-            return new Button
+            var b = new Button
             {
-                Name = kind,
-                Bounds = new Rectangle(x, y, 22, 22),
                 FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 },
-                Cursor = Cursors.Default, TabStop = false, UseMnemonic = false, Text = ""
+                Cursor = Cursors.Hand, TabStop = false, UseMnemonic = false, Text = ""
             };
+            b.Region = new Region(CirclePath(new Rectangle(0, 0, 32, 32)));
+            return b;
         }
 
-        /* 矢量图标（GDI+ 路径绘制，等价 SVG 输出；无文字字符），按 22×22 逻辑坐标绘制 */
+        /* —— 形状 —— */
+        static GraphicsPath RoundPath(Rectangle r, int radius)
+        {
+            var p = new GraphicsPath();
+            int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
+            if (d <= 2) { p.AddRectangle(r); return p; }
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        static GraphicsPath CirclePath(Rectangle r)
+        {
+            var p = new GraphicsPath();
+            p.AddEllipse(r);
+            return p;
+        }
+
+        /* 胶囊：矮的时候是正圆端，展开回答区后退成圆角卡片 */
+        int CornerRadius()
+        {
+            return Height <= 64 ? Math.Max(10, (Height - 2) / 2) : 16;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (Width <= 0 || Height <= 0) return;
+            var old = Region;
+            Region = new Region(RoundPath(new Rectangle(0, 0, Width, Height), CornerRadius()));
+            if (old != null) old.Dispose();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int rad = Math.Max(8, CornerRadius() - 1);
+            using (var p = RoundPath(new Rectangle(1, 1, Width - 3, Height - 3), rad))
+            {
+                /* 聚焦时先铺一圈 16% 强调色光晕，再描 1px 实线（对齐 .cbox:focus-within） */
+                if (focusIn)
+                    using (var glow = new Pen(Color.FromArgb(38, Accent()), 4))
+                        e.Graphics.DrawPath(glow, p);
+                using (var pen = new Pen(focusIn ? Accent() : Line(), 1))
+                    e.Graphics.DrawPath(pen, p);
+            }
+        }
+
+        /* 空白处按住即拖动（输入框/按钮/回答区除外），不需要专门的拖动把手 */
+        const int WM_NCHITTEST = 0x0084, HTCLIENT = 1, HTCAPTION = 2;
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                if ((int)m.Result == HTCLIENT)
+                {
+                    long lp = m.LParam.ToInt64();
+                    var sp = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
+                    var hits = new Control[] { input, bWeb, bSend, clearBtn, answer };
+                    for (int i = 0; i < hits.Length; i++)
+                    {
+                        var c = hits[i];
+                        if (c != null && c.Visible && c.RectangleToScreen(c.ClientRectangle).Contains(sp)) return;
+                    }
+                    m.Result = (IntPtr)HTCAPTION;
+                }
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        /* 矢量图标（GDI+ 路径，按 22×22 逻辑坐标绘制后缩放到控件尺寸） */
         static void PaintIcon(Control c, string kind, Color fg, bool badge)
         {
-            var bmp = new Bitmap(Math.Max(8, c.Width), Math.Max(8, c.Height));
+            int w = Math.Max(8, c.Width), h = Math.Max(8, c.Height);
+            var bmp = new Bitmap(w, h);
             using (var g = Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var pen = new Pen(fg, 1.4f))
+                g.ScaleTransform(w / 22f, h / 22f);
+                using (var pen = new Pen(fg, 1.35f))
                 using (var brush = new SolidBrush(fg))
                 {
-                    if (kind == "file") /* 文件：折角文档 + 三行内容线；badge=有附件时右上角圆点 */
+                    if (kind == "web") /* 联网：地球 */
                     {
-                        var p = new GraphicsPath();
-                        p.AddLine(6, 3.5f, 12.5f, 3.5f);
-                        p.AddLine(12.5f, 3.5f, 15.5f, 6.5f);
-                        p.AddLine(15.5f, 6.5f, 15.5f, 18.5f);
-                        p.AddLine(15.5f, 18.5f, 6, 18.5f);
-                        p.CloseFigure();
-                        g.DrawPath(pen, p);
-                        g.DrawLine(pen, 12.5f, 3.5f, 12.5f, 6.5f);
-                        g.DrawLine(pen, 12.5f, 6.5f, 15.5f, 6.5f);
-                        g.DrawLine(pen, 8, 10, 13.5f, 10);
-                        g.DrawLine(pen, 8, 12.5f, 13.5f, 12.5f);
-                        g.DrawLine(pen, 8, 15, 11.5f, 15);
-                        if (badge) g.FillEllipse(brush, 13.5f, 2, 6, 6);
+                        g.DrawEllipse(pen, 4.5f, 4.5f, 13, 13);
+                        g.DrawEllipse(pen, 8.7f, 4.5f, 4.6f, 13);
+                        g.DrawLine(pen, 4.5f, 11, 17.5f, 11);
                     }
-                    else if (kind == "web") /* 联网：地球（外圆 + 经线椭圆 + 赤道） */
+                    else if (kind == "send") /* 发送：上箭头 */
                     {
-                        g.DrawEllipse(pen, 4, 4, 14, 14);
-                        g.DrawEllipse(pen, 8.5f, 4, 5, 14);
-                        g.DrawLine(pen, 4, 11, 18, 11);
-                    }
-                    else if (kind == "more") /* 更多：三点 */
-                    {
-                        g.FillEllipse(brush, 3.8f, 9.7f, 2.6f, 2.6f);
-                        g.FillEllipse(brush, 9.7f, 9.7f, 2.6f, 2.6f);
-                        g.FillEllipse(brush, 15.6f, 9.7f, 2.6f, 2.6f);
-                    }
-                    else if (kind == "grip") /* 拖动把手：3×3 点阵 */
-                    {
-                        for (int i = 0; i < 3; i++)
-                            for (int j = 0; j < 3; j++)
-                                g.FillEllipse(brush, 5.5f + i * 5, 5.5f + j * 5, 2, 2);
+                        using (var p2 = new Pen(fg, 1.7f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        {
+                            g.DrawLine(p2, 11, 16.5f, 11, 5.8f);
+                            g.DrawLine(p2, 6.2f, 10.4f, 11, 5.8f);
+                            g.DrawLine(p2, 15.8f, 10.4f, 11, 5.8f);
+                        }
                     }
                     else if (kind == "clear") /* 清空：× */
                     {
                         g.DrawLine(pen, 6, 6, 15.5f, 15.5f);
                         g.DrawLine(pen, 15.5f, 6, 6, 15.5f);
                     }
+                    if (badge) g.FillEllipse(brush, 13.5f, 2, 6, 6);
                 }
             }
             var old = c.BackgroundImage;
@@ -2300,7 +2868,7 @@ namespace SoloChatHost
         void ClearAnswer()
         {
             lastAns = "";
-            if (!IsDisposed) PaintAnswer(); // 回到初始状态：收起回答区、半透明、高度 44
+            if (!IsDisposed) PaintAnswer(); // 回到初始状态：收起回答区、高度 50
         }
 
         void Cmd(string cmd)
@@ -2308,54 +2876,40 @@ namespace SoloChatHost
             main.PostRaw(JsonSerializer.Serialize(new { t = "quick.cmd", cmd }));
         }
 
-        void OpenMain()
-        {
-            try
-            {
-                main.Show();
-                if (main.WindowState == FormWindowState.Minimized) main.WindowState = FormWindowState.Normal;
-                main.Activate();
-            }
-            catch { }
-        }
-
-        /* 页面状态回显：联网开关 / Agent 模式 / 待发附件数（页面 quick.state 推送） */
+        /* 页面状态回显：只关心联网开关（Agent/附件已从小窗移除，参数保留兼容） */
         public void ApplyState(bool web, bool agent, int files)
         {
             if (IsDisposed) return;
-            syncState = true;
-            try { mode.SelectedIndex = agent ? 1 : 0; } finally { syncState = false; }
-            webOn = web; agentOn = agent; filesN = files;
+            webOn = web;
             PaintState();
         }
 
         void PaintState()
         {
-            Color accent = BackColor.GetBrightness() < 0.5f ? Hx("#5e6ad2") : Hx("#cc785c");
-            Color baseBg = pad.BackColor, baseFg = ThemeFg();
-            bWeb.BackColor = webOn ? accent : baseBg;
-            bWeb.ForeColor = webOn ? Color.White : baseFg;
-            bFile.BackColor = filesN > 0 ? accent : baseBg;
-            bFile.ForeColor = filesN > 0 ? Color.White : baseFg;
-            mode.BackColor = agentOn ? accent : baseBg;
-            mode.ForeColor = agentOn ? Color.White : baseFg;
-            grip.BackColor = baseBg;
-            tools.BackColor = baseBg;
-            /* v1.4.1：矢量图标按当前主题/状态重绘（无文字字符） */
-            PaintIcon(bFile, "file", filesN > 0 ? Color.White : baseFg, filesN > 0);
-            PaintIcon(bWeb, "web", webOn ? Color.White : baseFg, false);
-            PaintIcon(bMore, "more", baseFg, false);
-            PaintIcon(grip, "grip", baseFg, false);
-            PaintIcon(clearBtn, "clear", baseFg, false);
-            tip.SetToolTip(bFile, filesN > 0 ? ("待发附件 " + filesN + " 个 · 点击继续添加") : "文件：添加图片/文本/文档");
+            Color accent = Accent(), surface = Surface(), fg = Body();
+            bool hasText = !ph && input.Text.Trim().Length > 0;
+            tools.BackColor = surface;
+            sendPad.BackColor = surface;
+            /* 联网开关：开=强调色实心；关=透明，悬停给一层 --lift */
+            bWeb.BackColor = webOn ? accent : (webHot ? Lift() : surface);
+            PaintIcon(bWeb, "web", webOn ? Color.White : fg, false);
+            /* 发送键：有内容=强调色实心圆 + 白箭头；空=淡箭头（对齐主界面 #btn-send 的强调色） */
+            bSend.BackColor = hasText ? accent : (sendHot ? Lift() : surface);
+            PaintIcon(bSend, "send", hasText ? Color.White : Faint(), false);
+            PaintIcon(clearBtn, "clear", Faint(), false);
+            clearBtn.BackColor = surface;
             tip.SetToolTip(bWeb, webOn ? "联网搜索：开（点击关闭）" : "联网搜索：关（点击开启）");
-            tip.SetToolTip(bMore, "更多：新建会话 / 打开主窗 / 设置");
-            tip.SetToolTip(grip, "按住拖动移动快速条");
-            tip.SetToolTip(mode, agentOn ? "Agent 模式：文件读写（工作区内免确认，区外逐次确认）" : "Chat 模式：常规对话。点选 Agent 可选择工作区文件夹");
+            tip.SetToolTip(bSend, "发送（Enter）");
         }
 
         /* 不抢主窗焦点地显示 */
         protected override bool ShowWithoutActivation { get { return true; } }
+
+        /* 柔和投影（系统 CS_DROPSHADOW） */
+        protected override CreateParams CreateParams
+        {
+            get { var cp = base.CreateParams; cp.ClassStyle |= 0x20000; return cp; }
+        }
 
         void Reposition()
         {
@@ -2394,11 +2948,7 @@ namespace SoloChatHost
             try { BeginInvoke((Action)(() => FocusInput())); } catch { FocusInput(); }
         }
 
-        /* 全局热键：一次按下必然「召唤」
-           - 不可见 → 显示 + 聚焦
-           - 可见但焦点不在条上（被别的窗口盖住 / 用户在别的应用里）→ 拉到最前 + 聚焦，不隐藏
-           - 焦点已经在条上 → 隐藏
-           这样不会再出现「按一次没反应、按两次才出来」的观感问题（v0.2.0） */
+        /* 全局热键：一次按下必然「召唤」 */
         public void Toggle()
         {
             if (!Visible) { ShowAndFocus(); return; }
@@ -2406,7 +2956,6 @@ namespace SoloChatHost
             Hide(); main.QuickbarSync(false);
         }
 
-        /* 显示 + 立即置顶 + 排到消息队尾再抢焦点（Show() 当下窗口还没真正映射，同步 Activate 会失败） */
         void ShowAndFocus()
         {
             if (!Visible) { Reposition(); Show(); }
@@ -2416,7 +2965,6 @@ namespace SoloChatHost
             catch { FocusInput(); }
         }
 
-        /* 立即把窗口插到置顶层（任务栏之下），不等 2s 定时器 */
         void PinTop()
         {
             if (!Visible || IsDisposed) return;
@@ -2425,7 +2973,6 @@ namespace SoloChatHost
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
 
-        /* ShowWithoutActivation 窗口不会自动获得焦点，需显式激活后聚焦输入框（v1.2.3：Alt+Space 后直接可打字） */
         void FocusInput()
         {
             try
@@ -2439,11 +2986,7 @@ namespace SoloChatHost
         }
 
         /* 页面流式回传：在输入条内直接简要显示（不切回主窗）。
-           v1.4：即使回答到达时小窗已被隐藏也先记住，重新呼出时仍显示；
-           总高 = min(268, 屏幕工作区 1/3)，保证不遮挡其它应用超过三分之一屏；
-           v1.4.1：回答区右侧带「清空」图标按钮，一键回到初始状态。 */
-        string lastAns = "";
-
+           总高 = min(268, 屏幕工作区 1/3)，不遮挡其它应用超过三分之一屏。 */
         public void ShowAnswer(string text, bool done)
         {
             lastAns = text ?? "";
@@ -2451,7 +2994,6 @@ namespace SoloChatHost
             PaintAnswer();
         }
 
-        /* v2.1：回答区是否已贴着底部（决定流式刷新要不要跟随滚动） */
         bool AnswerAtBottom()
         {
             if (answer.TextLength == 0) return true;
@@ -2467,15 +3009,13 @@ namespace SoloChatHost
         {
             bool has = !string.IsNullOrEmpty(lastAns);
             int third = Screen.FromControl(this).WorkingArea.Height / 3;
-            int full = has ? Math.Min(268, Math.Max(60, third)) : 44;
+            int full = has ? Math.Min(268, Math.Max(80, third)) : 50;
             if (has)
             {
-                /* v2.1：流式刷新不再无条件拽到底 —— 重设 RTF 会重置滚动条，
-                   故先记下"是否贴底"与用户当前视口首字符，重设后按需还原。 */
                 bool atBottom = AnswerAtBottom();
                 int keepIdx = -1;
                 if (!atBottom) { try { keepIdx = answer.GetCharIndexFromPosition(new Point(2, 2)); } catch { keepIdx = -1; } }
-                answer.Rtf = MdToRtf(lastAns); // v1.8：轻量 Markdown → RTF
+                answer.Rtf = MdToRtf(lastAns); // 轻量 Markdown → RTF
                 if (atBottom)
                 {
                     answer.SelectionStart = answer.TextLength;
@@ -2483,25 +3023,23 @@ namespace SoloChatHost
                 }
                 else if (keepIdx >= 0 && keepIdx < answer.TextLength)
                 {
-                    answer.SelectionStart = keepIdx; // 用户自由滚动 → 保持原视口，不被流式更新打扰
+                    answer.SelectionStart = keepIdx;
                     answer.ScrollToCaret();
                 }
                 answer.SelectionLength = 0;
             }
             else answer.Text = "";
-            Opacity = has ? 0.98 : 0.5; // 有回答时提高不透明度，便于在半透明条上直接阅读
-            ansPanel.Height = Math.Max(0, full - 44);
+            ansPanel.Height = Math.Max(0, full - 50);
             ansPanel.Visible = has;
             Height = full;
         }
 
-        /* —— v1.8 轻量 Markdown → RTF（回答区） ——
+        /* —— 轻量 Markdown → RTF（回答区） ——
            支持：#~#### 标题、**粗**、*斜*、`行内码`、``` 代码块、-/1. 列表、> 引用、|表格|、--- 分隔线、[文本](链接)。
-           非 ASCII 一律走 \uN? 转义（N 为带符号 16 位），不依赖代码页。
-           colortbl 色表（按主题）：1=代码底 2=链接 3=次要 4=正文；正文基线 \fs19 = 9.5pt。 */
-        string MdToRtf(string md) // 实例方法：主题色取自本窗 BackColor
+           非 ASCII 一律走 \uN? 转义（带符号 16 位），不依赖代码页。 */
+        string MdToRtf(string md)
         {
-            bool dark = BackColor.GetBrightness() < 0.5f;
+            bool dark = darkMode;
             var sb = new StringBuilder(md.Length * 2 + 256);
             sb.Append(@"{\rtf1\ansi\uc1{\fonttbl{\f0\fnil\fcharset134 Microsoft YaHei UI;}{\f1\fnil Consolas;}}");
             sb.Append(dark ? @"{\colortbl;\red42\green44\blue48;\red127\green179\blue255;\red154\green160\blue170;\red208\green214\blue224;}"
@@ -2554,14 +3092,13 @@ namespace SoloChatHost
                     sb.Append(@"\par ");
                     continue;
                 }
-                sb.Append(Inline(ln)).Append(@"\par "); // 普通行保留原始缩进
+                sb.Append(Inline(ln)).Append(@"\par ");
             }
-            sb.Append('}'); // RTF 根组收尾
+            sb.Append('}');
             return sb.ToString();
         }
 
-        /* 行内标记：先转义 → 代码段抽占位防误伤 → 链接/粗/斜 → 还原代码段。
-           RTF 的格式开关写在 { } 组内，出组自动失效，无需手工复位。 */
+        /* 行内标记：先转义 → 代码段抽占位防误伤 → 链接/粗/斜 → 还原代码段 */
         static string Inline(string s)
         {
             s = Esc(s);
@@ -2574,7 +3111,7 @@ namespace SoloChatHost
             return s;
         }
 
-        /* RTF 转义：\{ } 与控制符；非 ASCII → \uN?（带符号 16 位，带 '?' 兜底字符） */
+        /* RTF 转义：\{ } 与控制符；非 ASCII → \uN? */
         static string Esc(string s)
         {
             var sb = new StringBuilder(s.Length + 16);
@@ -2589,8 +3126,7 @@ namespace SoloChatHost
             return sb.ToString();
         }
 
-        /* 小组件源（MicrosoftStartFeedProvider）等全屏 TopMost 窗会压过先创建的置顶窗，
-           周期性重申置顶保证输入条始终可见（2s 定时器，开销可忽略） */
+        /* 小组件源等全屏 TopMost 窗会压过先创建的置顶窗，周期性重申置顶 */
         System.Windows.Forms.Timer topTimer;
 
         void ReassertTopMost()
@@ -2600,8 +3136,6 @@ namespace SoloChatHost
             topTimer.Tick += (s, e) =>
             {
                 if (IsDisposed || !Visible) return;
-                /* v1.8：插到 Shell_TrayWnd（任务栏）正下方——仍在置顶层、照旧盖过小组件源等全屏置顶窗，
-                   但把任务栏让到我们上面；快速条停在屏幕底部时不再跟自适应任务栏抢 z 序 */
                 PinTop();
             };
             topTimer.Start();
@@ -2620,30 +3154,48 @@ namespace SoloChatHost
 
         static Color Hx(string h) { return ColorTranslator.FromHtml(h); }
 
-        void SetPh() { ph = true; input.Text = PH; input.ForeColor = SystemColors.GrayText; }
-        Color ThemeFg() { return Hx(this.BackColor.GetBrightness() < 0.5f ? "#f7f8f8" : "#141413"); }
+        /* 设计令牌（对齐 index.html：--soft / --hairline / --ink / --body / --faint / --primary / --lift） */
+        Color Accent()  { return Hx(darkMode ? "#5e6ad2" : "#cc785c"); }
+        Color Surface() { return Hx(darkMode ? "#0f1011" : "#f5f0e8"); }
+        Color Line()    { return Hx(darkMode ? "#23252a" : "#e6dfd8"); }
+        Color Ink()     { return Hx(darkMode ? "#f7f8f8" : "#141413"); }
+        Color Body()    { return Hx(darkMode ? "#d0d6e0" : "#3d3d3a"); }
+        Color Faint()   { return Hx(darkMode ? "#62666d" : "#8e8b82"); }
+        Color Lift()    { return Hx(darkMode ? "#141516" : "#e8e0d2"); }
+
+        void SetPh() { ph = true; input.Text = ""; if (hint != null) hint.Visible = true; }
+
+        /* 边框：常态 --hairline，聚焦 --primary（对应主界面 .cbox:focus-within） */
+        void SyncBorder()
+        {
+            BackColor = Surface();
+            Invalidate();
+        }
 
         void ApplyTheme(string t)
         {
-            bool d = t == "dark";
-            BackColor = Hx(d ? "#34343a" : "#e6dfd8");           // 1px 边框色
-            pad.BackColor = Hx(d ? "#141516" : "#faf9f5");
-            input.BackColor = pad.BackColor;
-            input.ForeColor = ph ? SystemColors.GrayText : Hx(d ? "#f7f8f8" : "#141413");
-            answer.BackColor = pad.BackColor;
-            answer.ForeColor = Hx(d ? "#d0d6e0" : "#3d3d3a");
-            if (lastAns.Length > 0) { try { answer.Rtf = MdToRtf(lastAns); } catch { } } // 主题色变化随 RTF 色表刷新
-            moreMenu.BackColor = pad.BackColor;
-            moreMenu.ForeColor = input.ForeColor;
-            PaintState(); // 左侧四格 + 模式选择按主题重绘
+            darkMode = t == "dark";
+            Color surface = Surface();
+            BackColor = surface;
+            pad.BackColor = surface;
+            input.BackColor = surface;
+            input.ForeColor = Ink();
+            hint.ForeColor = Faint();
+            hint.BackColor = surface;
+            answer.BackColor = surface;
+            answer.ForeColor = Body();
+            ansPanel.BackColor = surface;
+            if (lastAns.Length > 0) { try { answer.Rtf = MdToRtf(lastAns); } catch { } }
+            PaintState();
+            Invalidate();
         }
 
         void Send()
         {
-            if (ph) return;
             var text = input.Text.Trim();
             if (text.Length == 0) return;
             input.Clear();
+            SetPh();
             ShowAnswer("", false); // 收起上一轮回答区
             main.PostRaw(JsonSerializer.Serialize(new { t = "quick.ask", text }));
         }
@@ -2654,4 +3206,6 @@ namespace SoloChatHost
             main.PostRaw("{\"t\":\"quickbar.hidden\"}");
         }
     }
+
+
 }
