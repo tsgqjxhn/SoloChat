@@ -9379,8 +9379,12 @@ openLast.addEventListener('click', function(){
   if (!S.cfg.lastPkgDir) return UI.toast('还没有导出过', true);
   NET.revealPath(S.cfg.lastPkgDir);
 });
+var bExpKind = el('button', { class: 'btn btn-sec rn-mini', text: '导出本类…' });
+bExpKind.addEventListener('click', function(){
+  try { savePkg(EXT.exportKind(filter)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+});
 var exportRow = el('div', { style: 'margin:0 0 10px' });
-exportRow.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 4px;gap:8px' }, [openLast]));
+exportRow.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 4px;gap:8px' }, [openLast, bExpKind]));
 exportRow.appendChild(el('div', { class: 'ext-acc-hint', text: '导出时会弹出文件夹选择器' }));
 addBox.appendChild(exportRow);
 function pkgDone(rep){ afterImport(rep); }
@@ -15205,6 +15209,19 @@ function exportFiles(pkg){
   if (!items.length && !prs.length) throw new Error('这个包没有条目');
   return packBuild(pkg, items, prs);
 }
+/* 按类导出（「导入导出」面板 → 导出本类…）：filter 为当前页签 agents/skills/tools/prompt/plugins */
+function exportKind(kind){
+  var label = { agents:'智能体', skills:'技能', tools:'工具', prompt:'提示词', plugins:'插件' }[kind] || '扩展';
+  var items = userItems(), prs = [];
+  if (kind === 'prompt'){ items = []; prs = (S.cfg.prompts || []).slice(); }
+  else if (kind === 'plugins'){ prs = (S.cfg.prompts || []).slice(); }
+  else {
+    var k = kind === 'agents' ? 'agent' : (kind === 'skills' ? 'skill' : 'tool');
+    items = items.filter(function(x){ return x.kind === k; });
+  }
+  if (!items.length && !prs.length) throw new Error('本类还没有可导出的内容');
+  return packBuild('SoloChat-' + label, items, prs);
+}
 /* 单项导出（技能/工具/智能体页） */
 function exportOne(id){
   var it = null;
@@ -15531,7 +15548,7 @@ function importFiles(list){
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,
-    importFiles: importFiles, installMarket: installMarket, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, describe: describe, addPromptItem: addPromptItem, delPkg: delPkg };
+    importFiles: importFiles, installMarket: installMarket, exportFiles: exportFiles, exportKind: exportKind, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, describe: describe, addPromptItem: addPromptItem, delPkg: delPkg };
 })();
 
 /* v0.4.0c：本轮勾选（「/」面板）—— 把选中的扩展真正接进请求：
