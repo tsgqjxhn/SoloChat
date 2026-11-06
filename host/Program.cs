@@ -2024,7 +2024,7 @@ namespace SoloChatHost
             return full;
         }
 
-        /* v1.23：扩展包导出 —— 只接受「相对路径 + 文本」，限制在目标文件夹内，不覆盖目录外文件 */
+        /* v1.23：扩展包导出 —— 只接受「相对路径 + 文本」，限制在目标文件夹内，不覆盖目录外文件；where=pick 弹文件夹选择器 */
         void RunPkgAsync(JsonElement req, string id)
         {
             try
@@ -2034,29 +2034,60 @@ namespace SoloChatHost
                 foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '-');
                 name = name.Trim().TrimEnd('.', ' ');
                 if (name.Length == 0) name = "扩展包";
+                if (where == "pick")
+                {
+                    var reqCopy = req.Clone();
+                    BeginInvoke((Action)(() => PickPkgDir(id, name, reqCopy))); // 目录选择对话框必须在 UI(STA) 线程
+                    return;
+                }
                 string baseDir = where == "downloads"
                     ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
                     : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-                string root = Path.Combine(baseDir, name);
-                string rootFull = Path.GetFullPath(root);
-                Directory.CreateDirectory(rootFull);
-                int count = 0;
-                if (req.TryGetProperty("files", out JsonElement arr) && arr.ValueKind == JsonValueKind.Array)
+                WritePkgTo(id, name, baseDir, req);
+            }
+            catch (Exception ex) { PostFs(id, "pkg.error", null, ex.Message); }
+        }
+
+        /* 把包写入 选中目录/包名/...，沿用原来的路径越界检查，完成后回 pkg.done */
+        void WritePkgTo(string id, string name, string baseDir, JsonElement req)
+        {
+            string rootFull = Path.GetFullPath(Path.Combine(baseDir, name));
+            Directory.CreateDirectory(rootFull);
+            int count = 0;
+            if (req.TryGetProperty("files", out JsonElement arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement f in arr.EnumerateArray())
                 {
-                    foreach (JsonElement f in arr.EnumerateArray())
-                    {
-                        string rel = f.GetProperty("rel").GetString() ?? "";
-                        string text = f.TryGetProperty("text", out JsonElement tx) ? (tx.GetString() ?? "") : "";
-                        if (string.IsNullOrWhiteSpace(rel)) continue;
-                        string full = Path.GetFullPath(Path.Combine(rootFull, rel.Replace('/', Path.DirectorySeparatorChar)));
-                        if (!full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-                        string dir = Path.GetDirectoryName(full);
-                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                        File.WriteAllText(full, text, new UTF8Encoding(false));
-                        count++;
-                    }
+                    string rel = f.GetProperty("rel").GetString() ?? "";
+                    string text = f.TryGetProperty("text", out JsonElement tx) ? (tx.GetString() ?? "") : "";
+                    if (string.IsNullOrWhiteSpace(rel)) continue;
+                    string full = Path.GetFullPath(Path.Combine(rootFull, rel.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+                    string dir = Path.GetDirectoryName(full);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    File.WriteAllText(full, text, new UTF8Encoding(false));
+                    count++;
                 }
-                PostFs(id, "pkg.done", JsonSerializer.Serialize(new { dir = rootFull, files = count }), null);
+            }
+            PostFs(id, "pkg.done", JsonSerializer.Serialize(new { dir = rootFull, files = count }), null);
+        }
+
+        /* where=pick：UI 线程弹文件夹选择器；取消回 pkg.done(canceled)，选中后照常写入 选中目录/包名 */
+        void PickPkgDir(string id, string name, JsonElement req)
+        {
+            try
+            {
+                using (var dlg = new FolderBrowserDialog { Description = "选择导出到的文件夹（将创建「" + name + "」子目录）" })
+                {
+                    var owner = (quickBar != null && quickBar.Visible) ? (IWin32Window)quickBar
+                              : Visible ? (IWin32Window)this : null;
+                    if (dlg.ShowDialog(owner) != DialogResult.OK)
+                    {
+                        PostFs(id, "pkg.done", JsonSerializer.Serialize(new { canceled = true, files = 0, dir = "" }), null);
+                        return;
+                    }
+                    WritePkgTo(id, name, dlg.SelectedPath, req);
+                }
             }
             catch (Exception ex) { PostFs(id, "pkg.error", null, ex.Message); }
         }

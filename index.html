@@ -1066,6 +1066,17 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 .pkg-drop{margin:10px 0;padding:14px;border:1px dashed var(--hairline);border-radius:10px;text-align:center;font-size:12.5px;color:var(--faint);background:var(--soft)}
 .pkg-drop.over{border-color:var(--primary);color:var(--primary)}
 .pkg-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+/* 扩展页折叠面板：已有 / 市场 / 导入导出 */
+.ext-acc-box{margin:6px 0}
+.ext-acc{border:1px solid var(--border,var(--hairline));border-radius:10px;margin:8px 0;background:var(--card);overflow:hidden}
+.ext-acc>summary{cursor:pointer;list-style:none;padding:10px 14px;font-size:13px;font-weight:600;color:var(--primary);display:flex;align-items:center;gap:8px}
+.ext-acc>summary::-webkit-details-marker{display:none}
+.ext-acc>summary::before{content:'▸';color:var(--muted);transition:transform .15s}
+.ext-acc[open]>summary::before{transform:rotate(90deg)}
+.ext-acc[open]>summary{border-bottom:1px solid var(--border,var(--hairline))}
+.acc-body{padding:10px 14px}
+.ext-acc > .acc-body{display:block}
+.ext-acc-hint{font-size:11.5px;color:var(--muted);margin:0}
 </style>
 </head>
 <body>
@@ -8246,8 +8257,8 @@ function mmToggleCfg(id){
   function savePkg(pack){
   if (!pack || !pack.files || !pack.files.length) return UI.toast('没有可导出的内容', true);
   if (!NET.pkgSave) return UI.toast('需要 exe 宿主版才能写入磁盘', true);
-  var where = (S.cfg.pkgWhere === 'downloads') ? 'downloads' : 'desktop';
-  NET.pkgSave(pack.name, pack.files, where).then(function(r){
+  NET.pkgSave(pack.name, pack.files, 'pick').then(function(r){
+    if (r && r.canceled) return UI.toast('已取消导出');
     setCfg({ lastPkgDir: r.dir });
     UI.toast('已导出 ' + r.files + ' 个文件：' + r.dir);
   }, function(e){ UI.toast('导出失败：' + (e && e.message || e), true); });
@@ -9116,7 +9127,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   /* —— 页⑥ 关于 —— */
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
-    var filter = 'agents', sub = 'local';
+    var filter = 'agents';
     var INTRO = {
       tools: '内置能力默认全开，关掉后模型调用会被直接拒绝；下面还能加自己的声明式 http 工具。',
       agents: '子智能体：内置角色只读展示（含内部提示词），下面可以拼一个自己的组合智能体。',
@@ -9126,11 +9137,30 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
     };
     p.appendChild(pageTabs([['agents', '智能体'], ['plugins', '插件'], ['skills', '技能'], ['tools', '工具'], ['prompt', '提示词'], ['mcp', 'MCP']], function(k){ setFilter(k); }));
-    /* 前五类各三层子页签：本机已有 / 市场 / 自定义导入；MCP 保持单视图 */
-    var subTabs = pageTabs([['local', '本机已有'], ['market', '市场'], ['import', '自定义导入']], function(k){ setSub(k); });
-    subTabs.classList.add('pt-sub');   /* 仅第二层：选中态下划线/主色 */
-    subTabs.style.margin = '0 0 6px';
-    p.appendChild(subTabs);
+    /* 折叠面板：已有 / 市场 / 导入导出，默认全折叠，一次只开一个；MCP 仍单页 */
+    var accBox = el('div', { class: 'ext-acc-box' });
+    var accLocal = el('details', { class: 'ext-acc' }),
+        accMarket = el('details', { class: 'ext-acc' }),
+        accImport = el('details', { class: 'ext-acc' });
+    var localBody, marketBody, importBody;
+    [['local', accLocal, '已有'], ['market', accMarket, '市场'], ['import', accImport, '导入导出']].forEach(function(a){
+      var d = a[1];
+      d.open = false;
+      var sum = el('summary', { text: a[2] });
+      var body = el('div', { class: 'acc-body' });
+      d.appendChild(sum); d.appendChild(body);
+      d._sum = sum;
+      if (a[0] === 'local') localBody = body;
+      else if (a[0] === 'market') marketBody = body;
+      else importBody = body;
+      d.addEventListener('toggle', function(){
+        if (!d.open) return;
+        [accLocal, accMarket, accImport].forEach(function(o){ if (o !== d) o.open = false; });
+        renderSection(a[0]);
+      });
+      accBox.appendChild(d);
+    });
+    p.appendChild(accBox);
     var mktExtBox = el('div'), importResult = el('div', { class: 'hint' });
 
     var modeBox = el('div', { class: 'sub' });
@@ -9344,23 +9374,14 @@ bFiles.addEventListener('click', function(){ fiFiles.click(); });
 bDir.addEventListener('click', function(){ fiDir.click(); });
 var importRow = el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:6px 0' }, [bFiles, bDir, fiFiles, fiDir]);
 addBox.appendChild(importRow);
-var whereSel = el('select', { class: 'f-in', id: 'pk-where', style: 'width:auto;min-width:104px;padding:6px 8px' }, [
-  el('option', { value: 'desktop', text: '桌面' }),
-  el('option', { value: 'downloads', text: '下载文件夹' })
-]);
-whereSel.value = (S.cfg.pkgWhere === 'downloads') ? 'downloads' : 'desktop';
-whereSel.addEventListener('change', function(){
-  setCfg({ pkgWhere: whereSel.value });
-  UI.toast('导出位置已改为：' + (whereSel.value === 'downloads' ? '下载文件夹' : '桌面'));
-});
 var openLast = el('button', { class: 'btn btn-ghost rn-mini', text: '打开上次导出' });
 openLast.addEventListener('click', function(){
   if (!S.cfg.lastPkgDir) return UI.toast('还没有导出过', true);
   NET.revealPath(S.cfg.lastPkgDir);
 });
-var exportRow = el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 10px;gap:8px' }, [
-  el('span', { class: 'sub', style: 'margin:0', text: '导出到' }), whereSel, openLast
-]);
+var exportRow = el('div', { style: 'margin:0 0 10px' });
+exportRow.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 4px;gap:8px' }, [openLast]));
+exportRow.appendChild(el('div', { class: 'ext-acc-hint', text: '导出时会弹出文件夹选择器' }));
 addBox.appendChild(exportRow);
 function pkgDone(rep){ afterImport(rep); }
 function doImport(list){
@@ -9430,7 +9451,7 @@ function renderPkgs(){
       EXT.delPkg(p);
       renderPkgs(); renderList(filter); renderModeBox(); UI.toast('已移除「' + p + '」');
     });
-    var ex = el('button', { class: 'btn btn-sec rn-mini', text: '导出到桌面' });
+    var ex = el('button', { class: 'btn btn-sec rn-mini', text: '导出' });
     ex.addEventListener('click', function(){
       try {
         var pack = EXT.exportFiles(p);
@@ -9474,7 +9495,7 @@ addBtn.addEventListener('click', function(){
 adv.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
 addBox.appendChild(adv);
 addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
-p.appendChild(addBox);
+/* addBox 仅临时收集节点，页尾统一搬入折叠面板 body（不再 append 到 p） */
 
     /* ---------- MCP ---------- */
     var mcpBox = el('div');
@@ -9645,10 +9666,10 @@ p.appendChild(addBox);
       mktExtBox.textContent = '';
       mktExtBox.appendChild(el('div', { class: 'hint', text: '正在读取市场索引…' }));
       ensureMarket().then(function(){
-        if (seq !== mktSeq || filter !== kind || sub !== 'market') return;
+        if (seq !== mktSeq || filter !== kind || !accMarket.open) return;
         drawExt(kind);
       }, function(){
-        if (seq !== mktSeq || filter !== kind || sub !== 'market') return;
+        if (seq !== mktSeq || filter !== kind || !accMarket.open) return;
         drawExt(kind);
       });
     }
@@ -9663,35 +9684,70 @@ p.appendChild(addBox);
       UI.toast(msg, !!(rep.skipped && rep.skipped.length));
       apply();   /* 刷新本机列表 / 插件包 / 计数 / 市场卡片状态 */
     }
+    /* 把既有节点搬进三个折叠面板 body（appendChild 移动，不复制/重建）；mcpBox 仍独立挂在 p 上 */
+    localBody.appendChild(modeBox);
+    localBody.appendChild(arRow);
+    localBody.appendChild(list);
+    localBody.appendChild(agentBox);
+    localBody.appendChild(promptBox);
+    localBody.appendChild(pkgsBox);
+    marketBody.appendChild(marketBox);
+    marketBody.appendChild(mktExtBox);
+    importBody.appendChild(importRow);
+    importBody.appendChild(exportRow);
+    importBody.appendChild(dropZone);
+    importBody.appendChild(adv);
+    importBody.appendChild(importResult);
+    function renderSection(key){
+      if (key === 'local'){
+        var show = function(n, on){ n.style.display = on ? '' : 'none'; };
+        show(modeBox, filter === 'agents');
+        show(arRow, filter === 'tools');
+        show(list, filter === 'skills' || filter === 'tools');
+        show(agentBox, filter === 'agents');
+        show(promptBox, filter === 'prompt');
+        show(pkgsBox, filter === 'plugins');
+        renderModeBox(); renderPkgs();
+        if (filter === 'agents') renderAgents();
+        else if (filter === 'prompt') ensurePrompt();
+        else if (filter === 'skills' || filter === 'tools') renderList(filter);
+      } else if (key === 'market'){
+        marketBox.style.display = (filter === 'plugins') ? '' : 'none';
+        renderExtMarket(filter);
+        if (filter === 'plugins') renderMarket();
+      }
+      /* import：不重绘，只保留控件 */
+    }
+    function updateAccLabels(){
+      var n = 0, all = EXT.all();
+      if (filter === 'agents') n = SUB.ROLES.length + all.filter(function(x){ return x.kind === 'agent'; }).length;
+      else if (filter === 'skills') n = all.filter(function(x){ return x.kind === 'skill'; }).length;
+      else if (filter === 'tools') n = all.filter(function(x){ return x.kind === 'tool' || x.kind === 'builtin'; }).length;
+      else if (filter === 'prompt') n = (S.cfg.prompts || []).length;
+      else if (filter === 'plugins'){
+        var seen = {};
+        all.concat(S.cfg.prompts || []).forEach(function(x){ if (x && x.pkg) seen[x.pkg] = 1; });
+        n = Object.keys(seen).length;
+      }
+      accLocal._sum.textContent = n > 0 ? ('已有（' + n + '）') : '已有';
+    }
     function apply(){
-      var isMcp = (filter === 'mcp');
-      var local = (sub === 'local'), market = (sub === 'market'), imp = (sub === 'import');
-      var show = function(n, on){ n.style.display = on ? '' : 'none'; };
-      show(subTabs, !isMcp);
-      show(addBox, !isMcp);
-      show(modeBox, !isMcp && local && filter === 'agents');
-      show(arRow, !isMcp && local && filter === 'tools');
-      show(list, !isMcp && local && (filter === 'skills' || filter === 'tools'));
-      show(agentBox, !isMcp && local && filter === 'agents');
-      show(promptBox, !isMcp && local && filter === 'prompt');
-      show(pkgsBox, !isMcp && local && filter === 'plugins');
-      show(exportRow, !isMcp && local && (filter === 'plugins' || filter === 'tools'));
-      show(mcpBox, isMcp);
-      show(marketBox, !isMcp && market && filter === 'plugins');
-      show(mktExtBox, !isMcp && market);
-      show(importRow, !isMcp && imp);
-      show(dropZone, !isMcp && imp);
-      show(adv, !isMcp && imp);
-      show(importResult, !isMcp && imp);
+      updateAccLabels();
       renderModeBox(); renderPkgs();
-      if (isMcp) renderMcp();
       if (filter === 'agents') renderAgents();
       else if (filter === 'prompt') ensurePrompt();
       else if (filter === 'skills' || filter === 'tools') renderList(filter);
-      if (!isMcp && market) renderExtMarket(filter);
     }
-    function setSub(s){ sub = s; apply(); }
-    function setFilter(k){ filter = k; sub = 'local'; subTabs._pick('local'); }
+    function setFilter(k){
+      filter = k;
+      var isMcp = (k === 'mcp');
+      accBox.style.display = isMcp ? 'none' : '';
+      mcpBox.style.display = isMcp ? '' : 'none';
+      accLocal.open = accMarket.open = accImport.open = false;
+      mktExtBox.textContent = '';
+      updateAccLabels();
+      if (isMcp) renderMcp();
+    }
     p._setFilter = setFilter;
     setFilter('agents');
   });
