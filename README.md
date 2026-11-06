@@ -149,4 +149,5 @@ MIT，见 [LICENSE](LICENSE)。
 - [docs/审计-v0.4.md](docs/审计-v0.4.md)
 - [docs/对标记录.md](docs/对标记录.md)
 - [docs/扩展路线图.md](docs/扩展路线图.md)
+- [docs/扩展书写规范.md](docs/扩展书写规范.md)
 - [docs/变更记录.md](docs/变更记录.md)
