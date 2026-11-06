@@ -89,7 +89,7 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 实测值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,147,776 字节**（v0.4.1 发布实测），单文件，无任何散落 dll / config |
+| 发布产物 | `dist/SoloChatHost.exe` **3,162,624 字节**（v0.4.1，2026-11-06 重发布），单文件，无任何散落 dll / config |
 | 源码 | `index.html` **1,010,937 字节 / 16,823 行**（CSS、JS、SVG 全内联）；`host/Program.cs` **3,211 行 / 170,578 字节**（本轮未改 C#，实测不变） |
 | 首次运行磁盘占用 | **v0.2 基线**：exe 2,593,280 + `%LOCALAPPDATA%\OpenPage` ≈ **65 MB**（其中 WebView2 运行时组件 ~60 MB：Widevine、过滤规则、着色器缓存；真正的聊天数据 IndexedDB 约 2 MB，随会话增长）；当前 exe 约 3.14 MB |
 | 内存（可见空闲） | **v0.2 实测**：6 个进程（宿主 + 5 个 WebView2），工作集合计 ≈ **374 MB**，私有内存 ≈ **140 MB** |
