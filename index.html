@@ -9307,62 +9307,48 @@ function renderMarket(){
   marketBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '插件市场 · 运行时' }));
   var hostHint = el('div', { class: 'hint', style: 'margin:0 0 8px', text: '安装位置：%LOCALAPPDATA%\\OpenPage\\runtimes；不需要管理员权限，不改 PATH。' });
   marketBox.appendChild(hostHint);
-  function draw(cat){
-    var list = (cat && cat.plugins) || [];
-    if (!list.length){ marketBox.appendChild(el('div', { class: 'hint', text: '市场暂无插件。' })); return; }
-    NET.bridge.runtime('list').then(function(installed){
-      var have = {};
-      (installed || []).forEach(function(x){ if (x && x.id) have[x.id] = x; });
-      list.forEach(function(p){
-        var card = el('div', { class: 'sub-card' });
-        var head = el('div', { class: 'sc-h' }, [
-          el('span', { class: 'sc-name', text: p.name + ' ' + p.version }),
-          el('span', { class: 'sc-chip', text: p.kind === 'runtime' ? '运行时' : (p.kind || '插件') }),
-          el('span', { class: 'sc-chip', text: sizeFmt(p.size || 0) })
-        ]);
-        var st = have[p.id];
-        if (st) head.appendChild(el('span', { class: 'sc-chip', text: '已安装' }));
-        card.appendChild(head);
-        card.appendChild(el('div', { class: 'sc-desc', text: p.description || '' }));
-        var acts = el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' });
-        if (st){
-          var rm = el('button', { class: 'btn btn-ghost rn-mini', text: '移除' });
-          rm.addEventListener('click', function(){
-            UI.confirmBox({ title: '移除运行时？', text: '删除 ' + p.name + ' ' + p.version + ' 的本地文件。', okText: '移除', danger: true }).then(function(ok){
-              if (!ok) return;
-              rm.disabled = true;
-              NET.bridge.runtime('remove', { runtimeId: p.id }).then(function(){ UI.toast('已移除 ' + p.name); renderMarket(); }, function(e){ rm.disabled = false; UI.toast('移除失败：' + (e && e.message || e), true); });
-            });
-          });
-          acts.appendChild(rm);
-        } else {
-          var bt = el('button', { class: 'btn btn-primary rn-mini', text: '安装' });
-          bt.disabled = !NET.bridge.ok;
-          bt.addEventListener('click', function(){
-            bt.disabled = true; bt.textContent = '安装中…';
-            var payload = { runtimeId: p.id, name: p.name, version: p.version, sha256: p.sha256 || '' };
-            if (p.file) payload.file = p.file; else payload.url = p.url;
-            NET.bridge.runtime('install', payload).then(function(r){
-              UI.toast('已安装 ' + p.name + ' ' + (r && r.version || p.version));
-              renderMarket();
-            }, function(e){
-              bt.disabled = false; bt.textContent = '安装';
-              UI.toast('安装失败：' + (e && e.message || e), true);
-            });
-          });
-          acts.appendChild(bt);
-        }
-        card.appendChild(acts);
-        marketBox.appendChild(card);
+  function draw(cat, installed){
+    var list = (cat && cat.plugins) || [], have = {};
+    (installed || []).forEach(function(x){ if (x && x.id) have[x.id] = x; });
+    var avail = list.filter(function(p){ return !have[p.id]; });
+    if (!avail.length){ marketBox.appendChild(el('div', { class: 'hint', text: '运行时都已安装；已安装的运行时在「已有」里管理。' })); return; }
+    avail.forEach(function(p){
+      var card = el('div', { class: 'sub-card' });
+      card.appendChild(el('div', { class: 'sc-h' }, [
+        el('span', { class: 'sc-name', text: p.name + ' ' + p.version }),
+        el('span', { class: 'sc-chip', text: p.kind === 'runtime' ? '运行时' : (p.kind || '插件') }),
+        el('span', { class: 'sc-chip', text: sizeFmt(p.size || 0) })
+      ]));
+      card.appendChild(el('div', { class: 'sc-desc', text: p.description || '' }));
+      var bt = el('button', { class: 'btn btn-primary rn-mini', text: '安装' });
+      bt.disabled = !NET.bridge.ok;
+      bt.addEventListener('click', function(){
+        bt.disabled = true; bt.textContent = '安装中…';
+        var payload = { runtimeId: p.id, name: p.name, version: p.version, sha256: p.sha256 || '' };
+        if (p.file) payload.file = p.file; else payload.url = p.url;
+        NET.bridge.runtime('install', payload).then(function(r){
+          UI.toast('已安装 ' + p.name + ' ' + (r && r.version || p.version));
+          renderMarket(); renderRuntimeLocal(); renderModeBox();
+        }, function(e){
+          bt.disabled = false; bt.textContent = '安装';
+          UI.toast('安装失败：' + (e && e.message || e), true);
+        });
       });
-    }, function(){
-      marketBox.appendChild(el('div', { class: 'hint', text: '运行时接口不可用（需要 exe 宿主版）。' }));
+      card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [bt]));
+      marketBox.appendChild(card);
     });
   }
-  if (!NET.bridge.ok){ draw(BUILTIN_MARKET); return; }
-  fetch('plugins/market.json', { cache: 'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(cat){
-    draw(cat && cat.plugins && cat.plugins.length ? cat : BUILTIN_MARKET);
-  }).catch(function(){ draw(BUILTIN_MARKET); });
+  function catalog(){
+    return fetch('plugins/market.json', { cache: 'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(cat){
+      return (cat && cat.plugins && cat.plugins.length) ? cat : BUILTIN_MARKET;
+    }).catch(function(){ return BUILTIN_MARKET; });
+  }
+  NET.bridge.runtime('list').then(function(installed){
+    catalog().then(function(cat){ draw(cat, installed); });
+  }, function(){
+    marketBox.textContent = '';
+    marketBox.appendChild(el('div', { class: 'hint', text: '运行时接口不可用（需要 exe 宿主版）。' }));
+  });
 }
 renderMarket();
 var fiFiles = el('input', { type: 'file', multiple: '', accept: '.json,.md,.markdown,.txt', style: 'display:none' });
@@ -9637,26 +9623,26 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       }
       var idx = mktCache || { plugins: [] }, raw = idx.raw || '', pkgs = idx.plugins || [];
       var key = { agents: 'agents', skills: 'skills', tools: 'tools', prompt: 'prompts' }[kind];
-      var shown = pkgs.filter(function(p){ return kind === 'plugins' ? true : !!(p.items && p.items[key] > 0); });
-      if (!shown.length){ mktExtBox.appendChild(el('div', { class: 'hint', text: '这一类暂无可安装的扩展包。' })); return; }
+      var shown = pkgs.filter(function(p){
+        return kind === 'plugins' ? true : !!(p.items && p.items[key] > 0);
+      }).filter(function(p){ return !isInstalled(p.name); });
+      if (!shown.length){ mktExtBox.appendChild(el('div', { class: 'hint', text: '这一类没有可安装的扩展包；已安装的请到「已有」查看。' })); return; }
       mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '扩展包市场 · origin/ext/plugins' }));
       shown.forEach(function(pkg){ mktExtBox.appendChild(mktCard(pkg, raw)); });
     }
     function mktCard(pkg, raw){
-      var installed = isInstalled(pkg.name);
       var card = el('div', { class: 'sub-card' });
       card.appendChild(el('div', { class: 'sc-h' }, [
         el('span', { class: 'sc-name', text: pkg.name + ' ' + (pkg.version || '') }),
-        el('span', { class: 'sc-chip', text: installed ? '已安装' : '市场' })
+        el('span', { class: 'sc-chip', text: '市场' })
       ]));
       card.appendChild(el('div', { class: 'sc-desc', text: pkg.desc || '' }));
       var it = pkg.items || {};
       card.appendChild(el('div', { class: 'sub', style: 'font-size:11px', text:
         '工具 ' + (it.tools||0) + ' · 技能 ' + (it.skills||0) + ' · 智能体 ' + (it.agents||0) + ' · 提示词 ' + (it.prompts||0) }));
-      var btn = el('button', { class: installed ? 'btn btn-sec rn-mini' : 'btn btn-primary rn-mini',
-        text: installed ? '已安装' : '安装整包' });
+      var btn = el('button', { class: 'btn btn-primary rn-mini', text: '安装整包' });
       btn.addEventListener('click', function(){
-        if (isInstalled(pkg.name)){ UI.toast('「' + pkg.name + '」已安装；如需重装请先在 本机已有 → 插件 移除整包', true); return; }
+        if (isInstalled(pkg.name)){ UI.toast('「' + pkg.name + '」已安装；如需重装请到「已有」移除整包', true); return; }
         btn.disabled = true; btn.textContent = '安装中…';
         EXT.installMarket(pkg, raw).then(function(rep){ afterImport(rep); },
           function(e){ btn.disabled = false; btn.textContent = '安装整包'; UI.toast('安装失败：' + (e && e.message || e), true); });
@@ -9695,6 +9681,42 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     localBody.appendChild(agentBox);
     localBody.appendChild(promptBox);
     localBody.appendChild(pkgsBox);
+    var runtimeLocal = el('div', { class: 'pkg-list' });
+    localBody.appendChild(runtimeLocal);
+    function renderRuntimeLocal(){
+      runtimeLocal.textContent = '';
+      if (!NET.bridge.ok){ runtimeLocal.appendChild(el('div', { class: 'hint', text: '运行时接口不可用（需要 exe 宿主版）' })); return; }
+      NET.bridge.runtime('list').then(function(arr){
+        runtimeLocal.textContent = '';
+        arr = arr || [];
+        if (!arr.length){ runtimeLocal.appendChild(el('div', { class: 'hint', text: '还没有安装运行时插件；到「插件 → 市场」安装。' })); return; }
+        arr.forEach(function(p){
+          var card = el('div', { class: 'sub-card' });
+          card.appendChild(el('div', { class: 'sc-h' }, [
+            el('span', { class: 'sc-name', text: (p.name || p.id || '运行时') + ' ' + (p.version || '') }),
+            el('span', { class: 'sc-chip', text: '运行时' })
+          ]));
+          var loc = p.path || p.dir;
+          if (loc) card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11px;color:var(--muted)', text: '安装路径：' + loc }));
+          var rm = el('button', { class: 'btn btn-danger rn-mini', text: '移除' });
+          rm.addEventListener('click', function(){
+            UI.confirmBox({ title: '移除运行时？', text: '删除 ' + (p.name || p.id) + ' ' + (p.version || '') + ' 的本地文件。', okText: '移除', danger: true }).then(function(ok){
+              if (!ok) return;
+              rm.disabled = true;
+              NET.bridge.runtime('remove', { runtimeId: p.id }).then(function(){
+                UI.toast('已移除 ' + (p.name || p.id));
+                renderRuntimeLocal(); renderMarket(); renderModeBox();
+              }, function(e){ rm.disabled = false; UI.toast('移除失败：' + (e && e.message || e), true); });
+            });
+          });
+          card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [rm]));
+          runtimeLocal.appendChild(card);
+        });
+      }, function(){
+        runtimeLocal.textContent = '';
+        runtimeLocal.appendChild(el('div', { class: 'hint', text: '运行时接口不可用（需要 exe 宿主版）' }));
+      });
+    }
     marketBody.appendChild(marketBox);
     marketBody.appendChild(mktExtBox);
     importBody.appendChild(importRow);
@@ -9711,7 +9733,9 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         show(agentBox, filter === 'agents');
         show(promptBox, filter === 'prompt');
         show(pkgsBox, filter === 'plugins');
+        show(runtimeLocal, filter === 'plugins');
         renderModeBox(); renderPkgs();
+        if (filter === 'plugins') renderRuntimeLocal();
         if (filter === 'agents') renderAgents();
         else if (filter === 'prompt') ensurePrompt();
         else if (filter === 'skills' || filter === 'tools') renderList(filter);
@@ -9738,6 +9762,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     function apply(){
       updateAccLabels();
       renderModeBox(); renderPkgs();
+      if (filter === 'plugins') renderRuntimeLocal();
       if (filter === 'agents') renderAgents();
       else if (filter === 'prompt') ensurePrompt();
       else if (filter === 'skills' || filter === 'tools') renderList(filter);
