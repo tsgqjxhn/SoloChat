@@ -535,6 +535,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .pk-it .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-it .ds{flex:none;max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--faint)}
 .pk-it .tag{flex:none;font-size:10px;color:var(--faint);border:1px solid var(--hairline);border-radius:5px;padding:0 5px;line-height:16px}
+#pk-slash .pk-it .tag.bi{color:var(--primary);border-color:var(--ring-line);background:var(--soft)}
 .pk-it.off .nm{color:var(--muted)}
 .pk-pop:not(#pk-slash) .pk-it .ds,.pk-pop:not(#pk-slash) .pk-it .tag{display:none}
 .pk-badge{position:absolute;top:-2px;right:-2px;min-width:14px;height:14px;line-height:14px;text-align:center;font-size:10px;border-radius:7px;background:var(--primary);color:var(--on-primary,#fff);padding:0 3px}
@@ -1327,7 +1328,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.2';
+var APP_VER = 'v0.4.3';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1667,6 +1668,25 @@ function loadCfg(){
     if (Object.prototype.hasOwnProperty.call(act, mk)) cfg[mk] = act[mk];
   }
   if (!Array.isArray(cfg.models)) cfg.models = [];
+  /* 迁移（一次性）：内置工具旧 id tool:<name> → builtin:<name>；只做一次，之后用户自建同名工具保持 tool: 前缀 */
+  if (!c.picksBuiltinMig){
+    try {
+      var _bn = (typeof EXT !== 'undefined' && EXT && EXT.BUILTIN) ? EXT.BUILTIN : [];
+      var _bset = {};
+      for (var _bi = 0; _bi < _bn.length; _bi++) _bset[_bn[_bi].id] = 1;
+      if (cfg.picks && typeof cfg.picks === 'object' && Array.isArray(cfg.picks.tool)){
+        var _p = {}; for (var _kk in cfg.picks) _p[_kk] = cfg.picks[_kk];
+        var _src = _p.tool, _dst = [];
+        for (var _tj = 0; _tj < _src.length; _tj++){
+          var _id = _src[_tj];
+          if (typeof _id === 'string' && _id.indexOf('tool:') === 0 && _bset[_id.slice(5)]) _id = 'builtin:' + _id.slice(5);
+          if (_dst.indexOf(_id) < 0) _dst.push(_id);
+        }
+        _p.tool = _dst; cfg.picks = _p;
+      }
+    } catch (e) {}
+  }
+  cfg.picksBuiltinMig = 1;
   S.cfg = cfg;
 }
 var saveCfg = debounce(function(){
@@ -11530,6 +11550,12 @@ function sendMessage(){
     if (!NET.isMock() && !S.cfg.baseURL){ quickPending = false; openSettings(); toast('请先配置 Base URL，或填入 mock 试用', true); return; }
     if (!NET.isMock() && !S.cfg.currentModel){ quickPending = false; toast('请先在「设置 → 连接与模型」中选择模型', true); return; }
 
+    /* Chat 不执行工具：本轮勾了工具/插件就显式切到 Work，让扩展围栏真正运行 */
+    if ((S.cfg.mode || 'chat') === 'chat' && typeof PICK !== 'undefined' && PICK.restrict()) {
+      setCfg({ mode: 'work' });
+      try { renderComposerCtl(); } catch (e) {}
+      UI.toast('Chat 不执行工具，已切到 Work 来运行本轮勾选的工具');
+    }
     var s = curSession() || createSession();
     if (quickPending){ quickPending = false; qa = { sid: s.id, last: 0 }; } // 快速条：建会话后补齐同步标记，小窗直接收流式回复
     FS.reset(); // 新一轮用户输入：工具轮次与取消标志复位（v1.1）
@@ -11737,7 +11763,18 @@ function sendMessage(){
       /* 中止优先真实 AbortError；超时用 tmoErr */
       var info = NET.classify(tmoErr && tmoErr.tmo ? tmoErr : err);
       if (info.code === 'abort') endStream(st, 'aborted', { msg: ERR.EABORT });
-      else endStream(st, 'error', info);
+      else {
+        if (info.code === 'net' && !bg && !st.msg._netRetried){
+          st.msg._netRetried = 1;
+          endStream(st, 'error', info);
+          UI.toast('网络异常，1 秒后自动重试一次');
+          setTimeout(function(){
+            try { if (s.id === S.sid && !S.sending) retryMsg(st.msg.id); } catch (e) {}
+          }, 1200);
+          return;
+        }
+        endStream(st, 'error', info);
+      }
     }
   }
   /* 后台会话流：登记到 S.streams，但不进 S.msgs / 不建 DOM 节点；消息推入该会话的本地 msgs 供下一轮构造上下文 */
@@ -12673,7 +12710,8 @@ function sendMessage(){
   }
   function cmpTrigger(){ // 输入首字符 / 或 @ 时唤出选择器
     var v = $input.value || '';
-    if (v.charAt(0) === '/') popPrompts(v.slice(1));
+    /* v3.x：「/」交给统一扩展搜索面板（pk-slash），不再弹旧提示词库；@ 仍走导入历史 */
+    if (v.charAt(0) === '/'){ if (popMode && popMode !== 'more') closePop(); return; }
     else if (v.charAt(0) === '@') popAt(v.slice(1));
     else if (popMode && popMode !== 'more') closePop();
   }
@@ -13481,77 +13519,49 @@ function sendMessage(){
     var pop = panel(b.getAttribute('data-pk')); b.appendChild(pop);
   });
   refreshBadges();
-  /* 「/」唤起：与输入框同宽，分类折叠 */
-  var PK_ICON = { agent: 'x-agent', plugin: 'x-plugin', skill: 'x-skill', tool: 'x-tool', prompt: 'x-prompt', mcp: 'x-mcp' };
-  var PK_KINDS = ['agent', 'plugin', 'skill', 'tool', 'prompt', 'mcp'];
+  /* 「/」统一扩展搜索：保留符号，按 / 后的查询实时过滤全部扩展类型 */
+  function cnOf(it){ return it.kind === 'tool' ? (it.builtin ? '内置工具' : '工具') : (KEY[it.kind] || it.kind); }
+  function slashRow(it){
+    var ps = picks(), isP = it.kind === 'prompt';
+    var on = !isP && (ps[it.kind] || []).indexOf(it.id) >= 0;
+    var kids = [];
+    if (!isP) kids.push(el('span', { class: 'bx' }));
+    kids.push(el('span', { class: 'tag' + (it.builtin && it.kind === 'tool' ? ' bi' : ''), text: cnOf(it) }));
+    kids.push(el('span', { class: 'nm', text: it.title || it.name }));
+    if (it.desc) kids.push(el('span', { class: 'ds', text: String(it.desc).slice(0, 60) }));
+    var r = el('div', { class: 'pk-it' + (on ? ' on' : '') }, kids);
+    r.addEventListener('click', function(){
+      if (isP){ $input.value = it.body || ''; try { autosize(); } catch (e) {} closeAll(); $input.focus(); return; }
+      toggle(it.kind, it.id); r.classList.toggle('on');
+      /* 快速选用：选完清掉「/查询」并收起，输入框直接可以写问题；多选走左侧 pk 面板 */
+      $input.value = ''; try { autosize(); } catch (e) {} closeAll(); $input.focus();
+    });
+    return r;
+  }
+  function slashFilter(box, q){
+    var lst = box.querySelector('.pk-srch'); if (!lst) return;
+    while (lst.firstChild) lst.removeChild(lst.firstChild);
+    q = String(q || '').trim().toLowerCase();
+    var reg = []; try { reg = EXT.registry(); } catch (e2) {}
+    var shown = 0, i, it, hay;
+    for (i = 0; i < reg.length && shown < 60; i++){
+      it = reg[i];
+      hay = [it.name, it.title, it.desc, it.id, cnOf(it)].join(' ').toLowerCase();
+      if (q && hay.indexOf(q) < 0) continue;
+      lst.appendChild(slashRow(it)); shown++;
+    }
+    if (!shown) lst.appendChild(el('div', { class: 'pk-it', style: 'cursor:default;color:var(--faint)', text: '没有匹配的扩展' }));
+  }
   function slashPanel(){
     var box = el('div', { class: 'pk-pop', id: 'pk-slash' });
     box.appendChild(el('div', { class: 'pk-head' }, [
-      el('b', { text: '本轮扩展' }),
-      el('span', { text: '点分类展开，勾选本轮要用的项' })
+      el('b', { text: '扩展搜索' }),
+      el('span', { text: '输入 / 后继续打字，按名称 / 类型 / 说明筛选本轮要用的扩展' })
     ]));
-    var foot = el('div', { class: 'pk-foot' }, [
-      el('kbd', { text: 'Esc' }), el('span', { text: '关闭' }),
-      el('span', { text: '·' }),
-      el('span', { text: '再点一次取消勾选' })
-    ]);
-    var kinds = PK_KINDS.filter(function(k){ return list(k).length > 0; });
-    if (!kinds.length){
-      var go = el('button', { class: 'btn btn-sec', type: 'button', text: '打开扩展设置' });
-      go.addEventListener('click', function(){ closeAll(); try { openSettings(); } catch (e) {} });
-      box.appendChild(el('div', { class: 'pk-empty' }, [
-        icon('x-tool', 'fill'),
-        el('div', { class: 'pk-empty-t', text: '还没有可挑选的扩展' }),
-        el('div', { class: 'pk-empty-s', text: '在「设置 → 扩展」里导入技能 / 工具 / 提示词后，这里会按类型列出来。' }),
-        go
-      ]));
-      box.appendChild(foot);
-      return box;
-    }
-    var tiles = el('div', { class: 'pk-tiles' });
-    var scroll = el('div', { class: 'pk-scroll' });
-    function syncTiles(){
-      var ts = tiles.querySelectorAll('.pk-tile');
-      for (var i = 0; i < ts.length; i++){
-        var sec = scroll.querySelector('.pk-sec[data-k="' + ts[i].getAttribute('data-k') + '"]');
-        ts[i].classList.toggle('on', !!(sec && sec.classList.contains('open')));
-      }
-    }
-    kinds.forEach(function(k){
-      var t = el('button', { class: 'pk-tile', type: 'button', 'data-k': k }, [
-        icon(PK_ICON[k], 'fill'),
-        el('span', { text: KEY[k] }),
-        el('em', { text: String(list(k).length) })
-      ]);
-      t.addEventListener('click', function(){
-        var sec = scroll.querySelector('.pk-sec[data-k="' + k + '"]');
-        if (!sec) return;
-        var was = sec.classList.contains('open');
-        var all = scroll.querySelectorAll('.pk-sec');
-        for (var i = 0; i < all.length; i++) all[i].classList.remove('open');
-        if (!was){ sec.classList.add('open'); try { sec.scrollIntoView({ block: 'nearest' }); } catch (e) {} }
-        syncTiles();
-      });
-      tiles.appendChild(t);
-    });
-    box.appendChild(tiles);
-    kinds.forEach(function(k){
-      var it = list(k);
-      var sec = el('div', { class: 'pk-sec', 'data-k': k });
-      var sh = el('div', { class: 'pk-sh' }, [
-        icon(PK_ICON[k], 'fill'),
-        el('span', { text: KEY[k] }),
-        el('span', { class: 'n', text: it.length + ' 项' }),
-        icon('chev-r', 'cv')
-      ]);
-      var bd = el('div', { class: 'pk-body' });
-      it.forEach(function(x){ bd.appendChild(row(k, x)); });
-      sh.addEventListener('click', function(){ sec.classList.toggle('open'); syncTiles(); });
-      sec.appendChild(sh); sec.appendChild(bd);
-      scroll.appendChild(sec);
-    });
-    box.appendChild(scroll);
-    box.appendChild(foot);
+    box.appendChild(el('div', { class: 'pk-scroll pk-srch' }));
+    box.appendChild(el('div', { class: 'pk-foot' }, [
+      el('span', { text: '输入字母筛选 · Esc 关闭 · 点选加入本轮' })
+    ]));
     return box;
   }
   document.addEventListener('keydown', function(e){
@@ -13562,15 +13572,11 @@ function sendMessage(){
   window.addEventListener('load', function(){
     var inp = document.getElementById('input'); if (!inp) return;
     inp.addEventListener('input', function(){
-      var cur = document.getElementById('pk-slash');
-      if (inp.value === '/'){
-        inp.value = '';                       /* 「/」不留在输入框里 */
-        if (cur) return;
-        closeAll();
-        (document.querySelector('.cbox') || document.body).appendChild(slashPanel());
-      } else if (cur && inp.value){
-        cur.remove();                         /* 接着打字就收起 */
-      }
+      var v = inp.value || '', cur = document.getElementById('pk-slash');
+      if (v.charAt(0) === '/'){
+        if (!cur){ closeAll(); cur = slashPanel(); (document.querySelector('.cbox') || document.body).appendChild(cur); }
+        slashFilter(cur, v.slice(1));
+      } else if (cur) cur.remove();          /* 不以 / 开头就收起 */
     });
   });
 })();
@@ -13837,7 +13843,7 @@ $('#sidebar').addEventListener('click', function(e){
     if (e.target.id !== 'input') return;
     /* IME 组词 Enter 不触发发送 */
     if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === 'Escape' && S.sending){ UI.stopGeneration(); return; } // 发送按钮已删：Esc 停止
+    if (e.key === 'Escape' && S.sending){ if (!document.querySelector('.pk-pop')) UI.stopGeneration(); return; } // 面板开着时 Esc 只收面板，别顺带把生成停了
     /* Enter 或 Ctrl+Enter 发送；Shift+Enter / Alt+Enter 换行（§8.1） */
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey){
       e.preventDefault();
@@ -15756,7 +15762,7 @@ function importFiles(list){
     var out = [], i, u = userItems(), seen = {};
     for (i = 0; i < BUILTIN.length; i++){
       var b = BUILTIN[i];
-      out.push({ id: 'tool:' + b.id, kind: 'tool', name: b.id, title: b.title, desc: b.brief || '',
+      out.push({ id: 'builtin:' + b.id, kind: 'tool', name: b.id, title: b.title, desc: b.brief || '',
         modes: b.modes.slice(), builtin: true, on: isOn(b.id) });
     }
     /* 内置子智能体角色（clarify/criteria/plan/build/verify/fix/deliver）也算扩展内容 */
@@ -15793,7 +15799,10 @@ function importFiles(list){
       out.push({ id: 'mcp:' + mn, kind: 'mcp', name: mn, title: mn, desc: ms[i].url || '',
         url: ms[i].url || '', modes: ['work', 'agent'], builtin: false, on: true });
     }
-    return out;
+    /* 唯一 id：内置工具已用 builtin: 前缀，与用户 tool: 不冲突；这里兜底去重，避免重复条目 */
+    var dedup = {}, res = [];
+    for (i = 0; i < out.length; i++){ if (dedup[out[i].id]) continue; dedup[out[i].id] = 1; res.push(out[i]); }
+    return res;
   }
   function prompt(mode){
     var lines = [], t = toolsFor(mode), s2 = skillsFor(mode), i, off = [];
