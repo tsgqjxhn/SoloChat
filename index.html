@@ -103,6 +103,10 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 .brand .ic{width:18px;height:18px}
 .brand b{font-family:var(--font-display);font-size:16px;font-weight:600;letter-spacing:var(--tracking-display)}
 #btn-new{width:100%;justify-content:center}
+/* session groups v0.4.2：新建会话旁的小按钮 */
+.sb-new-row{display:flex;gap:6px;align-items:stretch}
+.sb-new-row #btn-new{flex:1;min-width:0;width:auto}
+#btn-new-group{flex:none;width:38px;padding:0;justify-content:center}
 .sb-search{padding:8px 12px}
 .sb-search .wrap{position:relative}
 .sb-search .ic{position:absolute;left:9px;top:8px;color:var(--faint)}
@@ -581,6 +585,10 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .ss-proj .delb:hover{background:var(--hairline-soft);color:var(--danger)}
 .ss-proj .add .ic,.ss-proj .pinb .ic,.ss-proj .delb .ic{width:14px;height:14px}
 .ss-proj .pinb.on{color:var(--primary);display:inline-flex}
+/* session groups v0.4.2：分组头 chip / 计数（覆盖附件 chip 的方块样式） */
+.ss-proj .chip{position:static;width:auto;height:auto;min-width:0;max-width:none;border:0;background:none;
+  border-radius:0;padding:0;overflow:visible;flex:none;font-size:11px;color:var(--faint);white-space:nowrap}
+.ss-proj .gnum{flex:none;min-width:14px;text-align:center;font-size:11px;color:var(--faint)}
 .ss-item.sub{margin-left:20px}
 .ss-item .tm{font-size:11px;color:var(--faint);margin-left:6px;flex:none;display:none}
 .ss-item.sub .tm{display:block}
@@ -1091,7 +1099,10 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
     </div>
     <div class="sb-top">
       <div class="brand"><svg class="ic fill" aria-hidden="true"><use href="#i-logo"/></svg><b>SoloChat</b></div>
-      <button id="btn-new" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>新建会话</button>
+      <div class="sb-new-row">
+        <button id="btn-new" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>新建会话</button>
+        <button id="btn-new-group" class="btn btn-ghost" title="新建分组（会话分组）"><svg class="ic"><use href="#i-folder"/></svg></button>
+      </div>
     </div>
     <div class="sb-search"><div class="wrap">
       <svg class="ic"><use href="#i-search"/></svg>
@@ -1150,7 +1161,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
-            <button id="btn-sesscfg" class="icon-btn" title="会话参数（仅当前会话，优先级高于全局）"><svg class="ic"><use href="#i-gear"/></svg></button>
+            <button id="btn-sesscfg" class="icon-btn" title="会话参数（发送前也可调：模型/提示词/温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
           </div>
         </div>
         <div id="cmp-pop" hidden></div>
@@ -1316,7 +1327,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.1';
+var APP_VER = 'v0.4.2';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1398,6 +1409,9 @@ var DEF_CFG = {
     showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' },
   wsClosed: {},                 // 侧栏项目折叠状态 {工作区路径: 1}
   pinnedWs: {},                 // 置顶项目 {工作区路径: 1}
+  /* session groups v0.4.2：会话分组（必须登记在 DEF_CFG，否则 loadCfg 白名单会丢） */
+  groups: [],                   // [{id,name,mode,model,systemPrompt,temperature,maxTokens,createdAt,updatedAt}]
+  gClosed: {},                  // 分组折叠状态 {groupId:1}
   /* v3.0 新配置项（必须登记在 DEF_CFG，否则载入时被白名单丢弃） */
   accent: 'coral',              // 强调色：coral | lavender | teal | amber
   fontScale: 1,                 // 字号缩放 0.92 | 1 | 1.12 | 1.25
@@ -1571,6 +1585,8 @@ var S = {
   sessions: [],           // 会话索引（全部，按 pinned+updatedAt 排序）
   sid: null,              // 当前会话 id（null = 草稿态：发送首条消息时才真正建会话）
   pendWs: '',             // 草稿态预选文件夹（建会话时落 workspace）
+  pendGroup: '',          // session groups v0.4.2：兼容旧字段（草稿预选分组）
+  draftCfg: null,         // session groups v0.4.2：发送前草稿配置 {groupId,mode,model,systemPrompt,params}
   msgs: [],               // 当前会话完整消息（内存）
   windowSize: LIMITS.DOM_WINDOW, // 当前 DOM 窗口大小（加载更早递增）
   sending: false,         // 【当前显示的会话】是否有流式请求进行中（= !!streams[sid]，v2.2）
@@ -1632,6 +1648,8 @@ function loadCfg(){
   if (!cfg.migMT){ if (cfg.maxTokens === 2048) cfg.maxTokens = 0; cfg.migMT = 1; }
   cfg.shortcuts = Object.assign({}, DEF_CFG.shortcuts, c.shortcuts || {});
   if (!Array.isArray(cfg.models)) cfg.models = [];
+  if (!Array.isArray(cfg.groups)) cfg.groups = [];                     // session groups v0.4.2：脏配置防崩
+  if (!cfg.gClosed || typeof cfg.gClosed !== 'object') cfg.gClosed = {}; // session groups v0.4.2
   if (!cfg.thinkByModel || typeof cfg.thinkByModel !== 'object') cfg.thinkByModel = {};
   if (!Array.isArray(cfg.prompts)) cfg.prompts = [];
   if (!Array.isArray(cfg.presets) || !cfg.presets.length)
@@ -1742,6 +1760,30 @@ function sortSessions(){
     if (!!b.pinned !== !!a.pinned) return b.pinned - a.pinned;
     return b.updatedAt - a.updatedAt;
   });
+}
+/* ===== session groups v0.4.2：分组查找 + 继承（会话 > 分组 > 全局） =====
+   新建会话不复制组模型/提示词，留空让它们动态继承；组设置变化后未覆盖会话自动跟随。 */
+function mkDraftCfg(groupId){
+  return { groupId: groupId || '', mode: '', model: '', systemPrompt: '', params: {} };
+}
+function groupById(id){
+  if (!id) return null;
+  var gs = (S.cfg && S.cfg.groups) || [];
+  for (var i = 0; i < gs.length; i++) if (gs[i] && gs[i].id === id) return gs[i];
+  return null;
+}
+function groupOfSession(s){ return (s && s.groupId) ? groupById(s.groupId) : null; }
+function sessModel(s){
+  var g = groupOfSession(s);
+  return (s && s.model) || (g && g.model) || (S.cfg && S.cfg.currentModel) || '';
+}
+function sessSystemPrompt(s){
+  var g = groupOfSession(s);
+  return (s && s.systemPrompt) || (g && g.systemPrompt) || (S.cfg && S.cfg.systemPrompt) || '';
+}
+function sessMode(s){
+  var g = groupOfSession(s);
+  return (s && s.mode) || (g && g.mode) || (S.cfg && S.cfg.mode) || 'chat';
 }
 
 /*  */
@@ -3007,12 +3049,16 @@ var NET = (function(){
     return { msg: ERR.ENET + '：' + m, code: 'net' };
   }
 
-  /* 参数优先级：会话显式设置 > 全局设置 > 内置默认（maxTokens 0=不传该字段） */
+  /* session groups v0.4.2：参数优先级 会话 > 分组 > 模型默认 > 全局（maxTokens 0=不传该字段） */
   function effParams(sess, cfg){
     var sp = (sess && sess.params) || {};
+    var g = groupOfSession(sess) || {};
     var t = sp.temperature, m = sp.maxTokens;
-    /* v3.0 #5：其次看「该模型默认参数」，再看全局 */
-    var md = ((cfg && cfg.modelMeta) || {})[cfg && cfg.currentModel] || {};
+    /* 分组显式值（''/null = 跟随） */
+    if (t == null || t === '') t = (g.temperature != null && g.temperature !== '') ? g.temperature : null;
+    if (m == null || m === '') m = (g.maxTokens != null && g.maxTokens !== '') ? g.maxTokens : null;
+    /* v3.0 #5：其次看「该模型默认参数」，再看全局；模型按会话生效模型取 */
+    var md = ((cfg && cfg.modelMeta) || {})[sessModel(sess)] || {};
     var mdDef = md.def || {};
     if (t == null || t === '') t = (mdDef.temperature != null) ? mdDef.temperature
       : ((cfg && cfg.temperature != null && cfg.temperature !== '') ? cfg.temperature : DEF_PARAMS.temperature);
@@ -3059,7 +3105,9 @@ var NET = (function(){
       }
     }
   }
-    var sys = (session.systemPrompt || S.cfg.systemPrompt) || '';
+    /* session groups v0.4.2：系统提示与请求模型都按「会话 > 分组 > 全局」继承 */
+    var sys = sessSystemPrompt(session) || '';
+    var mdl = sessModel(session);
     var cs = curSession();
     sys += '\n\n' + MEDIA_HINT; // v2.3：告诉模型可以内嵌图片/视频（否则多数模型不会主动用）
     if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
@@ -3139,20 +3187,20 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
       }
     }
     var body = {
-      model: S.cfg.currentModel,
+      model: mdl,
       messages: out,
       stream: !!S.cfg.stream,
       temperature: p.temperature
     };
     if (p.maxTokens > 0) body.max_tokens = p.maxTokens;
-    var tv = S.cfg.thinkByModel ? S.cfg.thinkByModel[S.cfg.currentModel] : null;
+    var tv = S.cfg.thinkByModel ? S.cfg.thinkByModel[mdl] : null;
     if (tv && tv !== 'Default'){
       /* B3-1：先按 wire 协议分流；OpenAI chat / responses 仍走原有字段推断 */
       var _proto = protocolNow(), _tv = String(tv).toLowerCase();
       if (_proto === 'anthropic-messages'){
         /* Anthropic 只认 thinking:{type:'enabled',budget_tokens}，reasoning_effort 会被静默丢弃；
            且仅支持 extended thinking 的 Claude 型号才发，其余型号不发任何思考字段 */
-        if (/claude-(3[-.]7|4|sonnet-4|opus-4|haiku-4)/i.test(S.cfg.currentModel) && _tv !== 'disabled'){
+        if (/claude-(3[-.]7|4|sonnet-4|opus-4|haiku-4)/i.test(mdl) && _tv !== 'disabled'){
           var _ab = 4096;
           if (_tv === 'low') _ab = 1024;
           else if (_tv === 'medium') _ab = 4096;
@@ -3166,7 +3214,7 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
         }
       } else if (_proto === 'gemini'){
         /* 内部字段，由 toGemini 写进 generationConfig.thinkingConfig；不发 reasoning_effort */
-        if (/gemini-(2\.5|3)/i.test(S.cfg.currentModel)){
+        if (/gemini-(2\.5|3)/i.test(mdl)){
           var _gb = 4096;
           if (_tv === 'disabled') _gb = 0;
           else if (_tv === 'enabled') _gb = -1;
@@ -3178,8 +3226,8 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
         }
       } else {
         /* v2.9：优先用模型能力表里探测到的「该模型认哪个思考字段」，没有则沿用通用两分支 */
-        var mmv = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-        var fld = quirksNow().thinkingParam || (mmv && mmv.reason) || (reasonProfile(S.cfg.currentModel) || {}).field || '';
+        var mmv = (S.cfg.modelMeta || {})[mdl] || null;
+        var fld = quirksNow().thinkingParam || (mmv && mmv.reason) || (reasonProfile(mdl) || {}).field || '';
         var onOff = /^(enabled|disabled)$/i.test(tv);
         if (fld === 'reasoning'){
           body.reasoning = onOff ? { enabled: /^enabled$/i.test(tv) } : { effort: tv };
@@ -9935,12 +9983,22 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     $list.textContent = '';
     var frag = document.createDocumentFragment();
     var pins = [], units = [], byWs = {};
+    /* session groups v0.4.2：先登记分组，组内会话单独收集 */
+    var gs = Array.isArray(S.cfg.groups) ? S.cfg.groups : [], byG = {}, gMeta = {};
+    for (var gi = 0; gi < gs.length; gi++){
+      var gg = gs[gi]; if (!gg || !gg.id) continue;
+      byG[gg.id] = []; gMeta[gg.id] = gg;
+    }
     for (var i = 0; i < S.sessions.length; i++){
       var s = S.sessions[i];
       if (s.temp) continue; /* v2.8：临时会话不进历史列表 */
-      var hit = !q || (s.title || '').toLowerCase().indexOf(q) >= 0 || (s.workspace || '').toLowerCase().indexOf(q) >= 0;
+      var sg = (s.groupId && byG[s.groupId]) ? gMeta[s.groupId] : null;
+      var hit = !q || (s.title || '').toLowerCase().indexOf(q) >= 0
+        || (s.workspace || '').toLowerCase().indexOf(q) >= 0
+        || (sg && (sg.name || '').toLowerCase().indexOf(q) >= 0); // 组名命中→该组会话都显示
       if (!hit) continue;
-      if (s.workspace) (byWs[s.workspace] || (byWs[s.workspace] = [])).push(s);
+      if (sg){ byG[sg.id].push(s); }
+      else if (s.workspace) (byWs[s.workspace] || (byWs[s.workspace] = [])).push(s);
       else (s.pinned ? pins : units).push({ t: s.updatedAt, s: s });
     }
     for (var ws in byWs){
@@ -9951,6 +10009,19 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         return b.updatedAt - a.updatedAt;
       });
       units.push({ t: mt, ws: ws, arr: arr, pin: !!(S.cfg.pinnedWs || {})[ws] });
+    }
+    /* session groups v0.4.2：分组单元插进 units，与会话/项目一起按 updatedAt 排序 */
+    for (var gid in byG){
+      var garr = byG[gid], gmt = 0;
+      for (var gk = 0; gk < garr.length; gk++) if (garr[gk].updatedAt > gmt) gmt = garr[gk].updatedAt;
+      garr.sort(function(a, b){
+        if (!!b.pinned !== !!a.pinned) return b.pinned - a.pinned;
+        return b.updatedAt - a.updatedAt;
+      });
+      var gmm = gMeta[gid];
+      var gNameHit = !q || (gmm.name || '').toLowerCase().indexOf(q) >= 0;
+      if (!q || gNameHit || garr.length) // 空组也显示（允许先建空组），组头显示 0
+        units.push({ t: gmt || gmm.updatedAt || gmm.createdAt || 0, g: gmm, arr: garr });
     }
     units.sort(function(a, b){ return b.t - a.t; });
     /* v3.0 #21：手动拖拽顺序优先（未拖过的按时间） */
@@ -9974,6 +10045,28 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       for (var i = 0; i < arr.length; i++){
         var u = arr[i];
         if (u.s){ frag.appendChild(sessionNode(u.s)); continue; }
+        /* session groups v0.4.2：分组头 + 组内会话（子会话仍显示时间） */
+        if (u.g){
+          var gd = u.g, gclosed = !!(S.cfg.gClosed || {})[gd.id];
+          var gmode = (gd.mode === 'work') ? 'Work' : 'Chat';
+          var gmodel = gd.model ? modelLabel(gd.model) : '跟随全局';
+          frag.appendChild(el('div', {
+            class: 'ss-proj' + (gclosed ? ' closed' : ''),
+            'data-gid': gd.id,
+            title: (gd.name || '分组') + '（' + gmode + ' · ' + gmodel + '）'
+          }, [
+            icon('down', 'chev'), icon('folder'),
+            el('span', { class: 'nm', text: gd.name || '未命名分组' }),
+            el('span', { class: 'gnum', text: String((u.arr || []).length) }),
+            el('span', { class: 'chip', text: gmode + ' · ' + gmodel }),
+            el('button', { class: 'add', 'data-gnew': '1', title: '在分组内新建会话' }, [icon('plus')]),
+            el('button', { class: 'pinb', 'data-gcfg': '1', title: '分组设置' }, [icon('gear')]),
+            el('button', { class: 'delb', 'data-gdel': '1', title: '删除分组（会话保留为未分组）' }, [icon('trash')])
+          ]));
+          if (!gclosed) for (var gj2 = 0; gj2 < (u.arr || []).length; gj2++)
+            frag.appendChild(sessionNode(u.arr[gj2], true));
+          continue;
+        }
         var closed = !!(S.cfg.wsClosed || {})[u.ws];
         var nm = u.ws.split(/[\\/]/).filter(Boolean).pop() || u.ws;
         frag.appendChild(el('div', { class: 'ss-proj' + (closed ? ' closed' : '') + (u.pin ? ' pinned' : ''), 'data-pws': u.ws, title: u.ws }, [
@@ -9991,7 +10084,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     /* v3.0 #21：无项目分组时，普通会话按「今天/昨天/本周/更早」分桶 */
     (function(){
       var hasProj = false;
-      for (var i = 0; i < units.length; i++) if (units[i].ws){ hasProj = true; break; }
+      for (var i = 0; i < units.length; i++) if (units[i].ws || units[i].g){ hasProj = true; break; }
       if (S.cfg.groupSessions !== false && !hasProj && units.length > 1){
         var d0 = new Date(); d0.setHours(0, 0, 0, 0);
         var t0 = d0.getTime(), day = 864e5;
@@ -10079,25 +10172,150 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     input.addEventListener('click', function(e){ e.stopPropagation(); });
   }
 
-  /* 会话参数弹层（侧边栏 ⚙）：仅该会话，优先级高于全局；留空/0=跟随全局 */
-  function sessCfgDlg(s){
-    var pp = s.params || {};
-    var t = el('input', { class: 'f-in', type: 'number', step: '0.1', 'data-sess': 'temperature', 'data-sid': s.id,
-      value: pp.temperature != null ? pp.temperature : '', placeholder: '跟随全局' });
-    var m = el('input', { class: 'f-in', type: 'number', 'data-sess': 'maxTokens', 'data-sid': s.id,
-      value: pp.maxTokens != null ? pp.maxTokens : '', placeholder: '跟随全局（0=不限）' });
-    var sp = el('textarea', { 'data-sess': 'systemPrompt', 'data-sid': s.id, text: s.systemPrompt || '' });
+  /* ===== session groups v0.4.2：弹层下拉构造 ===== */
+  function modelSelect(cur, emptyLabel){
+    var sel = el('select', { class: 'f-in' });
+    sel.appendChild(el('option', { value: '', text: emptyLabel || '跟随分组 / 全局' }));
+    var pool = (Array.isArray(S.cfg.models) ? S.cfg.models : []).slice();
+    if (cur && pool.indexOf(cur) < 0) pool.unshift(cur); // 当前值不在池里补一个选项
+    for (var i = 0; i < pool.length; i++)
+      sel.appendChild(el('option', { value: pool[i], text: modelLabel(pool[i]) }));
+    sel.value = cur || '';
+    return sel;
+  }
+  function groupSelect(cur){
+    var sel = el('select', { class: 'f-in' });
+    sel.appendChild(el('option', { value: '', text: '无分组' }));
+    var gs = Array.isArray(S.cfg.groups) ? S.cfg.groups : [];
+    for (var i = 0; i < gs.length; i++)
+      if (gs[i] && gs[i].id) sel.appendChild(el('option', { value: gs[i].id, text: gs[i].name || '未命名分组' }));
+    sel.value = cur || '';
+    return sel;
+  }
+  function modeSelect(cur, allowEmpty){
+    var sel = el('select', { class: 'f-in' });
+    if (allowEmpty) sel.appendChild(el('option', { value: '', text: '跟随分组 / 全局' }));
+    sel.appendChild(el('option', { value: 'chat', text: 'Chat' }));
+    sel.appendChild(el('option', { value: 'work', text: 'Work' }));
+    if (cur && cur !== 'chat' && cur !== 'work') // 兼容旧的 agent 会话，避免显示空白
+      sel.appendChild(el('option', { value: cur, text: cur === 'agent' ? 'Agent' : cur }));
+    sel.value = cur || (allowEmpty ? '' : 'chat');
+    return sel;
+  }
+  /* 分组设置弹层（新建/编辑）：点「保存」一次性写入 cfg.groups，不复制进会话 */
+  function groupDlg(gid){
+    var edit = !!gid, g = edit ? groupById(gid) : null;
+    if (edit && !g) return;
+    var now = Date.now();
+    var d = g || { name: '新分组', mode: 'chat', model: '', systemPrompt: '', temperature: '', maxTokens: '' };
+    var fName = el('input', { class: 'f-in', type: 'text', value: d.name || '', placeholder: '新分组' });
+    var fMode = modeSelect(d.mode || 'chat', false);
+    var fModel = modelSelect(d.model || '', '跟随全局');
+    var fTemp = el('input', { class: 'f-in', type: 'number', step: '0.1', min: '0', max: '2',
+      value: (d.temperature === '' || d.temperature == null) ? '' : d.temperature, placeholder: '跟随全局' });
+    var fMax = el('input', { class: 'f-in', type: 'number', min: '0', step: '1',
+      value: (d.maxTokens === '' || d.maxTokens == null) ? '' : d.maxTokens, placeholder: '跟随全局（0/留空=不限）' });
+    var fSp = el('textarea', { text: d.systemPrompt || '', placeholder: '留空=跟随全局 System Prompt' });
+    function save(){
+      var nm = (fName.value || '').trim().slice(0, 40) || '新分组';
+      var traw = fTemp.value === '' ? '' : parseFloat(fTemp.value);
+      if (isNaN(traw)) traw = '';                        // 不存 NaN
+      var mraw = fMax.value === '' ? '' : parseInt(fMax.value, 10);
+      if (isNaN(mraw) || mraw <= 0) mraw = '';          // 0/留空=不限制
+      var obj = { id: edit ? g.id : ('g' + Date.now().toString(36)), name: nm,
+        mode: fMode.value === 'work' ? 'work' : 'chat', model: fModel.value || '',
+        systemPrompt: fSp.value || '',
+        temperature: traw === '' ? '' : clamp(traw, 0, 2), maxTokens: mraw === '' ? '' : mraw,
+        createdAt: edit ? (g.createdAt || now) : now, updatedAt: now };
+      var arr = (Array.isArray(S.cfg.groups) ? S.cfg.groups : []).slice();
+      if (edit){ for (var i = 0; i < arr.length; i++) if (arr[i].id === g.id){ arr[i] = obj; break; } }
+      else arr.push(obj);
+      setCfg({ groups: arr });
+      renderSessions(); renderComposerCtl();
+      closeModal();
+      toast(edit ? ('已保存分组：' + nm) : ('已新建分组：' + nm));
+    }
+    S._grpSave = save;
+    S._grpDel = function(){ delGroup(gid); };
+    var acts = [];
+    if (edit) acts.push(el('button', { class: 'btn btn-danger', 'data-m': 'grp-del', text: '删除分组' }));
+    acts.push(el('button', { class: 'btn btn-sec', 'data-m': 'close', text: '取消' }));
+    acts.push(el('button', { class: 'btn btn-primary', 'data-m': 'grp-save', text: '保存' }));
     openModal(el('div', {}, [
-      el('h2', { text: '会话参数 · ' + (s.title || '未命名') }),
+      el('h2', { text: edit ? ('分组设置 · ' + (g.name || '')) : '新建分组' }),
       el('div', { class: 'f-grid' }, [
-        field('temperature', t, '0~2；留空=跟随全局'),
-        field('max_tokens', m, '单次输出上限；0/留空=不限制（不传），思考不会被截断')
+        field('名称', fName, '必填'), field('模式', fMode),
+        field('模型', fModel, '留空=组内会话跟随全局模型'),
+        field('temperature', fTemp, '留空=跟随全局'),
+        field('max_tokens', fMax, '留空/0=不限制')
       ]),
-      field('System Prompt', sp, '留空=跟随全局 System Prompt'),
+      field('System Prompt', fSp, '留空=跟随全局 System Prompt'),
+      el('div', { class: 'sub', text: '组内未单独覆盖的会话会自动跟随；已单独设置的会话不受影响。' }),
+      el('div', { class: 'f-actions' }, acts)
+    ]));
+  }
+  /* 删除分组：组内会话不删，只清空 groupId → 变为未分组 */
+  function delGroup(gid){
+    var g = groupById(gid);
+    if (!g) return;
+    confirmBox({ title: '删除分组', text: '删除分组「' + (g.name || '') + '」？组内会话不会删除，会变成「未分组」。', okText: '删除', danger: true })
+      .then(function(ok){
+        if (!ok) return;
+        var arr = (Array.isArray(S.cfg.groups) ? S.cfg.groups : []).filter(function(x){ return x && x.id !== gid; });
+        setCfg({ groups: arr });
+        var cm = S.cfg.gClosed || {}; if (cm[gid]) delete cm[gid];
+        for (var i = 0; i < S.sessions.length; i++)
+          if (S.sessions[i].groupId === gid){ S.sessions[i].groupId = ''; DB.putSession(S.sessions[i]); }
+        saveCfg(); renderSessions(); renderComposerCtl();
+        toast('已删除分组：会话保留为未分组');
+      });
+  }
+  /* 分组头「+」：预选分组 + 组模式，展开分组，新建草稿 */
+  function newFromGroup(gid){
+    var g = groupById(gid);
+    if (!g){ toast('分组不存在', true); return; }
+    setCfg({ mode: g.mode || 'chat' });
+    var cm = S.cfg.gClosed || (S.cfg.gClosed = {});
+    if (cm[gid]) delete cm[gid];
+    newDraft(gid);
+    saveCfg();
+    toast('已新建分组会话：' + (g.name || ''));
+  }
+  /* 会话参数弹层：会话态(有 s) 与「发送前草稿态」(s===null) 共用一套控件。
+     草稿态写 S.draftCfg，不创建会话、不写 DB；发送首条消息时由 createSession 应用。 */
+  function sessCfgDlg(s){
+    var isDraft = !s;
+    var d = isDraft ? (S.draftCfg || (S.draftCfg = mkDraftCfg())) : s;
+    var pp = d.params || (d.params = {});
+    function mark(node, key){
+      node.setAttribute('data-sess', key);
+      if (isDraft) node.setAttribute('data-draft', '1'); else node.setAttribute('data-sid', s.id);
+      return node;
+    }
+    var fGroup = mark(groupSelect(d.groupId || ''), 'groupId');
+    var fMode = mark(modeSelect(d.mode || '', isDraft), 'mode');
+    var fModel = mark(modelSelect(d.model || '', '跟随分组 / 全局'), 'model');
+    var fTemp = mark(el('input', { class: 'f-in', type: 'number', step: '0.1',
+      value: pp.temperature != null ? pp.temperature : '', placeholder: '跟随全局' }), 'temperature');
+    var fMax = mark(el('input', { class: 'f-in', type: 'number',
+      value: pp.maxTokens != null ? pp.maxTokens : '', placeholder: '跟随全局（0=不限）' }), 'maxTokens');
+    var fSp = mark(el('textarea', { text: d.systemPrompt || '' }), 'systemPrompt');
+    openModal(el('div', {}, [
+      el('h2', { text: isDraft ? '会话参数 · 新会话（发送前）' : ('会话参数 · ' + (s.title || '未命名')) }),
+      el('div', { class: 'f-grid' }, [
+        field('所属分组', fGroup), field('模式', fMode),
+        field('模型', fModel, '空=跟随分组 / 全局；会话值优先')
+      ]),
+      el('div', { class: 'f-grid' }, [
+        field('temperature', fTemp, '0~2；留空=跟随'),
+        field('max_tokens', fMax, '0/留空=不限制（不传）')
+      ]),
+      field('System Prompt', fSp, '留空=跟随分组 / 全局 System Prompt'),
+      el('div', { class: 'sub', text: isDraft ? '发送第一条消息时应用；组内未单独覆盖的会话会自动跟随分组设置。' : '会话值优先于分组，分组优先于全局。' }),
       el('div', { class: 'f-actions' }, [
         el('button', { class: 'btn btn-primary', 'data-m': 'close', text: '完成' })
       ])
-    ]), false, true);
+    ]));
   }
 
   /* 消息列表：窗口化渲染仅留 50 条 */
@@ -10441,7 +10659,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var text = '', fin = false;
     function done(ok){ if (fin) return; fin = true; if (S.compactHandle === h) S.compactHandle = null; cb(ok); }
     var h = NET.send({
-      body: { model: S.cfg.currentModel, stream: true, max_tokens: 2000,
+      body: { model: sessModel(s), stream: true, max_tokens: 2000, /* session groups v0.4.2 */
         messages: [{ role: 'user', content: COMPACT_PROMPT + '\n\n' + cut.join('\n') }] },
       onDelta: function(t2){ text += t2; },
       onUsage: function(){},
@@ -10498,7 +10716,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     if (st.rAcc) msg.reasoning = st.rAcc;
     msg.status = status;
   if (st && st.t0) msg.ms = Date.now() - st.t0; // v0.3.8：本轮耗时（对标 Claude）
-  try { if (msg.role === 'assistant' && !msg.model) msg.model = S.cfg.currentModel || ''; } catch (e) {} // v0.3.21：记录是哪个模型答的
+  try { if (msg.role === 'assistant' && !msg.model) msg.model = sessModel(sessionById(msg.sid)) || ''; } catch (e) {} // v0.3.21 / session groups v0.4.2：记录是哪个模型答的
   try { var _hd = $('#msg-list') && $listNode(msg.id) && $listNode(msg.id).querySelector('.msg-head'); if (_hd && msg.model && !_hd.querySelector('.msg-model')) { var _ms = document.createElement('span'); _ms.className = 'msg-tokens msg-model'; _ms.textContent = String(msg.model).split('/').pop().slice(0, 24); _ms.title = msg.model; _hd.appendChild(_ms); } } catch (e) {} // v0.3.29：流式建节点时 model 还没赋值，收尾补上
     if (errInfo) msg.errMsg = errInfo.msg;
     if (usage && usage.total_tokens) msg.tokens = usage.total_tokens;
@@ -10563,15 +10781,22 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
   function createSession(title){
     var now = Date.now();
     var tmp = !!S.tempMode; /* v2.8：临时会话 → 只建内存会话，不落库、不进历史 */
+    /* session groups v0.4.2：从草稿配置取显式值；model/systemPrompt 留空=动态继承分组/全局 */
+    var dc = S.draftCfg || {};
+    var gid = dc.groupId || S.pendGroup || '';
+    var g = gid ? groupById(gid) : null;
     var s = {
       id: uuid(), title: title || (tmp ? '临时会话' : '新会话'), createdAt: now, updatedAt: now,
-      mode: S.cfg.mode || 'chat', // v1.1.18：会话级模式
-      pinned: false, model: S.cfg.currentModel || '',
-      systemPrompt: '',   // 空=跟随全局；侧边栏 ⚙ 可单独覆盖（会话值优先）
-      params: {},         // 仅存显式覆盖项（temperature/maxTokens），空=跟随全局
+      groupId: gid,                                  // 所属分组；空=未分组
+      mode: dc.mode || (g && g.mode) || S.cfg.mode || 'chat', // v1.1.18：会话级模式
+      pinned: false,
+      model: dc.model || '',                         // 空=跟随分组/全局，不复制全局模型
+      systemPrompt: dc.systemPrompt || '',           // 空=跟随分组/全局
+      params: dc.params || {},                       // 仅存显式覆盖项，空=跟随
       workspace: S.pendWs || '', msgCount: 0, temp: tmp
     };
     S.pendWs = '';
+    S.draftCfg = null; S.pendGroup = '';             // 草稿配置应用完即清
     S.sessions.unshift(s);
     if (tmp){ DB.markTemp(s.id); }
     else DB.putSession(s);
@@ -10588,13 +10813,15 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     attachStreamView();
     return s;
   }
-  /* 草稿不落库；首条建会话 */
-  function newDraft(){
+  /* 草稿不落库；首条建会话。session groups v0.4.2：可预选分组，并重置草稿配置 */
+  function newDraft(groupId){
     dropTempSessions(); // v2.8：新建即丢弃上一个临时会话（不写历史、不留痕）
     revokePreviews(); // v2.2：新建草稿不中止其它会话的生成
     S.sid = null; S.windowSize = LIMITS.DOM_WINDOW; S.msgs = [];
     S.sugSeed = (Math.random() * 2147483647) | 0; // v2.9：新草稿换一批建议
     S.follow = true; // v2.1：新建草稿恢复跟随（配合 renderMsgs 不再强制滚动）
+    S.draftCfg = mkDraftCfg(groupId || ''); // 干净草稿（带 groupId 则预选分组）
+    S.pendGroup = '';
     renderSessions(); renderMsgs();
     renderComposerCtl();
     $title.textContent = 'SoloChat';
@@ -11421,7 +11648,7 @@ function sendMessage(){
   /* bg=true：为后台会话跑流（不动当前内存/DOM）；bg=false：当前显示会话 */
   function runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, bg){
     if (!s || isSending(s.id)) return;
-    var lim = ctxLimitFor(S.cfg.currentModel) || 131072; /* v2.9：按模型能力表的上限判断 */
+    var lim = ctxLimitFor(sessModel(s)) || 131072; /* v2.9 / session groups v0.4.2：按会话生效模型的上限判断 */
     var lu = lastUsage(msgs);
     if (lu && lu.p >= lim * 0.8 && msgs.length >= 9 && !S.compacting && (!S.compactTried || Date.now() - S.compactTried > 120000)){
       S.compacting = true; S.compactTried = Date.now();
@@ -11437,7 +11664,8 @@ function sendMessage(){
     }
     var asst = {
       id: uuid(), sid: s.id, role: 'assistant', content: '',
-      status: 'streaming', ts: Date.now(), attachments: []
+      status: 'streaming', ts: Date.now(), attachments: [],
+      model: sessModel(s) /* session groups v0.4.2：记录实际应答模型 */
     };
   try { if (searchMeta && searchMeta.items && searchMeta.items.length) asst.srcs = searchMeta.items.slice(0, 6).map(function(x){ return { t: x.t || x.title || '', u: x.u || x.url || '' }; }); } catch (e) {} // v0.3.32：本轮来源挂到消息上
     var st = bg ? beginStreamBG(asst, msgs) : beginStream(asst);
@@ -12259,9 +12487,9 @@ function sendMessage(){
      注意「本次输出」是**已经发生的**：上一轮回复真实生成的 completion token，
      不再按 max_tokens 预占一个「预计输出」（那既会重复计数，又会在空草稿时凭空多出几千）。 */
   function ctxEst(){
-    var fam = NET.estimate.family(S.cfg.currentModel);
+    var fam = NET.estimate.family(sessModel(curSession())); /* session groups v0.4.2 */
     var u = lastUsage(S.msgs);
-    var sys = (curSession() && curSession().systemPrompt) || S.cfg.systemPrompt || '';
+    var sys = sessSystemPrompt(curSession()) || '';
     var sysT = Math.ceil(NET.estimate.text(sys, fam));
     var histT, cache = 0, outT = 0, src = 'estimate';
     if (u && u.p > 0){
@@ -12296,7 +12524,7 @@ function sendMessage(){
   function renderCtxRing(){
     var z = $('#ctx-ring'); if (!z) return;
     var e = ctxEst();
-    var lim = ctxLimitFor(S.cfg.currentModel);
+    var lim = ctxLimitFor(sessModel(curSession())); /* session groups v0.4.2 */
     var pct = lim > 0 ? Math.min(1, e.tok / lim) : 0;
     var fg = z.querySelector('.ctx-fg'), num = z.querySelector('.ctx-num');
     if (fg) fg.style.strokeDasharray = (pct * 97.4).toFixed(1) + ' 97.4';
@@ -13363,6 +13591,7 @@ function sendMessage(){
     renderMsgs: renderMsgs, selectSession: selectSession, createSession: createSession,
     deleteSession: deleteSession, deleteProject: deleteProject, renameInline: renameInline, sendMessage: sendMessage,
     sessCfgDlg: sessCfgDlg,
+    groupDlg: groupDlg, delGroup: delGroup, newFromGroup: newFromGroup, /* session groups v0.4.2 */
     newDraft: newDraft, newFromProject: newFromProject,
     stopGeneration: stopGeneration, killStreams: killStreams, startStream: startStream, startStreamFor: startStreamFor, retryMsg: retryMsg,
     regenMsg: regenMsg, variantStep: variantStep, continueMsg: continueMsg, editMsg: editMsg, editSave: editSave,
@@ -13408,7 +13637,20 @@ function sendMessage(){
 $('#sidebar').addEventListener('click', function(e){
     var t = e.target;
     if (t.closest('#btn-new')) return void UI.newDraft();
+    if (t.closest('#btn-new-group')) return void UI.groupDlg(); /* session groups v0.4.2 */
     if (t.closest('#btn-settings')) return void UI.openSettings();
+    /* session groups v0.4.2：分组头点击（先于文件夹项目判断，因为组头也是 .ss-proj） */
+    var gEl = t.closest('[data-gid]');
+    if (gEl){
+      var gid = gEl.getAttribute('data-gid');
+      if (t.closest('[data-gnew]')) return void UI.newFromGroup(gid);
+      if (t.closest('[data-gcfg]')) return void UI.groupDlg(gid);
+      if (t.closest('[data-gdel]')) return void UI.delGroup(gid);
+      var gcMap = S.cfg.gClosed || (S.cfg.gClosed = {});
+      if (gcMap[gid]) delete gcMap[gid]; else gcMap[gid] = 1;
+      saveCfg(); UI.renderSessions();
+      return;
+    }
     var pj = t.closest('.ss-proj');
     if (pj){
       var pws = pj.getAttribute('data-pws');
@@ -13569,10 +13811,10 @@ $('#sidebar').addEventListener('click', function(e){
       return;
     }
     if (t.closest('#btn-more')) return void UI.moreToggle();
-    if (t.closest('#btn-sesscfg')){ // v1.4.3：会话参数入口移至输入区最右（原在侧边栏）
+    if (t.closest('#btn-sesscfg')){ // session groups v0.4.2：发送前（草稿态）也能打开会话参数
       var cs = curSession();
-      if (!cs) return void UI.toast('先发送一条消息建立会话，再设置会话参数', true);
-      return void UI.sessCfgDlg(cs);
+      UI.sessCfgDlg(cs || null);
+      return;
     }
     var pr = t.closest('[data-pact]');
     if (pr) return void UI.popAct(pr.getAttribute('data-pact'), pr.getAttribute('data-id') || '');
@@ -13702,6 +13944,9 @@ $('#sidebar').addEventListener('click', function(e){
     if (!b) return;
     var m = b.getAttribute('data-m');
     if (m === 'close') UI.closeModal();
+    /* session groups v0.4.2：分组弹层的保存/删除（回调在 groupDlg 里挂到 S） */
+    else if (m === 'grp-save'){ if (S._grpSave) S._grpSave(); }
+    else if (m === 'grp-del'){ if (S._grpDel) S._grpDel(); }
     else if (m === 'settings') UI.openSettings();
     else if (m === 'compress') UI.compressSession(b.getAttribute('data-id'));
     else if (m === 'open-data'){
@@ -13888,28 +14133,39 @@ $('#sidebar').addEventListener('click', function(e){
       if (ck === 'quickbar'){ QB_READY = true; notifyQuickbar(); }
     }
   }
+  /* session groups v0.4.2：会话参数控件 —— 会话态写指定会话，草稿态(data-draft=1)写 S.draftCfg */
   function applySessField(t){
-    /* 目标会话：控件带 data-sid（侧边栏会话设置，可非当前会话），否则当前会话 */
     var sid = t.getAttribute('data-sid');
-    var s = null;
-    if (sid){ for (var i = 0; i < S.sessions.length; i++) if (S.sessions[i].id === sid) s = S.sessions[i]; }
-    else s = curSession();
-    if (!s) return;
-    var sk = t.getAttribute('data-sess');
-    if (sk === 'systemPrompt') s.systemPrompt = t.value;
+    var isDraft = t.getAttribute('data-draft') === '1';
+    var s = null, draft = null;
+    if (sid){ for (var i = 0; i < S.sessions.length; i++) if (S.sessions[i].id === sid){ s = S.sessions[i]; break; } }
+    if (!s && isDraft) draft = S.draftCfg || (S.draftCfg = mkDraftCfg());
+    if (!s && !draft && !isDraft) s = curSession();
+    if (!s && !draft) return;
+    var sk = t.getAttribute('data-sess'), val = t.value;
+    if (sk === 'systemPrompt'){ if (s) s.systemPrompt = val; else draft.systemPrompt = val; }
+    else if (sk === 'groupId'){
+      if (s){
+        s.groupId = val || '';
+        /* 当前会话且未显式设模式时，组模式立即生效 */
+        if (s.id === S.sid && !s.mode){ var g = groupById(s.groupId); if (g && g.mode) setCfg({ mode: g.mode }); }
+      } else draft.groupId = val || '';
+    } else if (sk === 'mode'){
+      if (s){ s.mode = val || 'chat'; if (s.id === S.sid) setCfg({ mode: s.mode }); }
+      else draft.mode = val || '';
+    } else if (sk === 'model'){ if (s) s.model = val || ''; else draft.model = val || ''; }
     else {
-      s.params = s.params || {};
+      var pp = s ? (s.params = s.params || {}) : (draft.params = draft.params || {});
       if (sk === 'maxTokens'){
-        var n = parseInt(t.value, 10);
-        if (!n || n < 0) delete s.params.maxTokens; // 空/0 = 跟随全局
-        else s.params.maxTokens = n;
+        var n = parseInt(val, 10);
+        if (!n || n < 0) delete pp.maxTokens; else pp.maxTokens = n;
       } else {
-        var f = parseFloat(t.value);
-        if (isNaN(f)) delete s.params.temperature; // 空 = 跟随全局
-        else s.params.temperature = clamp(f, 0, 2);
+        var f = parseFloat(val);
+        if (isNaN(f)) delete pp.temperature; else pp.temperature = clamp(f, 0, 2);
       }
     }
-    DB.putSession(s);
+    if (s) DB.putSession(s); else saveCfg();
+    UI.renderSessions(); UI.renderComposerCtl();
   }
   function fieldOf(e, attr){
     var t = e.target;
@@ -14133,7 +14389,7 @@ UI.openSettings(); // 重建以刷新显示
     }
     if (sel) items.push({ ic: 'copy', label: '复制', run: function(){ copyText(sel); } });
     items.push({ ic: 'plus', label: '新建会话', run: function(){ UI.newDraft(); } });
-    items.push({ ic: 'folder', label: '新建分组', run: function(){ UI.pickWorkspace(); } });
+    items.push({ ic: 'folder', label: '新建分组', run: function(){ UI.groupDlg(); } }); /* session groups v0.4.2 */
     items.push({ ic: 'temp', label: '新建临时会话', run: function(){ UI.toggleTemp(); } });
     items.push({ sep: true });
     items.push({ ic: 'gear', label: '设置', run: function(){ UI.openSettings(); } });
