@@ -29,6 +29,31 @@ SoloChat 的扩展包集合。每个 `plugins/<id>` 就是一个可以直接导�
 
 机器可读索引见 [`index.json`](index.json)。
 
+## 运行时插件
+
+`index.json` 之外还有 `kind: runtime` 的**运行时插件**：由根目录
+[`runtimes.json`](runtimes.json) 登记，本体在 [`runtimes/python-311/`](runtimes/python-311/)。
+它和扩展包一样是插件，**不是主应用自带的 runtime**，也没有另起
+`runtime/python-311` 之类的分支或独立类别；只是 `kind` 不同、换了一份清单登记。
+
+| id | 名称 | 版本 | 内容 | 入口 |
+|---|---|---|---|---|
+| `python-3.11` | Python 3.11 | 3.11.9 | 官方 CPython 3.11.9 便携包 + uv | `python.exe` |
+
+**与扩展包的区别**
+
+| | 扩展包 | 运行时插件 |
+|---|---|---|
+| 清单 | `manifest.json` | `plugin.json`（`kind: runtime`） |
+| 内容 | `skills/ tools/ agents/ prompts/` | 可执行运行时压缩包（`.zip`） |
+| 登记 | `index.json` | `runtimes.json` |
+| 作用 | 为智能体增加工具 / 能力 | 为 Agent 模式提供脚本执行环境 |
+| 安装 | 导入到应用扩展目录 | 解压到 `%LOCALAPPDATA%\OpenPage\runtimes` |
+
+- 「工具只能是声明式 HTTP、不含可执行代码」是**扩展包 `tools/`** 的约束；运行时插件走另一条执行通道，
+  隔离边界见 [`runtimes/python-311/README.md`](runtimes/python-311/README.md)——**并非 OS 级安全沙箱**。
+- 其它扩展如需 Python，可在自身清单用 `requires` 声明前置，id 为 `python-3.11`。
+
 ## 安全模型
 
 - **工具只能是声明式 HTTP**：`{ "type": "http", "method": "GET", "url": "https://…/{arg}" }`。

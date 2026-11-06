@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "runtimes": [
+    {
+      "id": "python-3.11",
+      "kind": "runtime",
+      "name": "Python 3.11",
+      "version": "3.11.9",
+      "description": "官方 CPython 3.11.9 便携运行时（含 uv），供扩展脚本使用。",
+      "file": "runtimes/python-311/python-3.11.9-runtime.zip",
+      "sha256": "3ab929da23d57ec8ce581d3b6d7297a8d069b2b1661425c6c26008d11113b28f",
+      "size": 26128140
+    }
+  ]
+}
