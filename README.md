@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.0 · 一个单 exe，双击就是一个完整的本地 AI 聊天客户端。**
+**v0.4.1 · 一个单 exe，双击就是一个完整的本地 AI 聊天客户端。**
 
 没有安装器、没有前端构建步骤、没有 npm、没有云端。整个应用——界面、逻辑、图标、样式——全部内联在一个 `index.html` 里；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、原生加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -89,8 +89,8 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 实测值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,144,704 字节**（`dist-build` 构建实测；发布后同一体积），单文件，无任何散落 dll / config |
-| 源码 | `index.html` **1,008,183 字节 / 16,781 行**（CSS、JS、SVG 全内联）；`host/Program.cs` **3,211 行 / 170,578 字节** |
+| 发布产物 | `dist/SoloChatHost.exe` **3,147,776 字节**（v0.4.1 发布实测），单文件，无任何散落 dll / config |
+| 源码 | `index.html` **1,010,937 字节 / 16,823 行**（CSS、JS、SVG 全内联）；`host/Program.cs` **3,211 行 / 170,578 字节**（本轮未改 C#，实测不变） |
 | 首次运行磁盘占用 | **v0.2 基线**：exe 2,593,280 + `%LOCALAPPDATA%\OpenPage` ≈ **65 MB**（其中 WebView2 运行时组件 ~60 MB：Widevine、过滤规则、着色器缓存；真正的聊天数据 IndexedDB 约 2 MB，随会话增长）；当前 exe 约 3.14 MB |
 | 内存（可见空闲） | **v0.2 实测**：6 个进程（宿主 + 5 个 WebView2），工作集合计 ≈ **374 MB**，私有内存 ≈ **140 MB** |
 | 内存（最小化） | **v0.2 实测**：宿主自身工作集 56 MB → **2.2 MB**，全树工作集 ≈ **219 MB**（低内存态挂起渲染进程） |

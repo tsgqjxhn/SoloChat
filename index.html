@@ -1302,7 +1302,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.0';
+var APP_VER = 'v0.4.1';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -2569,6 +2569,8 @@ var NET = (function(){
     function rec(n, ok, msg){ out.push({ n: n, ok: ok, msg: msg }); }
     function s1(){
       step(1);
+      /* B3-2：Azure 没有通用 /models，跳过第 1 步直接测对话/流式，否则第 2、3 步根本不跑 */
+      if (isAzure()){ rec(1, true, 'Azure 无 /models，跳过'); return s2(); }
       var mu;
       try { mu = endpoint('models'); }          /* v0.4.x：Azure 会抛出明确提示（P1-6） */
       catch (e){ rec(1, false, e.message); return out; }
@@ -2720,8 +2722,12 @@ var NET = (function(){
     var gc = {};
     if (body.max_tokens) gc.maxOutputTokens = body.max_tokens;
     if (body.temperature != null) gc.temperature = body.temperature;
+    /* B3-1：把 buildBody 放的内部思考档位转成 thinkingConfig（含 budget=0 / -1），
+       即使没有 max_tokens / temperature 也要创建 generationConfig */
+    if (body.thinking && typeof body.thinking === 'object' && typeof body.thinking.budget_tokens === 'number')
+      gc.thinkingConfig = { thinkingBudget: body.thinking.budget_tokens };
     var out = { contents: contents };
-    if (gc.maxOutputTokens || gc.temperature != null) out.generationConfig = gc;
+    if (gc.maxOutputTokens || gc.temperature != null || gc.thinkingConfig) out.generationConfig = gc;
     if (sys.length) out.systemInstruction = { parts: [{ text: sys.join('\n\n') }] };
     if (body.tools && body.tools.length){
       out.tools = [{ functionDeclarations: body.tools.map(function(t){
@@ -3127,20 +3133,51 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     if (p.maxTokens > 0) body.max_tokens = p.maxTokens;
     var tv = S.cfg.thinkByModel ? S.cfg.thinkByModel[S.cfg.currentModel] : null;
     if (tv && tv !== 'Default'){
-      /* v2.9：优先用模型能力表里探测到的「该模型认哪个思考字段」，没有则沿用通用两分支 */
-      var mmv = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
-      var fld = quirksNow().thinkingParam || (mmv && mmv.reason) || (reasonProfile(S.cfg.currentModel) || {}).field || '';
-      var onOff = /^(enabled|disabled)$/i.test(tv);
-      if (fld === 'reasoning'){
-        body.reasoning = onOff ? { enabled: /^enabled$/i.test(tv) } : { effort: tv };
-      } else if (fld === 'thinking'){
-        body.thinking = { type: onOff ? tv.toLowerCase() : 'enabled' };
-      } else if (fld === 'enable_thinking'){
-        body.enable_thinking = onOff ? /^enabled$/i.test(tv) : !/^(off|none|no|0)$/i.test(tv);
-      } else if (onOff){
-        body.thinking = { type: tv.toLowerCase() };
+      /* B3-1：先按 wire 协议分流；OpenAI chat / responses 仍走原有字段推断 */
+      var _proto = protocolNow(), _tv = String(tv).toLowerCase();
+      if (_proto === 'anthropic-messages'){
+        /* Anthropic 只认 thinking:{type:'enabled',budget_tokens}，reasoning_effort 会被静默丢弃；
+           且仅支持 extended thinking 的 Claude 型号才发，其余型号不发任何思考字段 */
+        if (/claude-(3[-.]7|4|sonnet-4|opus-4|haiku-4)/i.test(S.cfg.currentModel) && _tv !== 'disabled'){
+          var _ab = 4096;
+          if (_tv === 'low') _ab = 1024;
+          else if (_tv === 'medium') _ab = 4096;
+          else if (_tv === 'high') _ab = 8192;
+          else if (_tv === 'max') _ab = 16384;
+          else if (_tv === 'enabled') _ab = 4096;
+          body.thinking = { type: 'enabled', budget_tokens: _ab };
+          /* max_tokens 必须 > budget_tokens，否则 Anthropic 拒绝；原本 0/未设时给更宽余量 */
+          if (!body.max_tokens) body.max_tokens = _ab + 4096;
+          else if (body.max_tokens < _ab + 2048) body.max_tokens = _ab + 2048;
+        }
+      } else if (_proto === 'gemini'){
+        /* 内部字段，由 toGemini 写进 generationConfig.thinkingConfig；不发 reasoning_effort */
+        if (/gemini-(2\.5|3)/i.test(S.cfg.currentModel)){
+          var _gb = 4096;
+          if (_tv === 'disabled') _gb = 0;
+          else if (_tv === 'enabled') _gb = -1;
+          else if (_tv === 'low') _gb = 1024;
+          else if (_tv === 'medium') _gb = 4096;
+          else if (_tv === 'high') _gb = 8192;
+          else if (_tv === 'max') _gb = 16384;
+          body.thinking = { budget_tokens: _gb };
+        }
       } else {
-        body.reasoning_effort = tv;
+        /* v2.9：优先用模型能力表里探测到的「该模型认哪个思考字段」，没有则沿用通用两分支 */
+        var mmv = (S.cfg.modelMeta || {})[S.cfg.currentModel] || null;
+        var fld = quirksNow().thinkingParam || (mmv && mmv.reason) || (reasonProfile(S.cfg.currentModel) || {}).field || '';
+        var onOff = /^(enabled|disabled)$/i.test(tv);
+        if (fld === 'reasoning'){
+          body.reasoning = onOff ? { enabled: /^enabled$/i.test(tv) } : { effort: tv };
+        } else if (fld === 'thinking'){
+          body.thinking = { type: onOff ? tv.toLowerCase() : 'enabled' };
+        } else if (fld === 'enable_thinking'){
+          body.enable_thinking = onOff ? /^enabled$/i.test(tv) : !/^(off|none|no|0)$/i.test(tv);
+        } else if (onOff){
+          body.thinking = { type: tv.toLowerCase() };
+        } else {
+          body.reasoning_effort = tv;
+        }
       }
     }
     if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent')){
@@ -7875,6 +7912,7 @@ var UI = (function(){
   function applyProv(id){
     var p = AP(), cat = NET.provEntry(id);
     if (!cat || id === '') return;
+    var prevProvId = p.provId;
     p.provId = id;
     if (id !== 'custom'){
       p.baseURL = cat.base || '';
@@ -7885,6 +7923,10 @@ var UI = (function(){
     mirrorPreset(); saveCfg();
     try { UI.openSettings(); } catch (e) {}
     try { UI.toast('已套用预设：' + cat.name); } catch (e2) {}
+    /* B3-3：换了厂商但模型池没清（可能是同一网关多地址），提示核对模型 ID，不自动清空 */
+    if (p.models && p.models.length && id !== prevProvId){
+      try { UI.toast('已切换供应商，模型池保留；请确认模型 ID 属于该厂商，或手动删除不兼容的模型'); } catch (e3) {}
+    }
   }
   /* v0.4.5：三步测试连接（① /models ② 最小对话 ③ 流式） */
   function testConnBtn(btn){
@@ -12000,7 +12042,7 @@ function sendMessage(){
       for (var j = 0; j < ps.length; j++){
         var pg = ps[j], og = el('optgroup', { label: pg.name || '配置' });
         var ms = (pg.models && pg.models.length) ? pg.models : (pg.currentModel ? [pg.currentModel] : []);
-        if (!ms.length) og.appendChild(el('option', { value: pg.id + '\x01', text: '（无模型）', disabled: true }));
+        if (!ms.length) og.appendChild(el('option', { value: pg.id + '\x01', text: '选择模型', disabled: true }));
         for (var k = 0; k < ms.length; k++)
           og.appendChild(el('option', { value: pg.id + '\x01' + ms[k], text: modelLabel(ms[k]),
             selected: (pg.id === S.cfg.activePreset && ms[k] === S.cfg.currentModel) ? '' : null }));
@@ -14516,9 +14558,9 @@ var EXT = (function(){
     { id: 'fs-edit',    kind: 'tool', title: '局部修改',   brief: '唯一匹配替换', modes: ['agent'] },
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
     { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
-    { id: 'sub',        kind: 'tool', title: '派子智能体', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
+    { id: 'sub',        kind: 'tool', title: '派子智能体（单任务）', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
     { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work', 'agent'] },
-    { id: 'agent',      kind: 'tool', title: '派子智能体', brief: '按角色派活（clarify/criteria/plan/build/verify/fix/deliver）', modes: ['work', 'agent'] },
+    { id: 'agent',      kind: 'tool', title: '按角色派活', brief: '按角色派活（clarify/criteria/plan/build/verify/fix/deliver）', modes: ['work', 'agent'] },
     { id: 'cmd',        kind: 'tool', title: '执行命令',   brief: '工作区内跑 git/node/npm 等（需确认）', modes: ['agent'] },
     { id: 'python',     kind: 'tool', title: '运行 Python', brief: 'Python 3.11 运行时 → 脚本输出', modes: ['agent'] },
     { id: 'git',        kind: 'tool', title: 'Git 操作',   brief: 'git status/diff/log/commit（需确认）', modes: ['agent'] },
