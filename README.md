@@ -65,7 +65,7 @@ SoloChat 的扩展包集合。每个 `plugins/<id>` 就是一个可以直接导�
 ## 提交新插件
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)。一句话：新建 `plugins/<id>/`，写好 `manifest.json`，
-在 `index.json` 里加一条，跑校验脚本，提 PR 到 `Plugin` 分支。
+在 `index.json` 里加一条，跑校验脚本，提 PR 到 `ext/plugins` 分支。
 
 ## 许可
 

@@ -3,8 +3,8 @@
   "name": "SoloChat 插件市场",
   "version": "1.0.0",
   "updated": "2026-11-02",
-  "home": "https://github.com/tsgqjxhn/SoloChat/tree/Plugin",
-  "raw": "https://raw.githubusercontent.com/tsgqjxhn/SoloChat/Plugin/",
+  "home": "https://github.com/tsgqjxhn/SoloChat/tree/ext/plugins",
+  "raw": "https://raw.githubusercontent.com/tsgqjxhn/SoloChat/ext/plugins/",
   "plugins": [
     {
       "id": "repo-insight",

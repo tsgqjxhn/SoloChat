@@ -74,4 +74,4 @@ node scripts/validate.mjs
 
 1. 在 `index.json` 的 `plugins` 数组加一条（id/name/version/desc/author/license/path/tags/items）；
 2. 跑校验；
-3. 提 PR 到 `Plugin` 分支。
+3. 提 PR 到 `ext/plugins` 分支。
