@@ -751,6 +751,9 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
   border-bottom:2px solid transparent;cursor:pointer}
 .pt-tabs button:hover{color:var(--ink)}
 .pt-tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--primary)}
+/* 第二层子页签：选中下划线+主色，未选中 muted（只作用于 .pt-sub，不改第一层） */
+.pt-sub button{color:var(--muted);border-bottom:2px solid transparent}
+.pt-sub button.on{color:var(--primary);font-weight:600;border-bottom-color:var(--primary)}
 .sub-card{border:1px solid var(--hairline);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--canvas)}
 .sub-card .sc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sub-card .sc-name{font-weight:600;color:var(--ink);font-size:13px}
@@ -9113,7 +9116,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
   /* —— 页⑥ 关于 —— */
     /* —— 页 扩展（v0.4.0）：内置功能开关 + 自定义 tools / skills / plugins —— */
     page('ext', '扩展', function(p){
-    var filter = 'agents';
+    var filter = 'agents', sub = 'local';
     var INTRO = {
       tools: '内置能力默认全开，关掉后模型调用会被直接拒绝；下面还能加自己的声明式 http 工具。',
       agents: '子智能体：内置角色只读展示（含内部提示词），下面可以拼一个自己的组合智能体。',
@@ -9123,6 +9126,12 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     mcp: 'MCP = 外部工具服务器（HTTP JSON-RPC）。登记地址后可探测 tools/list，工具执行链路后续接。'
     };
     p.appendChild(pageTabs([['agents', '智能体'], ['plugins', '插件'], ['skills', '技能'], ['tools', '工具'], ['prompt', '提示词'], ['mcp', 'MCP']], function(k){ setFilter(k); }));
+    /* 前五类各三层子页签：本机已有 / 市场 / 自定义导入；MCP 保持单视图 */
+    var subTabs = pageTabs([['local', '本机已有'], ['market', '市场'], ['import', '自定义导入']], function(k){ setSub(k); });
+    subTabs.classList.add('pt-sub');   /* 仅第二层：选中态下划线/主色 */
+    subTabs.style.margin = '0 0 6px';
+    p.appendChild(subTabs);
+    var mktExtBox = el('div'), importResult = el('div', { class: 'hint' });
 
     var modeBox = el('div', { class: 'sub' });
     p.appendChild(modeBox);
@@ -9262,6 +9271,7 @@ var BUILTIN_MARKET = { version: 1, plugins: [{
 }]};
 var marketBox = el('div');
 addBox.appendChild(marketBox);
+addBox.appendChild(mktExtBox);   /* 扩展包市场（origin/Plugin index.json），与运行时卡片并列 */
 function renderMarket(){
   marketBox.textContent = '';
   marketBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '插件市场 · 运行时' }));
@@ -9332,7 +9342,8 @@ var bFiles = el('button', { class: 'btn btn-sec', text: '导入文件…' });
 var bDir = el('button', { class: 'btn btn-primary', text: '导入文件夹…' });
 bFiles.addEventListener('click', function(){ fiFiles.click(); });
 bDir.addEventListener('click', function(){ fiDir.click(); });
-addBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:6px 0' }, [bFiles, bDir, fiFiles, fiDir]));
+var importRow = el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:6px 0' }, [bFiles, bDir, fiFiles, fiDir]);
+addBox.appendChild(importRow);
 var whereSel = el('select', { class: 'f-in', id: 'pk-where', style: 'width:auto;min-width:104px;padding:6px 8px' }, [
   el('option', { value: 'desktop', text: '桌面' }),
   el('option', { value: 'downloads', text: '下载文件夹' })
@@ -9347,18 +9358,11 @@ openLast.addEventListener('click', function(){
   if (!S.cfg.lastPkgDir) return UI.toast('还没有导出过', true);
   NET.revealPath(S.cfg.lastPkgDir);
 });
-addBox.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 10px;gap:8px' }, [
+var exportRow = el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:0 0 10px;gap:8px' }, [
   el('span', { class: 'sub', style: 'margin:0', text: '导出到' }), whereSel, openLast
-]));
-function pkgDone(rep){
-  renderPkgs(); renderList(filter); renderModeBox();
-  var msg = '导入 ' + rep.added + ' 项' + (rep.prompts ? '，' + rep.prompts + ' 条提示词' : '');
-  if (rep.skipped.length){
-    msg += '；跳过 ' + rep.skipped.length + ' 个';
-    console.warn('[扩展包] 跳过：\n' + rep.skipped.join('\n'));
-  }
-  UI.toast(msg, rep.skipped.length > 0);
-}
+]);
+addBox.appendChild(exportRow);
+function pkgDone(rep){ afterImport(rep); }
 function doImport(list){
   EXT.importFiles(list).then(pkgDone, function(e){ UI.toast('导入失败：' + (e && e.message || e), true); });
 }
@@ -9469,6 +9473,7 @@ addBtn.addEventListener('click', function(){
 });
 adv.appendChild(el('div', { class: 'f-actions' }, [addBtn]));
 addBox.appendChild(adv);
+addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
 p.appendChild(addBox);
 
     /* ---------- MCP ---------- */
@@ -9572,21 +9577,113 @@ p.appendChild(addBox);
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
     }
 
-    function setFilter(k){
-      filter = k;
-      var isAgents = (k === 'agents'), isMcp = (k === 'mcp'), isPrompt = (k === 'prompt');
-      modeBox.style.display = isAgents ? '' : 'none';
-      arRow.style.display = (k === 'tools') ? '' : 'none';
-      list.style.display = (isMcp || isAgents || isPrompt || k === 'plugins') ? 'none' : '';
-      agentBox.style.display = isAgents ? '' : 'none';
-      addBox.style.display = (k === 'tools' || k === 'plugins') ? '' : 'none';
-      mcpBox.style.display = isMcp ? '' : 'none';
-      promptBox.style.display = isPrompt ? '' : 'none';
-      if (isAgents) renderAgents();
-      if (isMcp) renderMcp();
-      if (isPrompt) ensurePrompt();
-      if (!isMcp && !isAgents && !isPrompt) renderList(k);
+    /* ===== 市场（origin/Plugin 分支 index.json）+ 三子页签调度 ===== */
+    var mktCache = null, mktErr = '', mktOffline = false;
+    var MKT_INDEX = 'https://raw.githubusercontent.com/tsgqjxhn/SoloChat/Plugin/index.json';
+    function ensureMarket(){
+      if (mktCache || mktErr) return Promise.resolve();
+      var url = window.__SOLOCHAT_MKT_INDEX__ || MKT_INDEX;
+      return NET.raw({ url: url, method: 'GET', timeout: 15000 }).then(function(r){
+        if (!r || r.status !== 200) throw new Error('HTTP ' + (r && r.status));
+        var idx;
+        try { idx = JSON.parse(r.text); } catch(e){ throw new Error('index.json 不是合法 JSON'); }
+        if (!idx || !idx.plugins) throw new Error('index.json 缺少 plugins');
+        mktCache = idx;
+      }).then(null, function(e){
+        mktErr = (e && e.message) || String(e);
+        return fetch('plugins/market.json', { cache: 'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(cat){
+          mktOffline = !!(cat && cat.plugins && cat.plugins.length);
+        }).catch(function(){});
+      });
     }
+    function isInstalled(name){
+      var hit = false;
+      EXT.all().forEach(function(it){ if (it.pkg === name) hit = true; });
+      (S.cfg.prompts || []).forEach(function(pr){ if (pr.pkg === name) hit = true; });
+      return hit;
+    }
+    function drawExt(kind){
+      mktExtBox.textContent = '';
+      if (mktErr){
+        var t = '市场暂不可用：' + mktErr;
+        if (mktOffline) t += '（已回退到本机运行时目录，插件 → 市场 可安装 Python 运行时）';
+        mktExtBox.appendChild(el('div', { class: 'hint', style: 'color:var(--danger)', text: t }));
+        return;
+      }
+      var idx = mktCache || { plugins: [] }, raw = idx.raw || '', pkgs = idx.plugins || [];
+      var key = { agents: 'agents', skills: 'skills', tools: 'tools', prompt: 'prompts' }[kind];
+      var shown = pkgs.filter(function(p){ return kind === 'plugins' ? true : !!(p.items && p.items[key] > 0); });
+      if (!shown.length){ mktExtBox.appendChild(el('div', { class: 'hint', text: '这一类暂无可安装的扩展包。' })); return; }
+      mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '扩展包市场 · origin/Plugin' }));
+      shown.forEach(function(pkg){ mktExtBox.appendChild(mktCard(pkg, raw)); });
+    }
+    function mktCard(pkg, raw){
+      var installed = isInstalled(pkg.name);
+      var card = el('div', { class: 'sub-card' });
+      card.appendChild(el('div', { class: 'sc-h' }, [
+        el('span', { class: 'sc-name', text: pkg.name + ' ' + (pkg.version || '') }),
+        el('span', { class: 'sc-chip', text: installed ? '已安装' : '市场' })
+      ]));
+      card.appendChild(el('div', { class: 'sc-desc', text: pkg.desc || '' }));
+      var it = pkg.items || {};
+      card.appendChild(el('div', { class: 'sub', style: 'font-size:11px', text:
+        '工具 ' + (it.tools||0) + ' · 技能 ' + (it.skills||0) + ' · 智能体 ' + (it.agents||0) + ' · 提示词 ' + (it.prompts||0) }));
+      var btn = el('button', { class: installed ? 'btn btn-sec rn-mini' : 'btn btn-primary rn-mini',
+        text: installed ? '已安装' : '安装整包' });
+      btn.addEventListener('click', function(){
+        if (isInstalled(pkg.name)){ UI.toast('「' + pkg.name + '」已安装；如需重装请先在 本机已有 → 插件 移除整包', true); return; }
+        btn.disabled = true; btn.textContent = '安装中…';
+        EXT.installMarket(pkg, raw).then(function(rep){ afterImport(rep); },
+          function(e){ btn.disabled = false; btn.textContent = '安装整包'; UI.toast('安装失败：' + (e && e.message || e), true); });
+      });
+      card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [btn]));
+      return card;
+    }
+    function renderExtMarket(kind){
+      mktExtBox.textContent = '';
+      mktExtBox.appendChild(el('div', { class: 'hint', text: '正在读取市场索引…' }));
+      ensureMarket().then(function(){ drawExt(kind); }, function(){ drawExt(kind); });
+    }
+    function afterImport(rep){
+      if (S._pRefresh) S._pRefresh();
+      var msg = '导入 ' + rep.added + ' 项' + (rep.prompts ? '，' + rep.prompts + ' 条提示词' : '');
+      if (rep.skipped && rep.skipped.length){
+        msg += '；跳过 ' + rep.skipped.length + ' 个';
+        console.warn('[扩展包] 跳过：\n' + rep.skipped.join('\n'));
+      }
+      importResult.textContent = msg;
+      UI.toast(msg, !!(rep.skipped && rep.skipped.length));
+      apply();   /* 刷新本机列表 / 插件包 / 计数 / 市场卡片状态 */
+    }
+    function apply(){
+      var isMcp = (filter === 'mcp');
+      var local = (sub === 'local'), market = (sub === 'market'), imp = (sub === 'import');
+      var show = function(n, on){ n.style.display = on ? '' : 'none'; };
+      show(subTabs, !isMcp);
+      show(addBox, !isMcp);
+      show(modeBox, !isMcp && local && filter === 'agents');
+      show(arRow, !isMcp && local && filter === 'tools');
+      show(list, !isMcp && local && (filter === 'skills' || filter === 'tools'));
+      show(agentBox, !isMcp && local && filter === 'agents');
+      show(promptBox, !isMcp && local && filter === 'prompt');
+      show(pkgsBox, !isMcp && local && filter === 'plugins');
+      show(exportRow, !isMcp && local && (filter === 'plugins' || filter === 'tools'));
+      show(mcpBox, isMcp);
+      show(marketBox, !isMcp && market && filter === 'plugins');
+      show(mktExtBox, !isMcp && market);
+      show(importRow, !isMcp && imp);
+      show(dropZone, !isMcp && imp);
+      show(adv, !isMcp && imp);
+      show(importResult, !isMcp && imp);
+      renderModeBox(); renderPkgs();
+      if (isMcp) renderMcp();
+      if (filter === 'agents') renderAgents();
+      else if (filter === 'prompt') ensurePrompt();
+      else if (filter === 'skills' || filter === 'tools') renderList(filter);
+      if (!isMcp && market) renderExtMarket(filter);
+    }
+    function setSub(s){ sub = s; apply(); }
+    function setFilter(k){ filter = k; sub = 'local'; subTabs._pick('local'); }
     p._setFilter = setFilter;
     setFilter('agents');
   });
@@ -15081,6 +15178,71 @@ function importFiles(list){
   });
   return chain.then(function(){ return rep; });
 }
+  /* 市场整包安装：只取文本、绝不执行市场代码；rawBase 可注入（本地 HTTP 自测用） */
+  function installMarket(pkg, rawBase){
+    if (!pkg || !pkg.path) return Promise.reject(new Error('包缺少 path'));
+    var pname = String(pkg.name || pkg.id || '未命名包');
+    function E(msg){ return new Error('「' + pname + '」' + msg); }
+    /* 逐段编码 + 路径安全：拒绝空 / 绝对 / .. 段 / 协议 / 反斜杠；中文与空格逐段 encodeURIComponent */
+    function segPath(p){
+      var s = String(p == null ? '' : p);
+      if (!s) throw E('路径为空');
+      if (s.charAt(0) === '/') throw E('不允许绝对路径：' + s);
+      if (s.indexOf('\\') >= 0) throw E('路径含反斜杠：' + s);
+      if (s.indexOf(':') >= 0) throw E('路径含协议/冒号：' + s);
+      var segs = s.split('/');
+      for (var i = 0; i < segs.length; i++)
+        if (!segs[i] || segs[i] === '..' || segs[i] === '.') throw E('路径含空段或 .. / .：' + s);
+      return segs.map(function(x){ return encodeURIComponent(x); }).join('/');
+    }
+    var root = String(pkg.id || pkg.name || 'pkg').replace(/[\\/]/g, '-');
+    var pathPart, base;
+    try { pathPart = segPath(pkg.path); } catch (e){ return Promise.reject(e); }
+    var raw = String(rawBase || '');
+    if (raw.charAt(raw.length - 1) !== '/') raw += '/';
+    base = raw + pathPart + '/';
+    function get(rel){
+      var enc;
+      try { enc = segPath(rel); } catch (e){ return Promise.reject(e); }
+      return NET.raw({ url: base + enc, method: 'GET', timeout: 15000 }).then(function(r){
+        if (!r || r.status < 200 || r.status >= 300) throw E('HTTP ' + (r && r.status) + '：' + rel);
+        var t = String(r.text || '');
+        if (t.length > 512000) throw E('文件过大：' + rel);
+        return t;
+      });
+    }
+    function mk(rel, txt){
+      var b = new Blob([txt], { type: 'text/plain' });
+      b._rel = root + '/' + rel;
+      b.name = rel.split('/').pop();
+      return b;
+    }
+    return get('manifest.json').then(function(mtxt){
+      var man;
+      try { man = JSON.parse(mtxt); } catch(e){ throw E('manifest.json 不是合法 JSON：' + e.message); }
+      /* 用 manifest.name 重算包根：让 importGroup 的 pkg 与 isInstalled(pkg.name) 一致 */
+      root = String((man && (man.name || man.title)) || pkg.name || pkg.id || 'pkg').replace(/[\\/]/g, '-').slice(0, 40);
+      var rels = [];
+      ['skills', 'tools', 'agents', 'prompts'].forEach(function(k){
+        (man[k] || []).forEach(function(it){
+          var f = typeof it === 'string' ? it : (it && (it.file || it.path));
+          if (f && rels.indexOf(f) < 0) rels.push(f);
+        });
+      });
+      if (rels.length > 40) throw E('清单条目过多（' + rels.length + '）');
+      var files = [mk('manifest.json', mtxt)];
+      var chain = Promise.resolve();
+      rels.forEach(function(rel){
+        chain = chain.then(function(){
+          return get(rel).then(function(txt){ files.push(mk(rel, txt)); });
+        });
+      });
+      return chain.then(function(){
+        if (files.length === 1) throw E('清单里没有可导入的条目');
+        return importFiles(files);
+      });
+    });
+  }
   function runTool(name, arg){
     var it = hasTool(name);
     if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
@@ -15305,7 +15467,7 @@ function importFiles(list){
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,
-    importFiles: importFiles, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, describe: describe, addPromptItem: addPromptItem, delPkg: delPkg };
+    importFiles: importFiles, installMarket: installMarket, exportFiles: exportFiles, exportOne: exportOne, exportPrompt: exportPrompt, packText: packText, describe: describe, addPromptItem: addPromptItem, delPkg: delPkg };
 })();
 
 /* v0.4.0c：本轮勾选（「/」面板）—— 把选中的扩展真正接进请求：
