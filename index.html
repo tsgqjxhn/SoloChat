@@ -9639,10 +9639,18 @@ p.appendChild(addBox);
       card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [btn]));
       return card;
     }
+    var mktSeq = 0;
     function renderExtMarket(kind){
+      var seq = ++mktSeq;
       mktExtBox.textContent = '';
       mktExtBox.appendChild(el('div', { class: 'hint', text: '正在读取市场索引…' }));
-      ensureMarket().then(function(){ drawExt(kind); }, function(){ drawExt(kind); });
+      ensureMarket().then(function(){
+        if (seq !== mktSeq || filter !== kind || sub !== 'market') return;
+        drawExt(kind);
+      }, function(){
+        if (seq !== mktSeq || filter !== kind || sub !== 'market') return;
+        drawExt(kind);
+      });
     }
     function afterImport(rep){
       if (S._pRefresh) S._pRefresh();
