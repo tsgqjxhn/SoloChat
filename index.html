@@ -9271,7 +9271,7 @@ var BUILTIN_MARKET = { version: 1, plugins: [{
 }]};
 var marketBox = el('div');
 addBox.appendChild(marketBox);
-addBox.appendChild(mktExtBox);   /* 扩展包市场（origin/Plugin index.json），与运行时卡片并列 */
+addBox.appendChild(mktExtBox);   /* 扩展包市场（origin/ext/plugins index.json），与运行时卡片并列 */
 function renderMarket(){
   marketBox.textContent = '';
   marketBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '插件市场 · 运行时' }));
@@ -9577,9 +9577,9 @@ p.appendChild(addBox);
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
     }
 
-    /* ===== 市场（origin/Plugin 分支 index.json）+ 三子页签调度 ===== */
+    /* ===== 市场（origin/ext/plugins 分支 index.json）+ 三子页签调度 ===== */
     var mktCache = null, mktErr = '', mktOffline = false;
-    var MKT_INDEX = 'https://raw.githubusercontent.com/tsgqjxhn/SoloChat/Plugin/index.json';
+    var MKT_INDEX = 'https://raw.githubusercontent.com/tsgqjxhn/SoloChat/ext/plugins/index.json';
     function ensureMarket(){
       if (mktCache || mktErr) return Promise.resolve();
       var url = window.__SOLOCHAT_MKT_INDEX__ || MKT_INDEX;
@@ -9614,7 +9614,7 @@ p.appendChild(addBox);
       var key = { agents: 'agents', skills: 'skills', tools: 'tools', prompt: 'prompts' }[kind];
       var shown = pkgs.filter(function(p){ return kind === 'plugins' ? true : !!(p.items && p.items[key] > 0); });
       if (!shown.length){ mktExtBox.appendChild(el('div', { class: 'hint', text: '这一类暂无可安装的扩展包。' })); return; }
-      mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '扩展包市场 · origin/Plugin' }));
+      mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '扩展包市场 · origin/ext/plugins' }));
       shown.forEach(function(pkg){ mktExtBox.appendChild(mktCard(pkg, raw)); });
     }
     function mktCard(pkg, raw){
