@@ -1,8 +1,8 @@
 # SoloChat
 
-**v0.4.3 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.4 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
-没有安装器、没有前端构建、没有 npm、没有云端。界面、逻辑、图标、样式全部内联在一个 `index.html` 里；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
+没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
 ![首屏](screenshots/home.png)
 
@@ -11,6 +11,7 @@
 ### 对话与会话
 
 - **Chat / Work / Agent 三种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认。
+- **Chat 富文本**：任务列表、表格列对齐 + 横向滚动、脚注、定义列表、最多 3 层嵌套引用；9 种语言代码高亮（js/ts/py/java/cs/go/rs/sh/sql）。
 - **会话分组**：侧栏「+ 分组」创建一组 Chat/Work 会话，不绑定文件夹；组可设模式、模型、System Prompt、temperature、max_tokens，组内未覆盖的会话动态继承，删除分组保留会话。
 - **发送前调参**：输入区右侧 ⚙ 在第一条消息前也能打开「新会话（发送前）」，设置分组、模式、模型、提示词、温度与输出上限；请求按「会话 > 分组 > 全局」取生效模型。
 - **Chat 选工具自动切 Work**：Chat 本身不执行工具；本轮勾了工具/插件时，发送前显式切到 Work 并提示，避免工具围栏没人执行。
@@ -74,8 +75,9 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,163,648 字节**（v0.4.3，FileVersion 0.4.3.0），单文件，无散落 dll |
-| 主源码 | `index.html` **1,025,562 字节 / 17,356 行**（CSS / JS / SVG 全内联） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,171,840 字节**（v0.4.4，FileVersion 0.4.4.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,033,621 字节 / 17,475 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **13 个文件 / 1,033,693 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **172,099 字节 / 3,242 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
@@ -85,13 +87,15 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 ```
 SoloChat/
-├── index.html                        # 单文件客户端（唯一运行时）
+├── src/                              # 源码：index.template.html + css/svg/js 分段
+├── index.html                        # 构建产物（单文件运行时；不手改）
 ├── host/
 │   ├── Program.cs                    # WebView2 宿主（托盘 / 热键 / 桥 / 文件 / 运行时）
 │   ├── SoloChatHost.csproj           # 单文件发布配置
 │   └── app.ico
 ├── docs/                             # 工程规范、审计、对标、扩展规范、变更记录
-├── tools/verify.mjs                  # 零依赖静态闸门（6 项）
+├── tools/build.mjs                   # src/ → index.html 零依赖内联构建（--check）
+├── tools/verify.mjs                  # 零依赖静态闸门（7 项）
 ├── plugins/                          # 本机运行时市场清单 + Python zip
 ├── dist/SoloChatHost.exe             # 发布产物
 ├── screenshots/                      # README 截图
@@ -103,10 +107,10 @@ SoloChat/
 
 ## 开发与版本
 
-- 主应用仍是单文件：`index.html` ≤ **1,048,576 字节** / ≤ 18,000 行，零外部依赖，ES5 / IIFE。
-- 当前闸门：`node tools/verify.mjs`（内联脚本语法、字节数、行数、重复 id、版本一致、脚本非空）；发布前必须 6/6。
+- 主应用仍是单文件产物：`index.html` ≤ **10,485,760 字节**（1.5 MiB 起预警）/ ≤ 30,000 行，零外部依赖，ES5 / IIFE；源码在 `src/`，用 `node tools/build.mjs` 生成。
+- 当前闸门：`node tools/build.mjs --check` + `node tools/verify.mjs`（语法、字节、行数、重复 id、版本一致、脚本非空、构建新鲜度）；发布前必须 7/7。
 - **版本策略**：每次发布在末位 **+0.01**（例如 0.4.2 → 0.4.3）；**0.1 级版本未经用户允许不得变动**。
-- 每次改完：`verify` → `dotnet build` → 重发布 `dist/SoloChatHost.exe` → **重启 exe**，确认新进程/窗口后再汇报。
+- 每次改完：`build` → `verify` → `dotnet build` → 重发布 `dist/SoloChatHost.exe` → **重启 exe**，确认新进程/窗口后再汇报。
 - 扩展包不受单文件限制；写作与区分规范见 [docs/扩展书写规范.md](docs/扩展书写规范.md)。
 
 ## 安全
@@ -125,3 +129,4 @@ MIT，见 [LICENSE](LICENSE)。
 - [docs/对标记录.md](docs/对标记录.md)
 - [docs/扩展路线图.md](docs/扩展路线图.md)
 - [docs/变更记录.md](docs/变更记录.md)
+- [docs/对标与改进-v0.5.md](docs/对标与改进-v0.5.md)
