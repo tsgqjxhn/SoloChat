@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6df6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E">
+<!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
+<title>SoloChat · AI 对话</title>
+<script><!--@@JS_THEME@@--></script>
+<style><!--@@CSS@@--></style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar" aria-label="会话列表">
+    <div class="sb-rail" id="sb-rail">
+      <button class="rail-btn" data-r="expand" title="展开侧栏" aria-label="展开侧栏"><svg class="ic"><use href="#i-sb"/></svg>
+      <button class="rail-btn" data-r="new" title="新建会话" aria-label="新建会话"><svg class="ic"><use href="#i-edit"/></svg></button>
+      <button class="rail-btn" data-r="search" title="搜索会话" aria-label="搜索会话"><svg class="ic"><use href="#i-search"/></svg></button>
+      <div class="rail-sp"></div>
+      <button class="rail-btn" data-r="settings" title="设置" aria-label="设置"><svg class="ic"><use href="#i-gear"/></svg></button>
+    </div>
+    <div class="sb-top">
+      <div class="brand"><svg class="ic fill" aria-hidden="true"><use href="#i-logo"/></svg><b>SoloChat</b></div>
+      <div class="sb-new-row">
+        <button id="btn-new" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>新建会话</button>
+        <button id="btn-new-group" class="btn btn-ghost" title="新建分组（会话分组）"><svg class="ic"><use href="#i-folder"/></svg></button>
+      </div>
+    </div>
+    <div class="sb-search"><div class="wrap">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="sb-q" type="text" placeholder="搜索会话 (Ctrl+K)" autocomplete="off">
+    </div></div>
+    <div id="session-list" role="listbox"></div>
+    <div class="sb-foot">
+      <button id="btn-settings" class="btn btn-ghost"><svg class="ic"><use href="#i-gear"/></svg>设置</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <button class="icon-btn tb-logo" id="btn-home" title="SoloChat 项目主页（浏览器打开）"><svg class="ic fill"><use href="#i-logo"/></svg></button>
+      <div id="tb-title">SoloChat</div>
+      <div id="tb-c">
+        <div id="tb-mode"><span id="tb-mode-name">Chat</span></div>
+        <select id="sel-model" class="sel-mini" title="切换模型"></select>
+        <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
+        <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
+      </div>
+      <div id="win-ctl">
+        <button class="win-btn" data-win="min" title="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
+        <button class="win-btn" data-win="max" title="最大化 / 还原（双击顶栏空白同效）"><svg class="ic"><use href="#i-max"/></svg></button>
+        <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+
+    <div id="msg-scroll">
+      <div id="dual-view"></div>
+      <div id="msg-list"></div>
+      <div id="empty"></div>
+      <button id="btn-bottom"><svg class="ic"><use href="#i-down"/></svg>回到底部</button>
+    </div>
+
+    <div id="composer">
+      <div id="sub-pop" hidden></div>
+      <div class="inner">
+        <div id="route-hint" hidden></div>
+        <div class="crow">
+          <!-- v1.1.6：附件缩略图放进输入框所在的中间列，默认显示在输入框上方。 -->
+          <div id="chips"></div>
+          <div class="czone cz-l">
+            <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
+            <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
+        <button class="icon-btn pk-btn" data-pk="agent" title="智能体：本轮指定使用哪些"><svg class="ic"><use href="#i-x-agent"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="plugin" title="插件：本轮指定使用哪些"><svg class="ic"><use href="#i-x-plugin"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="skill" title="技能：本轮指定使用哪些"><svg class="ic"><use href="#i-x-skill"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="tool" title="工具：本轮指定使用哪些"><svg class="ic"><use href="#i-x-tool"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="prompt" title="提示词：本轮指定使用哪些"><svg class="ic"><use href="#i-x-prompt"/></svg><span class="pk-badge" hidden></span></button>
+        <button class="icon-btn pk-btn" data-pk="mcp" title="MCP：本轮指定使用哪些"><svg class="ic"><use href="#i-x-mcp"/></svg><span class="pk-badge" hidden></span></button>
+            <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
+          </div>
+          <div class="cwrap">
+            <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
+          </div>
+          <div class="czone cz-r2">
+            <button id="btn-sesscfg" class="icon-btn" title="会话参数（发送前也可调：模型/提示词/温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
+          </div>
+        </div>
+        <div id="cmp-pop" hidden></div>
+      </div>
+    </div>
+  </main>
+
+  <div id="rn-rail" aria-label="右侧面板">
+  <button class="rail-btn" id="btn-panel" title="面板：工作区 / 网页 / 来源（Ctrl+J）"><svg class="ic"><use href="#i-panel"/></svg></button>
+  <button class="rail-btn" data-rn="ws" title="工作区"><svg class="ic"><use href="#i-ws"/></svg></button>
+  <button class="rail-btn" data-rn="view" title="运行 / 预览"><svg class="ic"><use href="#i-play"/></svg></button>
+  <button class="rail-btn" data-rn="out" title="终端输出"><svg class="ic"><use href="#i-term"/></svg></button>
+      <button class="rail-btn" data-rn="src" title="研究来源（本会话）"><svg class="ic"><use href="#i-link"/></svg></button>
+</div>
+<aside id="runner" data-tab="ws" aria-label="工作区 / 网页 / 来源">
+    <div class="rn-resize" id="rn-resize" title="拖动调整宽度（双击复位）"></div>
+    <div class="rn-head">
+      <div class="rn-tabs" id="rn-tabs" role="tablist">
+        <button type="button" class="rn-tab" data-rt="ws" role="tab" title="本会话的沙箱工作区文件">工作区<span class="rn-ws-count" id="rn-ws-count"></span></button>
+        <button type="button" class="rn-tab" data-rt="web" role="tab" title="在侧栏里打开网页（不弹新窗口）">网页</button>
+          <button type="button" class="rn-tab" data-rt="src" role="tab" title="本会话搜到的来源与抓取状态">来源<span class="rn-ws-count" id="rn-src-count"></span></button>
+      </div>
+      <!-- v1.1.19：运行 / 终端不再占顶部分栏，改由文件预览/运行直接进入；
+           kindEl 仍需要节点，隐藏保留以兼容现有渲染代码。 -->
+      <span class="rn-kind" id="rn-kind" hidden></span>
+      <span class="rn-kind" id="rn-status" hidden></span>
+      <span class="sp"></span>
+      <button class="btn btn-ghost rn-mini" id="rn-ws-zip" title="把沙箱工作区打包为 zip 下载（全程内存，不落临时文件）"><svg class="ic"><use href="#i-dl"/></svg>打包 zip</button>
+      <button class="btn btn-ghost rn-mini" id="rn-restart" title="重新运行当前代码块">重启</button>
+      <button class="btn btn-ghost rn-mini" id="rn-clear" title="清空终端">清空</button>
+      <button class="btn btn-ghost rn-mini" id="rn-dl" title="下载当前运行产物"><svg class="ic"><use href="#i-dl"/></svg>下载</button>
+      <button class="icon-btn" id="rn-refresh" title="刷新当前面板"><svg class="ic"><use href="#i-retry"/></svg></button>
+      <button class="icon-btn" id="rn-max" title="最大化 / 还原面板"><svg class="ic"><use href="#i-max"/></svg></button>
+      <button class="icon-btn" id="rn-close" title="关闭面板"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="rn-body">
+      <div class="rn-pane" id="pane-ws">
+        <div id="rn-ws-list"></div>
+        <div id="rn-ws-view" hidden></div>
+      </div>
+      <div class="rn-pane rn-view" id="pane-view">
+        <div class="rn-pvbar" id="rn-pvbar" hidden>
+          <button class="icon-btn rn-mini" id="pv-back" title="后退"><svg class="ic"><use href="#i-chev-l"/></svg></button>
+          <button class="icon-btn rn-mini" id="pv-fwd" title="前进"><svg class="ic"><use href="#i-chev-r"/></svg></button>
+          <span class="rn-pvpath" id="pv-path" title=""></span>
+          <button class="btn btn-ghost rn-mini" id="pv-reload" title="重新加载预览">刷新</button>
+          <button class="icon-btn rn-mini" id="pv-close" title="关闭预览"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
+        <iframe id="rn-frame" sandbox="allow-scripts" title="沙箱预览"></iframe>
+        <pre class="rn-src" id="rn-src" hidden></pre>
+        <div class="rn-empty" id="rn-empty">点代码块右上角的 ▶ 在这里运行；Work 产物可在「工作区」里预览或运行</div>
+      </div>
+      <div class="rn-pane" id="pane-web">
+        <div class="rn-pvbar">
+          <input id="web-url" class="rn-inp" placeholder="输入网址后回车" spellcheck="false">
+          <button class="btn btn-ghost rn-mini" id="web-go">打开</button>
+          <button class="btn btn-ghost rn-mini" id="web-txt" title="网站禁止被嵌入时，抓正文在侧栏渲染（脚本不执行）">文本</button>
+          <button class="icon-btn rn-mini" id="web-pop" title="在右侧侧栏重新打开（不再弹独立窗口）"><svg class="ic"><use href="#i-link"/></svg></button>
+        </div>
+        <iframe id="web-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" title="侧栏网页"></iframe>
+      </div>
+      <div class="rn-pane" id="pane-src">
+        <div id="rn-src-list"></div>
+      </div>
+      <div class="rn-pane" id="pane-out">
+        <div id="rn-out"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div id="modal" role="dialog" aria-modal="true"><div class="scrim"></div><div class="panel" id="modal-panel"></div></div>
+<div id="toast-root" aria-live="polite"></div>
+<input type="file" id="file-input" accept="image/*,.txt,.md,.markdown,.json,.html,.htm,.css,.js,.py,.java,.c,.cpp,.h,.cs,.xml,.yml,.yaml,.csv,.log,.ini,.toml,.sql,.sh,.bat,.docx,.xlsx,.pptx,.pdf,.rtf" multiple hidden>
+
+<!-- SVG sprite：43 个内联图标（路径已压缩） -->
+<svg style="display:none"><!--@@SVG_SYMBOLS@@--></svg>
+
+<script><!--@@JS_APP@@--></script>
+</body>
+</html>

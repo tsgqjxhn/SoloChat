@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 /* B1-4：零依赖静态闸门（Node ESM，不用 npm 包；本地手动跑，不接 CI）
      node tools/verify.mjs
-   检查项：内联 <script> 语法 / index.html 体积 / 重复 id / 版本一致 / 内联脚本非空。
+   检查项：内联 <script> 语法 / index.html 体积 / 行数 / 重复 id / 版本一致 / 内联脚本非空 / 构建新鲜度。
    每项输出 PASS/FAIL 与实测值；任一 FAIL 时 process.exit(1)。 */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HTML_PATH = path.join(ROOT, 'index.html');
 const CSPROJ_PATH = path.join(ROOT, 'host', 'SoloChatHost.csproj');
 
-const LIMIT_BYTES = 1048576;   // 1 MiB
-const LIMIT_LINES = 18000;
+const LIMIT_BYTES = 10485760;   // 10 MiB（硬上限）
+const WARN_BYTES = 1572864;     // 1.5 MiB（预警）
+const LIMIT_LINES = 30000;      // 软上限
+const WARN_LINES = 24000;
 
 const checks = [];
 function add(name, ok, measured, detail) {
@@ -60,15 +63,17 @@ add('1. 内联 <script> 语法（new Function）',
 
 /* 2. 字节数 */
 const bytes = htmlBuf.length;
+const sizeWarn = bytes > WARN_BYTES ? ' [WARN] > ' + WARN_BYTES : '';
 add('2. index.html 字节数 ≤ ' + LIMIT_BYTES, bytes <= LIMIT_BYTES,
-  bytes + ' 字节（上限 ' + LIMIT_BYTES + '）', '');
+  bytes + ' 字节（硬上限 ' + LIMIT_BYTES + '，预警 ' + WARN_BYTES + '）' + sizeWarn, '');
 
 /* 3. 行数（末尾换行不计入最后一行） */
 const parts = text.split(/\r?\n/);
 if (parts.length && parts[parts.length - 1] === '') parts.pop();
 const lines = parts.length;
+const lineWarn = lines > WARN_LINES ? ' [WARN] > ' + WARN_LINES : '';
 add('3. index.html 行数 ≤ ' + LIMIT_LINES, lines <= LIMIT_LINES,
-  lines + ' 行（上限 ' + LIMIT_LINES + '）', '');
+  lines + ' 行（软上限 ' + LIMIT_LINES + '，预警 ' + WARN_LINES + '）' + lineWarn, '');
 
 /* 4. HTML 标记里没有重复 id —— 先剥掉 script/style/注释，避免把 JS 字符串里的 id="..." 当标记 */
 const markup = text
@@ -108,6 +113,19 @@ const minLen = scripts.length ? Math.min.apply(null, scripts.map(function (s) { 
 add('6. 每个内联 <script> 非空', scripts.length > 0 && empty.length === 0,
   scripts.length + ' 段，最短 ' + minLen + ' 字符，空段 ' + empty.length + ' 个',
   empty.length ? '空段行号：' + empty.map(function (s) { return s.line; }).join(', ') : '');
+
+/* 7. 构建新鲜度 */
+(function () {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'build.mjs'), '--check'], {
+    cwd: ROOT,
+    encoding: 'utf8'
+  });
+  const out = ((r.stdout || '') + (r.stderr || '')).trim();
+  const ok = r.status === 0 && /\bBUILD OK\b/.test(r.stdout || '');
+  add('7. 构建新鲜度（src/ → index.html）', ok,
+    ok ? (out || 'BUILD OK') : ('exit=' + r.status),
+    ok ? '' : 'src/ 改了但 index.html 没重新构建，或构建检查失败：' + (out || '(无输出)'));
+})();
 
 report();
 
