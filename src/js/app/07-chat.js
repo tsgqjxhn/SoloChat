@@ -332,7 +332,7 @@ function sendMessage(){
       compactCtx(cs0, S.msgs.slice(), function(ok){ S.compacting = false; UI.toast(ok ? '已压缩（不再发送历史全文）' : '压缩失败，保持原样', !ok); });
       return;
     }
-    if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型'); return; }
+    if (cmd === '/help'){ $input.value = ''; $input.style.height = ''; UI.autosize(); UI.toast('/clear 新建对话 · /compact 压缩当前上下文 · /model <id> 切换模型 · /rewind 撤销编辑重发'); return; }
     if (cmd === '/limits'){ /* v0.3.87：看自主执行的边界（对标 AutoGPT 的运行上限） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _l7 = [];
@@ -343,6 +343,10 @@ function sendMessage(){
       if (!_l7.length){ UI.toast('读不到限制常量', true); return; }
       UI.toast('自主执行边界：' + _l7.join(' · '));
       return;
+    }
+    if (cmd === '/rewind'){ /* C6：撤销编辑重发造成的截断（2 分钟内） */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      doRewind(); return;
     }
     if (cmd === '/undo'){ /* v0.3.86：撤销最近一次写入（对标 Aider 的 /undo） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
@@ -1175,21 +1179,58 @@ function sendMessage(){
     var text = ta.value.trim();
     if (!text) return;
     var m = S.msgs[i];
+    var _oldText = m.content;
     m.content = text.slice(0, LIMITS.MSG_TEXT);
     m.tokens = tokEst(m.content);
     DB.putMessage(m);
-    truncateAfter(i);
+    truncateAfter(i, _oldText);
     renderMsgs();
     touchSession(text);
     textsForMsg(m).then(function(t){ startStream(null, t); });
   }
-  /* 截断：删 index 之后全部消息，index 保留 */
-  function truncateAfter(idx){
-    var removed = S.msgs.splice(idx + 1);
-    removed.forEach(function(m){
+  /* 截断：删 index 之后全部消息，index 保留；被截断的进 2 分钟撤销槽（/rewind） */
+  var _rewind = null, _rewindTimer = 0;
+  function finalizeRewind(){
+    if (!_rewind) return;
+    var r = _rewind; _rewind = null;
+    try { clearTimeout(_rewindTimer); } catch (e) {}
+    r.items.forEach(function(m){
       DB.delMessage(m.id);
       if (m.attachments && m.attachments.length) DB.delAttachments(m.attachments);
     });
+  }
+  function truncateAfter(idx, oldText){
+    finalizeRewind();
+    var removed = S.msgs.splice(idx + 1);
+    var sid = S.sid || 'draft';
+    removed.forEach(function(m){
+      m._sid0 = m.sid || sid;
+      m.sid = m._sid0 + '#u'; // 软删除：不随会话加载，撤销时还原
+      DB.putMessage(m);
+    });
+    if (removed.length){
+      _rewind = { sid: sid, idx: idx, items: removed, oldText: oldText, at: Date.now() };
+      _rewindTimer = setTimeout(finalizeRewind, 120000);
+      toast('已截断后续 ' + removed.length + ' 条，2 分钟内可 /rewind 恢复');
+    }
+  }
+  function doRewind(){
+    if (!_rewind || _rewind.sid !== (S.sid || 'draft')){ UI.toast('没有可恢复的截断（只有编辑重发后的 2 分钟内可恢复）', true); return; }
+    var r = _rewind; _rewind = null;
+    try { clearTimeout(_rewindTimer); } catch (e) {}
+    var tail = S.msgs.splice(r.idx + 1);
+    tail.forEach(function(m){
+      DB.delMessage(m.id);
+      if (m.attachments && m.attachments.length) DB.delAttachments(m.attachments);
+    });
+    var head = S.msgs[r.idx];
+    if (head && r.oldText != null){ head.content = r.oldText; head.tokens = tokEst(head.content); DB.putMessage(head); }
+    r.items.forEach(function(m){
+      m.sid = m._sid0 || r.sid; delete m._sid0;
+      DB.putMessage(m); S.msgs.push(m);
+    });
+    renderMsgs(); touchSession();
+    UI.toast('已恢复 ' + r.items.length + ' 条消息');
   }
   function deleteMsg(id){
   if (S.sending){ UI.toast('回复生成中，先停止再删除', true); return; } // v0.3.5：否则收尾时会把消息写回库
