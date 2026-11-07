@@ -827,6 +827,31 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
 ::-webkit-scrollbar-track{background:transparent}
 
+/* P1：Chat 富文本补全（任务列表/表格/脚注/定义列表/代码高亮） */
+.md .md-task{list-style:none;margin-left:-1.2em}
+.md .md-task input[type="checkbox"]{vertical-align:baseline;margin-right:.35em;position:relative;top:1px}
+.md .md-task.done{color:var(--faint);text-decoration:line-through}
+.md .tb-wrap{overflow-x:auto;margin:10px 0}
+.md .tb-wrap>table{min-width:max-content;margin:0;width:auto}
+.md th.ta-c,.md td.ta-c{text-align:center}
+.md th.ta-r,.md td.ta-r{text-align:right}
+.md .fnref{font-size:11px;vertical-align:super;line-height:0}
+.md .fnref a{color:var(--primary);text-decoration:none}
+.md .fn-list{margin-top:14px;padding-top:8px;border-top:1px solid var(--hairline-soft);font-size:12px;color:var(--muted)}
+.md .fn-list ol{margin:4px 0 0 20px}
+.md .fn-list li{margin:2px 0}
+.md dl{margin:7px 0}
+.md dt{font-weight:600;color:var(--ink);margin-top:6px}
+.md dd{margin:1px 0 4px 1.2em}
+.md pre code .hl-k{color:#c678dd}
+.md pre code .hl-s{color:#98c379}
+.md pre code .hl-c{color:#7f848e;font-style:italic}
+.md pre code .hl-n{color:#d19a66}
+:root[data-theme="light"] .md pre code .hl-k{color:#d7a1f7}
+:root[data-theme="light"] .md pre code .hl-s{color:#b5e890}
+:root[data-theme="light"] .md pre code .hl-c{color:#9aa0ab;font-style:italic}
+:root[data-theme="light"] .md pre code .hl-n{color:#e5b07b}
+
 /* ================= v3.0 集中样式（30 项改进） ================= */
 /* #7 字号档 + 强调色（只覆盖 token，不新增尺寸） */
 :root{--fs-scale:1}
