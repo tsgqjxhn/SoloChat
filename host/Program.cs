@@ -118,6 +118,7 @@ namespace SoloChatHost
         WebView2 webPanel;   // v0.9.8：右侧栏内嵌浏览器（独立控件，不受 X-Frame-Options 限制）
         string webPendingUrl = ""; // v1.1.8：初始化期间的最近一次 URL，避免开第二个网页被第一个覆盖
         bool webPanelWanted;       // v1.1.8：页面是否仍要求显示（hide 后迟到的初始化不能再把它弹出来）
+        Rectangle webPanelRect;    // v1.29：记住最后一次布局，read/act 需要重新显示时恢复位置
         CoreWebView2Environment env; // v0.2.3：播放窗口复用同一环境（共享 cookie/登录态）
         QuickBarForm quickBar;
         NotifyIcon tray;
@@ -841,6 +842,24 @@ namespace SoloChatHost
                         }
                     }));
                 }
+                else if (wop == "read") /* v1.29：读当前应用内浏览器页面 → {title,url,text,links} */
+                {
+                    string rUrl = root.TryGetProperty("url", out JsonElement rUrlEl) ? rUrlEl.GetString() : "";
+                    var selfR = this;
+                    BeginInvoke((Action)(async () => { await selfR.WebPanelReadAsync(id, rUrl); }));
+                }
+                else if (wop == "act") /* v1.29：操作当前应用内浏览器页面（click/type/scroll/wait/back/forward） */
+                {
+                    string aOp = root.TryGetProperty("op2", out JsonElement aOpEl) ? aOpEl.GetString() : "";
+                    string aSel = root.TryGetProperty("selector", out JsonElement aSelEl) ? aSelEl.GetString() : "";
+                    string aText = root.TryGetProperty("text", out JsonElement aTextEl) ? aTextEl.GetString() : "";
+                    int aDy = 0;
+                    if (root.TryGetProperty("dy", out JsonElement aDyEl) && aDyEl.ValueKind == JsonValueKind.Number) aDy = aDyEl.GetInt32();
+                    int aMs = 0;
+                    if (root.TryGetProperty("ms", out JsonElement aMsEl) && aMsEl.ValueKind == JsonValueKind.Number) aMs = aMsEl.GetInt32();
+                    var selfA = this;
+                    BeginInvoke((Action)(async () => { await selfA.WebPanelActAsync(id, aOp, aSel, aText, aDy, aMs); }));
+                }
                 else
                 {
                     string wurl = root.TryGetProperty("url", out JsonElement wuEl) ? wuEl.GetString() : "";
@@ -1042,8 +1061,9 @@ namespace SoloChatHost
                     });
                 }
                 float sc = DeviceDpi / 96f;
-                webPanel.Bounds = new Rectangle((int)(x * sc), (int)(y * sc),
+                webPanelRect = new Rectangle((int)(x * sc), (int)(y * sc),
                     Math.Max(80, (int)(w * sc)), Math.Max(80, (int)(h * sc)));
+                webPanel.Bounds = webPanelRect;
                 if (webPanelWanted)
                 {
                     webPanel.Visible = true;
@@ -1058,6 +1078,268 @@ namespace SoloChatHost
                 }
             }
             catch (Exception ex) { Log("webpanel: " + ex.Message); }
+        }
+
+        /* v1.29：P4「看页面」—— 宿主侧读 DOM / 操作页面。
+           read：注入只读脚本，回 {title,url,text,links}；text 截 20000、links 前 100（文字截 80）。
+           act：click/type/scroll/wait/back/forward；全部走 webview.done / webview.error 回页面。
+           只处理主文档；跨域 iframe 不读，只在结果里带 frames 数量。 */
+        static string JsLit(string s) { return JsonSerializer.Serialize(s ?? ""); }
+
+        /* ExecuteScriptAsync 返回的是 JSON 字符串字面量（再包一层），这里剥掉外层。 */
+        static string UnwrapJs(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+            try
+            {
+                var t = JsonSerializer.Deserialize<string>(raw);
+                if (t != null) return t;
+            }
+            catch { }
+            return raw;
+        }
+
+        void EnsureWebPanelVisible()
+        {
+            try
+            {
+                if (webPanel == null) return;
+                webPanelWanted = true;
+                if (!webPanel.Visible)
+                {
+                    if (webPanelRect.Width >= 80 && webPanelRect.Height >= 80)
+                        webPanel.Bounds = webPanelRect;
+                    webPanel.Visible = true;
+                }
+                webPanel.BringToFront();
+            }
+            catch { }
+        }
+
+        async Task<string> WebPanelStatusJson(CoreWebView2 ctl)
+        {
+            try
+            {
+                var raw = await ctl.ExecuteScriptAsync(
+                    "JSON.stringify({ok:true,url:location.href,title:document.title})");
+                var d = UnwrapJs(raw);
+                return string.IsNullOrEmpty(d) ? "{\"ok\":true}" : d;
+            }
+            catch { return "{\"ok\":true}"; }
+        }
+
+        async Task<bool> WaitForNavigation(CoreWebView2 ctl, string url)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            bool started = false;
+            EventHandler<CoreWebView2NavigationStartingEventArgs> onStart = (s, e) => { started = true; };
+            EventHandler<CoreWebView2NavigationCompletedEventArgs> onDone = (s, e) =>
+            {
+                if (started) tcs.TrySetResult(e.IsSuccess);
+            };
+            ctl.NavigationStarting += onStart;
+            ctl.NavigationCompleted += onDone;
+            try { ctl.Navigate(url); }
+            catch
+            {
+                ctl.NavigationStarting -= onStart;
+                ctl.NavigationCompleted -= onDone;
+                throw;
+            }
+            var fin = await Task.WhenAny(tcs.Task, Task.Delay(15000));
+            ctl.NavigationStarting -= onStart;
+            ctl.NavigationCompleted -= onDone;
+            if (fin != tcs.Task) return false;   // 15s 超时
+            if (!tcs.Task.Result) return false;  // 导航失败
+            await Task.Delay(350);               // 给页面脚本一点渲染时间
+            return true;
+        }
+
+        async Task WebPanelReadAsync(string id, string url)
+        {
+            id = id ?? ("wvr" + Environment.TickCount);
+            try
+            {
+                if (webPanel == null || webPanel.CoreWebView2 == null)
+                {
+                    Post(id, "webview.error", null, "浏览器未打开，请先用 ```browser <url> 打开页面", 0);
+                    return;
+                }
+                var ctl = webPanel.CoreWebView2;
+                EnsureWebPanelVisible();
+
+                if (!string.IsNullOrEmpty(url))
+                {
+                    if (!Uri.TryCreate(url, UriKind.Absolute, out Uri u) ||
+                        (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps))
+                    {
+                        Post(id, "webview.error", null, "地址无效（需 http/https 绝对地址）：" + url, 0);
+                        return;
+                    }
+                    bool ok;
+                    try { ok = await WaitForNavigation(ctl, url); }
+                    catch (Exception ex)
+                    {
+                        Post(id, "webview.error", null, "导航失败：" + ex.Message, 0);
+                        return;
+                    }
+                    if (!ok)
+                    {
+                        Post(id, "webview.error", null, "导航超时或失败（15s）：" + url, 0);
+                        return;
+                    }
+                }
+
+                const string script =
+                    "(function(){try{" +
+                    "var links=[],seen={},as=document.querySelectorAll('a[href^=\"http\"]');" +
+                    "for(var i=0;i<as.length&&links.length<100;i++){" +
+                    "var a=as[i],h=a.href||'';if(!h||seen[h])continue;seen[h]=1;" +
+                    "var t=(a.innerText||a.textContent||'').replace(/\\s+/g,' ').trim().slice(0,80);" +
+                    "links.push({t:t,u:h});" +
+                    "}" +
+                    "var b=document.body,txt=b?(b.innerText||''):'';" +
+                    "txt=txt.replace(/\\r/g,'').replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim();" +
+                    "if(txt.length>20000)txt=txt.slice(0,20000);" +
+                    "return JSON.stringify({title:document.title||'',url:location.href,text:txt,links:links," +
+                    "frames:document.querySelectorAll('iframe').length});" +
+                    "}catch(e){return JSON.stringify({error:String((e&&e.message)||e)});}})()";
+
+                var raw = await ctl.ExecuteScriptAsync(script);
+                var data = UnwrapJs(raw);
+                if (string.IsNullOrEmpty(data))
+                {
+                    Post(id, "webview.error", null, "页面没有返回内容（可能还在加载）", 0);
+                    return;
+                }
+                Post(id, "webview.done", data, null, 200);
+            }
+            catch (Exception ex)
+            {
+                Post(id, "webview.error", null, "读取失败：" + ex.Message, 0);
+            }
+        }
+
+        async Task WebPanelActAsync(string id, string op2, string selector, string text, int dy, int ms)
+        {
+            id = id ?? ("wva" + Environment.TickCount);
+            try
+            {
+                if (webPanel == null || webPanel.CoreWebView2 == null)
+                {
+                    Post(id, "webview.error", null, "浏览器未打开，请先用 ```browser <url> 打开页面", 0);
+                    return;
+                }
+                var ctl = webPanel.CoreWebView2;
+                EnsureWebPanelVisible();
+                string selLit = JsLit(selector ?? "");
+                string txtLit = JsLit(text ?? "");
+
+                if (op2 == "wait")
+                {
+                    if (ms > 0)
+                    {
+                        await Task.Delay(Math.Min(ms, 15000));
+                        Post(id, "webview.done", await WebPanelStatusJson(ctl), null, 200);
+                        return;
+                    }
+                    if (string.IsNullOrEmpty(selector))
+                    {
+                        Post(id, "webview.done", "{\"ok\":false,\"err\":\"wait 需要选择器或毫秒\"}", null, 200);
+                        return;
+                    }
+                    var deadline = DateTime.UtcNow.AddSeconds(15);
+                    bool found = false;
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        var hit = UnwrapJs(await ctl.ExecuteScriptAsync("!!document.querySelector(" + selLit + ")"));
+                        if (string.Equals(hit, "true", StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                        await Task.Delay(200);
+                    }
+                    if (!found)
+                    {
+                        Post(id, "webview.done", "{\"ok\":false,\"err\":\"等待超时：selector not found\"}", null, 200);
+                        return;
+                    }
+                    Post(id, "webview.done", await WebPanelStatusJson(ctl), null, 200);
+                    return;
+                }
+
+                if (op2 == "back" || op2 == "forward")
+                {
+                    if (op2 == "back")
+                    {
+                        if (!ctl.CanGoBack)
+                        {
+                            Post(id, "webview.done", "{\"ok\":false,\"err\":\"没有可后退的历史记录\"}", null, 200);
+                            return;
+                        }
+                        ctl.GoBack();
+                    }
+                    else
+                    {
+                        if (!ctl.CanGoForward)
+                        {
+                            Post(id, "webview.done", "{\"ok\":false,\"err\":\"没有可前进的历史记录\"}", null, 200);
+                            return;
+                        }
+                        ctl.GoForward();
+                    }
+                    await Task.Delay(500);
+                    Post(id, "webview.done", await WebPanelStatusJson(ctl), null, 200);
+                    return;
+                }
+
+                string script;
+                if (op2 == "click")
+                {
+                    if (string.IsNullOrEmpty(selector))
+                    {
+                        Post(id, "webview.done", "{\"ok\":false,\"err\":\"selector not found\"}", null, 200);
+                        return;
+                    }
+                    script =
+                        "(function(){var el=document.querySelector(" + selLit + ");" +
+                        "if(!el)return JSON.stringify({ok:false,err:'selector not found'});" +
+                        "try{el.click();}catch(e){return JSON.stringify({ok:false,err:String((e&&e.message)||e)});}" +
+                        "return JSON.stringify({ok:true,url:location.href,title:document.title});})()";
+                }
+                else if (op2 == "type")
+                {
+                    if (string.IsNullOrEmpty(selector))
+                    {
+                        Post(id, "webview.done", "{\"ok\":false,\"err\":\"selector not found\"}", null, 200);
+                        return;
+                    }
+                    script =
+                        "(function(){var el=document.querySelector(" + selLit + ");" +
+                        "if(!el)return JSON.stringify({ok:false,err:'selector not found'});" +
+                        "try{el.focus();el.value=" + txtLit + ";" +
+                        "el.dispatchEvent(new Event('input',{bubbles:true}));}" +
+                        "catch(e){return JSON.stringify({ok:false,err:String((e&&e.message)||e)});}" +
+                        "return JSON.stringify({ok:true,url:location.href,title:document.title});})()";
+                }
+                else if (op2 == "scroll")
+                {
+                    script =
+                        "(function(){window.scrollBy(0," + dy + ");" +
+                        "return JSON.stringify({ok:true,url:location.href,title:document.title});})()";
+                }
+                else
+                {
+                    Post(id, "webview.done", "{\"ok\":false,\"err\":\"不认识的动作：" + op2 + "\"}", null, 200);
+                    return;
+                }
+
+                var data = UnwrapJs(await ctl.ExecuteScriptAsync(script));
+                if (string.IsNullOrEmpty(data)) data = "{\"ok\":true}";
+                if (op2 == "click" || op2 == "type") await Task.Delay(250);  // 让页面脚本先跑一轮
+                Post(id, "webview.done", data, null, 200);
+            }
+            catch (Exception ex)
+            {
+                Post(id, "webview.error", null, "操作失败：" + ex.Message, 0);
+            }
         }
 
         async Task<string> GetWebCookies(string url)

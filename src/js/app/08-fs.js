@@ -23,7 +23,7 @@ var FS = (function(){
     '失败处理：读 [fs-result] 的错误原因（路径错/匹配不到/权限），修正参数重试一次；同一错误两次不成就停下说明卡点。\n' +
     '输出格式（三段写完就停）：① 改动清单（文件:行/函数）② 验证方式与结果 ③ 未验证项与风险。不要整篇重贴文件内容，只贴改动片段。';
 function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|python|sub|agent|suball|browser|web|crawl|time|calc|json|http|search|get)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|python|sub|agent|suball|browser-read|browser-act|browser|web|crawl|time|calc|json|http|search|get)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -261,6 +261,31 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (!bo2) bo2 = NET.openExternal(bu2, 'window'); // v0.3.88：优先侧栏，失败再开窗口
       parts.push('[browser] ' + (bo2 ? '已在应用内窗口打开：' : '打开失败：') + bu2);
       next(); return;
+    }
+    /* v1.29（P4）：Agent 模式也能读/操作应用内浏览器（逻辑复用 09-pick.js 的 BROWSER_TOOL） */
+    if (c.op === 'browser-read' || c.op === 'browser-act'){
+      if (typeof BROWSER_TOOL === 'undefined'){
+        parts.push('[' + c.op + '] 浏览器工具组件未加载（请重启应用）'); next(); return;
+      }
+      var _bArg = String(c.path || '').trim();
+      if (c.op === 'browser-read'){
+        if (_bArg){
+          var _bU2 = NET.safeUrl(_bArg);
+          if (!_bU2){ parts.push('[browser-read] 地址无效（需 http/https 绝对地址）：' + _bArg); next(); return; }
+          _bArg = _bU2;
+        }
+        BROWSER_TOOL.read(_bArg).then(function(d){
+          if (d.error) parts.push('[browser-read] 失败：' + d.error);
+          else parts.push(BROWSER_TOOL.fmtRead(d));
+        }, function(e){ parts.push('[browser-read] ' + ((e && e.message) || e)); }).then(next);
+        return;
+      }
+      var _bAct = BROWSER_TOOL.parseAct(c.path, c.body);
+      if (_bAct.err){ parts.push('[browser-act] 参数错误：' + _bAct.err); next(); return; }
+      BROWSER_TOOL.call('act', _bAct).then(function(d){
+        parts.push(BROWSER_TOOL.fmtAct(d));
+      }, function(e){ parts.push('[browser-act] 失败：' + ((e && e.message) || e)); }).then(next);
+      return;
     }
     if (c.op === 'time' || c.op === 'calc' || c.op === 'json' || c.op === 'http'){
       NET.simpleOp(c.op, c.arg, c.body).then(
@@ -546,6 +571,8 @@ var EXT = (function(){
     { id: 'search',     kind: 'tool', title: '联网搜索',   brief: '关键词 → 标题/链接/摘要', modes: ['work','agent'] },
     { id: 'get',        kind: 'tool', title: '抓文件',     brief: 'URL → 落盘（图片/PDF/Office/音视频），文档抽正文', modes: ['work','agent'] },
   { id: 'browser',    kind: 'tool', title: '内置浏览器', brief: 'URL → 应用内窗口（带 cookie/登录态）', modes: ['work','agent'] },
+    { id: 'browser-read', kind: 'tool', title: '读网页', brief: 'URL/当前页 → 标题+正文+链接', modes: ['work','agent'] },
+    { id: 'browser-act',  kind: 'tool', title: '操作网页', brief: 'click/type/scroll/wait/back', modes: ['work','agent'] },
     { id: 'download',   kind: 'tool', title: '下载视频',   brief: 'B 站/直链 → mp4，HLS 自动拼接', modes: ['work'] },
     { id: 'play',       kind: 'tool', title: '应用内播放', brief: 'URL → 悬浮播放窗口', modes: ['work'] },
     { id: 'run',        kind: 'tool', title: '沙箱运行',   brief: 'html/js/css → 控制台输出', modes: ['work'] },
@@ -727,6 +754,8 @@ var SPECS = {
   get: { form: 'get <url>', arg: '文件直链（http/https）', ret: '[get] 已保存：路径（大小，类型）', note: '图片/PDF/Office/压缩包/音视频都能落盘；文档顺手抽正文（前 4000 字）。', limit: '图片会以 data URL 附进结果供模型看图；网页版没有宿主桥时不可用。' },
   download: { form: 'download <视频页 URL 或 BV 号>', arg: 'B 站页面地址，或 BV 号（如 BV1xx411x7xx）', ret: '[download] 已保存：mp4 路径（大小，清晰度）', note: '宿主侧下载并自动拼 HLS 分片。', limit: '仅 Work 模式；需要宿主 exe，网页版没有这个能力。' },
   browser: { form: 'browser <url>', arg: '一个 http/https 绝对地址', ret: '[browser] 已在应用内窗口打开：url', note: '开一个应用内浏览器窗口（同一 WebView2，带 cookie 与登录态），用来看网页、榜单、需要登录的页面。', limit: '仅 Work / Agent；窗口由宿主 exe 打开，纯网页版退化为新标签页。地址必须是绝对 URL。' },
+  'browser-read': { form: 'browser-read <url>' + '\n' + '（url 可空 = 读当前页面）', arg: '可空；空则读应用内浏览器当前页', ret: '[browser-read] 标题 / URL + 正文 + 链接列表', note: '读渲染后的真实页面（JS 页面、加载更多之后都能读）：正文截 12000 字，链接前 40 条。', limit: '仅 Work / Agent；需先用 browser 打开页面；只读主文档，跨域 iframe 跳过；导航/读取 15s 超时；纯网页版无此能力。' },
+  'browser-act': { form: 'browser-act click <选择器>' + '\n' + 'browser-act type <选择器> | <文本>' + '\n' + 'browser-act scroll <像素>' + '\n' + 'browser-act wait <选择器|毫秒>' + '\n' + 'browser-act back|forward', arg: '动作名 + 选择器/文本/像素', ret: '[browser-act] ok / url / title（失败带原因）', note: '在应用内浏览器里点按钮、填输入框、滚动加载更多、等待元素出现或后退/前进。', limit: '仅 Work / Agent；选择器不存在返回 selector not found；wait 最多等 15s；type 会覆盖原有值并触发 input 事件。' },
   play: { form: 'play <url>', arg: 'http/https 地址', ret: '[play] 已在播放窗口打开：url', note: '在顶层播放窗口打开，带 Referer 与登录态。', limit: '仅 Work 模式；地址必须是绝对 URL。' },
   run: { form: 'run <html|svg|js|css|c>' + '\n' + '（紧跟代码体）', arg: '第一行写类型，剩下是源码', ret: '[run-result] 类型 成功/失败（Nms）+ 控制台输出', note: '在沙箱 iframe / 脚本引擎里真跑一遍，拿真实输出，别在正文里手算。', limit: '支持 html/svg/js/css/c；同型错误连续多次会先自愈重试一次，仍失败就停下。' },
   preview: { form: 'preview <工作区相对路径>', arg: '如 index.html（不许 ..）', ret: '[preview] 已在运行面板打开：路径', note: '右侧运行面板的内置浏览器直接看产物。', limit: '仅 Work 模式；文件必须已在会话工作区里（先 vfs-write）。' },

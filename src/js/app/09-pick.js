@@ -65,7 +65,8 @@ var MODE = (function(){
     '只有当任务能拆成互不依赖的几块（≥2 处并行检索或修改）时才用 ```agent plan|build|verify 派出去，' +
     '拿到摘要自己合并、落盘、验证；小改动自己做完，别为派而派。' +
     '收尾必须给交付总结：改了哪些文件、关键改动、怎么验证、风险/未验证项。\n' + DELIVER_TEMPLATE +
-  '要看真实网页就 \u0060\u0060\u0060browser <url> 开应用内窗口，别派子智能体去「访问」网址。';
+  '要看真实网页就 \u0060\u0060\u0060browser <url> 开应用内窗口，别派子智能体去「访问」网址；' +
+  '要看渲染后的页面内容用 \u0060\u0060\u0060browser-read，要翻页/点「加载更多」用 \u0060\u0060\u0060browser-act（click/type/scroll/wait/back）。';
   /* v1.14：Work = 画布 + 沙箱脚本合并。v1.1.25：正文必须有过程说明 + 交付总结，不再只给缩略工具卡 */
   var AGENT_W_P = '直接落地：先读要改的文件，然后用最小 diff 改完；改前用 1 句说明改哪个文件、为什么，改后给交付总结：' +
     '改动文件、关键 diff、验证方式、风险。不需要先出长计划。';
@@ -82,7 +83,9 @@ var WORK_P = '工作区模式（Work）：你的产物就是文件。\n' +
     '生成了哪些文件（路径 + 用途）；怎么打开/验证；已知限制或未验证项。不要只写「已完成」或「文件已生成」。\n' +
     '5) 代码/长文放工具卡，正文不贴整段代码；但解释、判断、总结必须写在正文。\n' +
     '6) 只有用户明确说「贴出来看看」时才在正文里展开代码。\n' +
-    '7) 要看网页（榜单、文档、需要登录的页面）用 ```browser <url> 开应用内浏览器窗口；只要文字内容用 ```web。\n' +
+    '7) 要看网页（榜单、文档、需要登录的页面）用 ```browser <url> 开应用内浏览器窗口；只要静态文字内容用 ```web。\n' +
+    '   要读 JS 渲染后的页面（Steam 合集、无限滚动、加载更多）用 ```browser-read（可带 URL；不带就读当前页），' +
+    '先读→```browser-act click #more / scroll 1200 / wait #list .item→再读一次；操作完必须再读，别凭猜测写结论。\n' +
     DELIVER_TEMPLATE;
   /* v1.28.1：Chat 没有工具，模型常自己编围栏和「已派出去」的话 —— 直接写死 */
 var CHAT_NO_TOOLS_P = '本轮是纯对话，没有任何工具：不能读写文件、不能联网、不能派子智能体、不能打开内置浏览器。\n'
@@ -870,6 +873,119 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
            stageFiles: stageFiles, scanChild: scanChild, aclOf: aclOf, ROLES: ROLES, MAX_DEPTH: MAX_DEPTH, covered: covered, mode: am };
 })();
 
+/* v1.29（P4）：应用内浏览器「看页面」能力 —— 页面侧只负责解析参数/格式化结果/收发宿主消息。
+   宿主（host/Program.cs 的 webview op=read|act）在 WebView2 里执行只读脚本与点击/输入，
+   回 webview.done（data 为 JSON 字符串）或 webview.error。 */
+var BROWSER_TOOL = (function(){
+  var seq = 0, pend = {}, hooked = false;
+  function ready(){
+    return !!(typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok && NET.bridge.engine === 'webview2');
+  }
+  function hook(){
+    if (hooked) return;
+    hooked = true;
+    try {
+      window.chrome.webview.addEventListener('message', function(e){
+        var d = e && e.data;
+        if (!d || (d.t !== 'webview.done' && d.t !== 'webview.error')) return;
+        var p = d.id && pend[d.id]; if (!p) return;
+        delete pend[d.id];
+        try { clearTimeout(p.timer); } catch (x) {}
+        if (d.t === 'webview.error'){ p.reject(new Error(d.message || '浏览器操作失败')); return; }
+        var obj = null;
+        try { obj = (typeof d.data === 'string') ? JSON.parse(d.data) : d.data; } catch (x) { obj = null; }
+        if (!obj || typeof obj !== 'object'){ p.reject(new Error('浏览器返回的数据无法解析')); return; }
+        p.resolve(obj);
+      });
+    } catch (e) {}
+  }
+  function call(op, payload){
+    if (!ready()) return Promise.reject(new Error('浏览器未打开，请先用 ```browser <url> 打开页面（或当前不是 exe 宿主版）'));
+    hook();
+    return new Promise(function(res, rej){
+      var id = 'bw' + Date.now().toString(36) + (++seq);
+      var timer = setTimeout(function(){
+        if (!pend[id]) return;
+        delete pend[id];
+        rej(new Error('浏览器操作超时（20s）'));
+      }, 20000);
+      pend[id] = { resolve: res, reject: rej, timer: timer };
+      var msg = { t: 'webview', op: op, id: id };
+      if (payload) for (var k in payload) if (payload[k] != null) msg[k] = payload[k];
+      try { NET.bridge.send(msg); }
+      catch (e){ delete pend[id]; clearTimeout(timer); rej(e); }
+    });
+  }
+  /* 解析 browser-act 的围栏参数：
+     click #more / type #q | 文本 / scroll 1200 / wait #x 或 800 / back / forward */
+  function parseAct(arg, body){
+    var s = String(arg == null ? '' : arg).trim();
+    var extra = String(body == null ? '' : body).replace(/\r/g, '').trim();
+    if (!s) return { err: '缺少动作（click / type / scroll / wait / back / forward）' };
+    var sp = s.indexOf(' '), op = (sp < 0 ? s : s.slice(0, sp)).toLowerCase();
+    var rest = sp < 0 ? '' : s.slice(sp + 1).trim();
+    if (op === 'back' || op === 'forward') return { op2: op };
+    if (op === 'scroll'){
+      var dy = parseInt(rest, 10);
+      if (!isFinite(dy)) return { err: 'scroll 需要像素数，如 scroll 1200' };
+      return { op2: 'scroll', dy: dy };
+    }
+    if (op === 'wait'){
+      if (!rest) return { err: 'wait 需要选择器或毫秒，如 wait #list .item / wait 1200' };
+      if (/^\d+$/.test(rest)) return { op2: 'wait', ms: parseInt(rest, 10) };
+      return { op2: 'wait', selector: rest };
+    }
+    if (op === 'click'){
+      if (!rest) return { err: 'click 需要 CSS 选择器，如 click #more' };
+      return { op2: 'click', selector: rest };
+    }
+    if (op === 'type'){
+      var p = rest.indexOf('|');
+      if (p < 0) return { err: 'type 需要写成 type 选择器 | 文本，如 type #q | 航海' };
+      var sel = rest.slice(0, p).trim();
+      var txt = rest.slice(p + 1).replace(/^\s/, '');
+      if (!sel) return { err: 'type 缺少选择器，如 type #q | 航海' };
+      if (extra) txt += (txt ? '\n' : '') + extra;
+      return { op2: 'type', selector: sel, text: txt };
+    }
+    return { err: '不认识的动作：' + op + '（可用 click / type / scroll / wait / back / forward）' };
+  }
+  function read(url){
+    var payload = {};
+    if (url) payload.url = String(url);
+    return call('read', payload);
+  }
+  function act(arg, body){
+    var p = parseAct(arg, body);
+    if (p.err) return Promise.reject(new Error(p.err));
+    return call('act', p);
+  }
+  function fmtRead(d){
+    d = d || {};
+    if (d.error) return '[browser-read] 失败：' + d.error;
+    var title = String(d.title || '（无标题）'), url = String(d.url || '');
+    var text = String(d.text || '').replace(/\r/g, '').trim();
+    var total = text.length;
+    if (text.length > 12000) text = text.slice(0, 12000) + '\n…（正文已截断，共 ' + total + ' 字）';
+    var links = Array.isArray(d.links) ? d.links.slice(0, 40) : [];
+    var L = ['[browser-read] ' + title + ' / ' + url];
+    if (d.frames) L.push('（页面含 ' + d.frames + ' 个 iframe，跨域内容未读取）');
+    L.push('正文：' + (text || '（空）'));
+    L.push('链接：' + (links.length ? '' : '（无）'));
+    for (var i = 0; i < links.length; i++){
+      var t = String(links[i] && links[i].t || '').trim() || '（无文字）';
+      L.push((i + 1) + '. ' + t.slice(0, 80) + ' → ' + String(links[i] && links[i].u || ''));
+    }
+    return L.join('\n');
+  }
+  function fmtAct(d){
+    d = d || {};
+    if (d.ok === false) return '[browser-act] 失败：' + (d.err || '未知原因');
+    return '[browser-act] ok / ' + String(d.url || '') + ' / ' + String(d.title || '');
+  }
+  return { ready: ready, call: call, parseAct: parseAct, read: read, act: act, fmtRead: fmtRead, fmtAct: fmtAct };
+})();
+
 var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
@@ -878,6 +994,8 @@ var WORK = (function(){
   var PROTOCOL = 'Work 协议：在页面沙箱里完成短任务；沙箱不联网、不写磁盘（除 vfs）。\n' +
     '工具（围栏首行是参数）：\n' +
     '```browser URL —— 应用内浏览器打开网页（要登录态、要看页面本身时用）。\n' +
+    '```browser-read [URL] —— 读应用内浏览器当前页（或先打开 URL）：回标题 + 正文 + 链接；JS 渲染、点过「加载更多」的页面用这个。\n' +
+    '```browser-act click #more —— 操作页面：click 选择器 / type 选择器 | 文本 / scroll 像素 / wait 选择器或毫秒 / back / forward。\n' +
     '```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 search。\n' +
     '```search 查询词 —— 联网检索，回标题+链接+摘要。\n' +
     '```nav JSON —— 航海图：{"type":"bearing","heading":45,"trueBearing":120,"target":"灯塔A"}；\n' +
@@ -906,7 +1024,7 @@ var WORK = (function(){
     '纪律：绝不回答「我无法访问网络」——先调工具，只有工具真的失败才回报原因（附失败输出要点）。\n' +
     '输出：结论在前；有产物给「文件清单 + 怎么打开/运行」；有失败给「失败原因 + 建议下一步」。';
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -1106,7 +1224,7 @@ var WORK = (function(){
       UI.holdBusy(-1, sid0);
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview|play|download|get)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play|download|get|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
@@ -1399,6 +1517,38 @@ var WORK = (function(){
           UI.toast('视频已下载：' + r.path);
         }, function(e){
           add('[download] 下载失败：' + (e && e.message || e), { op: 'download', ok: false, brief: (e && e.message || String(e)).slice(0, 60) });
+        }).then(next);
+        return;
+      }
+      /* ---- v1.29（P4）：读当前应用内浏览器页面（渲染后的 DOM + 链接） ---- */
+      if (c.op === 'browser-read'){
+        var brU = String(c.arg || '').trim();
+        if (brU){
+          var brSafe = NET.safeUrl(brU);
+          if (!brSafe){ add('[browser-read] 地址无效（需 http/https 绝对地址）：' + brU, { op: 'browser-read', ok: false, brief: '地址无效' }); next(); return; }
+          brU = brSafe;
+        }
+        var t0br = Date.now();
+        BROWSER_TOOL.read(brU).then(function(d){
+          if (d.error){ add('[browser-read] 失败：' + d.error, { op: 'browser-read', ok: false, brief: String(d.error).slice(0, 60) }); return; }
+          add(BROWSER_TOOL.fmtRead(d), { op: 'browser-read', url: d.url || brU, ok: true, ms: Date.now() - t0br, brief: String(d.title || '').slice(0, 40) });
+          w0.errStreak = 0;
+        }, function(e){
+          add('[browser-read] ' + ((e && e.message) || e), { op: 'browser-read', ok: false, brief: String((e && e.message) || e).slice(0, 60) });
+        }).then(next);
+        return;
+      }
+      /* ---- v1.29（P4）：点按钮 / 填框 / 滚动 / 等待 / 前进后退 ---- */
+      if (c.op === 'browser-act'){
+        var ba = BROWSER_TOOL.parseAct(c.arg, c.body);
+        if (ba.err){ add('[browser-act] 参数错误：' + ba.err, { op: 'browser-act', ok: false, brief: '参数错误' }); next(); return; }
+        var t0ba = Date.now();
+        BROWSER_TOOL.call('act', ba).then(function(d){
+          var brief = ba.op2 + (ba.selector ? ' ' + ba.selector : (ba.ms ? ' ' + ba.ms + 'ms' : ''));
+          add(BROWSER_TOOL.fmtAct(d), { op: 'browser-act', url: d.url || '', ok: d.ok !== false, ms: Date.now() - t0ba, brief: brief.slice(0, 50) });
+          if (d.ok !== false) w0.errStreak = 0;
+        }, function(e){
+          add('[browser-act] 失败：' + ((e && e.message) || e), { op: 'browser-act', ok: false, brief: String((e && e.message) || e).slice(0, 60) });
         }).then(next);
         return;
       }

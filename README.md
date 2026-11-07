@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.6 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.7 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -11,6 +11,7 @@
 ### 对话与会话
 
 - **Chat / Work / Agent 三种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认。
+- **Work / Agent 看页面**：`browser-read` 读渲染后的标题/正文/链接，`browser-act` 点按钮/填框/滚动/等待/前进后退；Steam 合集、加载更多、无限滚动都能先读 → 点 → 再读。
 - **Chat 富文本**：任务列表、表格列对齐 + 横向滚动、脚注、定义列表、最多 3 层嵌套引用；9 种语言代码高亮（js/ts/py/java/cs/go/rs/sh/sql）。
 - **Chat 生图 + 图片流**：输入区生图按钮，弹窗填提示词/尺寸/张数；支持上游 partial 帧渐进显示，完成后图片入附件库，刷新仍在，可下载/重新生成。
 - **会话分组**：侧栏「+ 分组」创建一组 Chat/Work 会话，不绑定文件夹；组可设模式、模型、System Prompt、temperature、max_tokens，组内未覆盖的会话动态继承，删除分组保留会话。
@@ -76,10 +77,10 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,210,752 字节**（v0.4.6，FileVersion 0.4.6.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,072,695 字节 / 18,311 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **15 个文件 / 1,072,767 字节**（模板 + css/svg/js 分段） |
-| 宿主源码 | `host/Program.cs` **172,099 字节 / 3,242 行** |
+| 发布产物 | `dist/SoloChatHost.exe` **3,234,816 字节**（v0.4.7，FileVersion 0.4.7.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,083,806 字节 / 18,490 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **15 个文件 / 1,083,878 字节**（模板 + css/svg/js 分段） |
+| 宿主源码 | `host/Program.cs` **185,764 字节 / 3,524 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
 内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。

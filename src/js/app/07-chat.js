@@ -453,7 +453,7 @@ function sendMessage(){
     if (cmd === '/skills'){ /* v0.3.77：看当前模式可用的技能（对标 OpenHands 的技能清单） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _sk = []; try { _sk = EXT.skillNames(S.cfg.mode) || []; } catch (e) { _sk = []; }
-      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'web', 'search', 'sub', 'agent'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
+      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
       if (!_sk.length){ UI.toast('当前模式没有可用工具', true); return; }
       UI.toast('本模式可用工具 ' + _sk.length + ' 个：' + _sk.join(', ') + '（用三反引号 + 工具名调用）');
     }

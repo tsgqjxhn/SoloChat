@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.6';
+var APP_VER = 'v0.4.7';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -385,7 +385,7 @@ function loadCfg(){
   /* 迁移（一次性）：内置工具旧 id tool:<name> → builtin:<name> */
   if (!c.picksBuiltinMig) {
     try {
-      var _bset={web:1,crawl:1,search:1,get:1,browser:1,download:1,play:1,run:1,preview:1,'vfs-write':1,'vfs-list':1,'vfs-read':1,patch:1,'fs-read':1,'fs-write':1,'fs-edit':1,'fs-list':1,skill:1,sub:1,suball:1,agent:1,cmd:1,python:1,git:1,nav:1,chart:1,shot:1,time:1,calc:1,json:1,http:1};
+      var _bset={web:1,crawl:1,search:1,get:1,browser:1,'browser-read':1,'browser-act':1,download:1,play:1,run:1,preview:1,'vfs-write':1,'vfs-list':1,'vfs-read':1,patch:1,'fs-read':1,'fs-write':1,'fs-edit':1,'fs-list':1,skill:1,sub:1,suball:1,agent:1,cmd:1,python:1,git:1,nav:1,chart:1,shot:1,time:1,calc:1,json:1,http:1};
       if (cfg.picks && typeof cfg.picks==='object' && Array.isArray(cfg.picks.tool)){
         var _p={}; for (var _k in cfg.picks) _p[_k]=cfg.picks[_k];
         var _src=_p.tool, _dst=[];
