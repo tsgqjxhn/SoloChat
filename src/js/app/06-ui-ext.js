@@ -1206,10 +1206,14 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
   if (!String(msg.content || '').trim() && String(msg.reasoning || '').trim()){ /* v0.3.57：只拿到推理时，把它当正文显示，别让用户对着空泡 */
     msg.content = String(msg.reasoning).trim() + '\n\n> 以上是模型的推理内容：这一轮没有单独的正文返回（常见于 reasoning 模型或上游只回 reasoning_content）。';
   }
-  if (!String(msg.content || '').trim()){ /* v0.3.58：两个分支必须分开——之前把 0.3.56 的占位符塞进了 0.3.57 的 if 里，互相覆盖 */
+  if (!errInfo && !String(msg.content || '').trim()){ /* v0.3.58：两个分支必须分开；有错误时不贴空回复占位符，由错误条展示 */
     var _r = String(msg.reasoning || '').trim();
     var _tok = (usage && usage.completion_tokens) || msg.tokens || 0;
     msg.content = '（这一轮没有返回正文' + (_tok ? '，但计费了 ' + _tok + ' tokens' : '') + (_r ? '；只拿到推理过程，见下方「思考」折叠' : '') + '）\n\n> 常见原因：模型只输出 reasoning / 接口不是 OpenAI 的 delta.content 格式 / 上游把回复截断。可以换个模型或看「思考」里的内容。';
+    try {
+      var _raw0 = (typeof NET !== 'undefined' && NET && ((NET.lastRaw && NET.lastRaw()) || NET._lastRaw)) || '';
+      if (_raw0) msg.content += '\n> 已保留本轮原始流：设置里开 SC_DBG 后可用 SC_DBG.net.lastRaw() 复制排查。';
+    } catch (e) {}
     msg.emptyReply = 1;
   }
     if (msg.content.length > LIMITS.MSG_TEXT){

@@ -5,12 +5,20 @@ function hostHeaders(headers, url){
   return headers;
 }
 
+var _lastRaw = '';
 function fetchStream(opt){
     var url0 = endpoint('chat', true);
     var headers = authHeaders();
     hostHeaders(headers, url0);
     var attempt = 0, MAX_RETRY = 3;
     var gotFirst = false, idleTimer = null, firstTimer = null;
+    var failed = false, rawBuf = '';
+    _lastRaw = '';
+    function saveRaw(){
+      if (rawBuf.length > 16384) rawBuf = rawBuf.slice(-16384);
+      _lastRaw = rawBuf;
+      try { NET._lastRaw = _lastRaw; } catch (e) {}
+    }
 
     function clearTimers(){ clearTimeout(idleTimer); clearTimeout(firstTimer); idleTimer = firstTimer = null; }
     function armFirst(){
@@ -50,7 +58,14 @@ function fetchStream(opt){
         var ct = res.headers.get('content-type') || '';
         if (ct.indexOf('application/json') >= 0){ // 服务端忽略 stream 的兜底（§6.2）
           clearTimers();
-          return res.json().then(function(j){
+          return res.text().then(function(txt){
+            rawBuf = txt || ''; saveRaw();
+            var j;
+            try { j = JSON.parse(txt); } catch (e) { throw new Error('响应不是合法 JSON'); }
+            if (j && j.error){
+              var em = j.error.message || j.error.code || (typeof j.error === 'string' ? j.error : JSON.stringify(j.error));
+              throw new Error('上游错误：' + em);
+            }
             /* v0.4.x：统一走 parseNonStream，并补 usage / tool_calls（P1-4） */
             var ms = parseNonStream(j) || {};
             if (ms.content) opt.onDelta(ms.content, false);
@@ -69,29 +84,40 @@ function fetchStream(opt){
         var reader = res.body.getReader();
         var dec = new TextDecoder('utf-8');
         var tacc = makeToolAcc();   // v0.8.3：旁路累积 tool_calls（不改解析器）
+        function onUpstreamErr(msg){
+          if (failed) return; failed = true;
+          clearTimers(); saveRaw();
+          try { opt.onError(new Error('上游错误：' + msg)); } catch (e) {}
+          try { reader.cancel(); } catch (e) {}
+        }
         var parser = createParserFor(protocolNow(),
           function(t, isR){
+            if (failed) return;
             if (!gotFirst){ gotFirst = true; clearTimeout(firstTimer); }
             armIdle();
             opt.onDelta(t, isR);
           },
-          function(u){ opt.onUsage(u); }
+          function(u){ if (!failed) opt.onUsage(u); },
+          onUpstreamErr
         );
         opt.onReader && opt.onReader(reader);
         function pump(){
           return reader.read().then(function(r){
-            if (r.done){ clearTimers(); parser.end(); opt.onDone(null, tacc.list()); return; }
-        var _ct = dec.decode(r.value, { stream: true });
-        scanToolCalls(tacc, _ct, protocolNow());
-        var _fin = parser.feed(_ct);
-        if (_fin === true){ clearTimers(); opt.onDone(null, tacc.list()); try { reader.cancel(); } catch (e) {} return; } // v0.3.36：收到 DONE 就收尾，避免 keep-alive 连接触发空闲超时
+            if (failed) return;
+            if (r.done){ clearTimers(); if (!failed){ parser.end(); saveRaw(); if (!failed) opt.onDone(null, tacc.list()); } return; }
+            var _ct = dec.decode(r.value, { stream: true });
+            rawBuf += _ct; saveRaw();
+            scanToolCalls(tacc, _ct, protocolNow());
+            var _fin = parser.feed(_ct);
+            if (failed) return;
+            if (_fin === true){ clearTimers(); saveRaw(); if (!failed) opt.onDone(null, tacc.list()); try { reader.cancel(); } catch (e) {} return; } // v0.3.36：收到 DONE 就收尾，避免 keep-alive 连接触发空闲超时
             return pump();
           });
         }
-        return pump().catch(function(e){ clearTimers(); throw e; });
+        return pump().catch(function(e){ clearTimers(); saveRaw(); if (!failed) throw e; });
       });
     }
-    return once().catch(function(e){ clearTimers(); opt.onError(e); });
+    return once().catch(function(e){ clearTimers(); saveRaw(); if (!failed) opt.onError(e); });
   }
 
   /* 通道② 宿主桥（§7.2）：页面侧适配器 —— 引擎无关
@@ -286,19 +312,26 @@ function fetchStream(opt){
   };
   function bridgeStream(opt){
     var id = 'r' + (++bridge.seq);
-    var parser = createParserFor(protocolNow(), opt.onDelta, function(u){ opt.onUsage(u); });
     var tacc = makeToolAcc();   // v0.8.3：桥通道同样采集 tool_calls
-    var finished = false;
+    var finished = false, rawBuf = '';
+    _lastRaw = '';
+    function saveRaw(){ if (rawBuf.length > 16384) rawBuf = rawBuf.slice(-16384); _lastRaw = rawBuf; try { NET._lastRaw = _lastRaw; } catch (e) {} }
     function finErr(e){
       if (finished) return; finished = true;
+      saveRaw();
       delete bridge.pend[id];
       opt.onError(e);
     }
+    var parser = createParserFor(protocolNow(), opt.onDelta, function(u){ opt.onUsage(u); },
+      function(msg){ finErr(new Error('上游错误：' + msg)); });
     bridge.pend[id] = {
       onChunk: function(text){
+        if (finished) return;
+        rawBuf += text; saveRaw();
         scanToolCalls(tacc, text, protocolNow());
         if (parser.feed(text) === true){ // v0.3.38：桥通道也在收到 [DONE] 时收尾
           if (finished) return; finished = true;
+          saveRaw();
           delete bridge.pend[id];
           try { bridge.abort(id); } catch (e) {}
           parser.end(); opt.onDone(null, tacc.list());
@@ -306,6 +339,7 @@ function fetchStream(opt){
       },
       onDone: function(status){
         if (finished) return; finished = true;
+        saveRaw();
         delete bridge.pend[id];
         // Issue 12: 非 2xx 视为失败（此前 401/500 仍当成功，UI 停在空回复且无错误提示）
         if (status != null && (status < 200 || status >= 300)) {
@@ -1656,6 +1690,8 @@ function fetchStream(opt){
     endpoint: endpoint, applyQuirks: applyQuirks, testConn: testConn,   // v0.4.5：协议层
     createParserFor: createParserFor, convertBody: convertBody, protocolNow: protocolNow,   // v0.4.6：协议适配（调试用）
     modelCaps: modelCaps,     // v1.7：调试/测试用
+    lastRaw: function(){ return _lastRaw || NET._lastRaw || ''; },
+    _lastRaw: '',
   bridge: bridge,
     fs: fsCall
   };

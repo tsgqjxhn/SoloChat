@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.4';
+var APP_VER = 'v0.4.5';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -738,66 +738,260 @@ function Dprov(ok, msg){
 }
 var NET = (function(){
   /* v0.4.x：reasoningField 生效（P1-5）—— 供应商怪癖字段名优先，再依次回退常见字段 */
-  function reasonOf(d){
-    if (!d) return '';
-    var fld = (quirksNow() || {}).reasoningField;
-    if (fld && d[fld] != null) return d[fld];
-    if (d.reasoning_content != null) return d.reasoning_content;
-    if (d.reasoning != null) return d.reasoning;
-    if (d.thinking != null) return d.thinking;
+  /* v0.4.x P0-fix：统一文本提取 —— 字符串/数组/对象/多种字段名；跳过图片/文件段 */
+  function textOf(v){
+    if (v == null) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    if (Array.isArray(v)){
+      var out = '';
+      for (var i = 0; i < v.length; i++){
+        var it = v[i];
+        if (it && (it.type === 'image_url' || it.type === 'input_image' || it.type === 'image' || it.type === 'file' || it.type === 'document')) continue;
+        out += textOf(it);
+      }
+      return out;
+    }
+    if (typeof v === 'object'){
+      if (typeof v.text === 'string') return v.text;
+      if (v.content != null && (typeof v.content === 'string' || Array.isArray(v.content))) return textOf(v.content);
+      if (typeof v.value === 'string') return v.value;
+      if (typeof v.output_text === 'string') return v.output_text;
+    }
     return '';
   }
-  /* 统一 SSE 增量解析器（§6.2） */
-  function createParser(onDelta, onUsage){
-    var buf = '', data = [], done = false, emitted = false;
-    function flush(){ // 空行触发派发一条事件
+  function reasonOf(v, root){
+    var d = v || {};
+    var fld = (quirksNow() || {}).reasoningField;
+    if (fld && d[fld] != null) return textOf(d[fld]);
+    if (d.reasoning_content != null) return textOf(d.reasoning_content);
+    if (d.reasoning != null){
+      if (typeof d.reasoning === 'string') return d.reasoning;
+      if (d.reasoning && typeof d.reasoning === 'object')
+        return textOf(d.reasoning.text) || textOf(d.reasoning.summary) || textOf(d.reasoning.content) || textOf(d.reasoning);
+      return textOf(d.reasoning);
+    }
+    if (d.thinking != null) return textOf(d.thinking);
+    if (d.reasoning_details){
+      if (Array.isArray(d.reasoning_details)){
+        var out = '';
+        for (var i = 0; i < d.reasoning_details.length; i++) out += textOf(d.reasoning_details[i]);
+        if (out) return out;
+      }
+      return textOf(d.reasoning_details);
+    }
+    if (root && root !== d){
+      if (root.reasoning != null && typeof root.reasoning === 'string') return root.reasoning;
+      if (root.reasoning_content != null) return textOf(root.reasoning_content);
+      if (root.thinking != null) return textOf(root.thinking);
+      if (root.reasoning != null) return reasonOf({ reasoning: root.reasoning });
+    }
+    return '';
+  }
+  /* 统一 SSE 增量解析器（P0-fix：多形状容错 + 流内错误 + 裸 JSON 行） */
+  function createParser(onDelta, onUsage, onErr){
+    var buf = '', data = [], done = false, emitted = false, errHit = false, emittedText = false;
+    function err(msg){
+      if (errHit) return;
+      errHit = true; done = true;
+      if (onErr) try { onErr(msg || '上游错误'); } catch (e) {}
+    }
+    function emit(t, isR){
+      if (errHit || t == null || t === '') return;
+      onDelta(t, !!isR); emitted = true; if (!isR) emittedText = true;
+    }
+    function usage(u, partial){
+      if (!u || !onUsage) return;
+      var out = u;
+      if (partial && !u.partial) out = { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0, partial: true };
+      onUsage(out);
+    }
+    function dispatch(j){
+      if (!j || typeof j !== 'object' || errHit) return;
+      /* 1. 上游错误 */
+      if (j.error){
+        var em = j.error.message || j.error.code || (typeof j.error === 'string' ? j.error : '');
+        return err(em || JSON.stringify(j.error));
+      }
+      if (j.type === 'error' || j.type === 'response.failed'){
+        return err((j.error && j.error.message) || j.message || (j.response && j.response.error && j.response.error.message) || '上游错误');
+      }
+      /* usage（通用，非 typed 事件） */
+      if (j.usage && !j.type) usage(j.usage);
+      /* 2. 事件类型分派（Responses / Anthropic） */
+      var t = j.type || '';
+      if (t){
+        if (t === 'response.output_text.delta'){ emit(textOf(j.delta), false); return; }
+        if (t === 'response.output_text.done'){ if (!emittedText) emit(textOf(j.text), false); return; }
+        if (t === 'response.reasoning_summary_text.delta' || t === 'response.reasoning_text.delta'){ emit(textOf(j.delta), true); return; }
+        if (t === 'response.completed'){
+          if (j.response && j.response.usage) usage({ prompt_tokens: j.response.usage.input_tokens || 0, completion_tokens: j.response.usage.output_tokens || 0 });
+          if (!emittedText && j.response && j.response.output){
+            var outTxt = '';
+            var outs = j.response.output;
+            for (var oi = 0; oi < outs.length; oi++){
+              var oc = outs[oi] && outs[oi].content;
+              if (!oc) continue;
+              for (var ci = 0; ci < oc.length; ci++){
+                if (oc[ci] && (oc[ci].type === 'output_text' || oc[ci].type === 'text')) outTxt += textOf(oc[ci].text != null ? oc[ci].text : oc[ci]);
+              }
+            }
+            if (outTxt) emit(outTxt, false);
+          }
+          return;
+        }
+        if (t === 'content_block_delta' && j.delta){
+          if (j.delta.type === 'text_delta' && j.delta.text != null) emit(textOf(j.delta.text), false);
+          else if (j.delta.type === 'thinking_delta' && j.delta.thinking != null) emit(textOf(j.delta.thinking), true);
+          else if (j.delta.text != null) emit(textOf(j.delta.text), false);
+          return;
+        }
+        if (t === 'content_block_start' && j.content_block && j.content_block.type === 'text' && j.content_block.text != null){
+          emit(textOf(j.content_block.text), false); return;
+        }
+        if (t === 'message_start' && j.message && j.message.usage){
+          usage({ prompt_tokens: j.message.usage.input_tokens || 0, completion_tokens: 0 }, true); return;
+        }
+        if (t === 'message_delta' && j.usage){
+          usage({ prompt_tokens: 0, completion_tokens: j.usage.output_tokens || 0 }, true); return;
+        }
+        /* 其他 typed 事件忽略 */
+      }
+      /* 3. OpenAI chat choices */
+      if (j.choices && j.choices[0]){
+        var ch = j.choices[0];
+        var d = ch.delta || ch.message || ch;
+        var ct = textOf(d.content) || textOf(d.text);
+        if (ct) emit(ct, false);
+        var r = reasonOf(d, j);
+        if (r) emit(r, true);
+        return;
+      }
+      /* 4. 无 choices 但 delta 是字符串 */
+      if (typeof j.delta === 'string'){ emit(j.delta, false); return; }
+      /* 5. Gemini candidates */
+      if (j.candidates && j.candidates[0]){
+        var cand = j.candidates[0];
+        var parts = (cand.content && cand.content.parts) || [];
+        for (var pi = 0; pi < parts.length; pi++){
+          var p = parts[pi];
+          if (!p) continue;
+          if (p.text) emit(p.text, !!p.thought);
+        }
+        if (j.usageMetadata) usage({ prompt_tokens: j.usageMetadata.promptTokenCount || 0, completion_tokens: j.usageMetadata.candidatesTokenCount || 0 }, true);
+        return;
+      }
+      /* 6. 根级 reasoning */
+      if (j.reasoning != null || j.reasoning_content != null || j.thinking != null){
+        var rr = textOf(j.reasoning) || textOf(j.reasoning_content) || textOf(j.thinking);
+        if (rr) emit(rr, true);
+      }
+      /* 7. Responses 非流式 output 兜底 */
+      if (!emittedText && j.output && Array.isArray(j.output)){
+        var ot = '';
+        for (var oi2 = 0; oi2 < j.output.length; oi2++){
+          var occ = j.output[oi2] && j.output[oi2].content;
+          if (!occ) continue;
+          for (var ci2 = 0; ci2 < occ.length; ci2++){
+            if (occ[ci2]){
+              if (occ[ci2].text != null) ot += textOf(occ[ci2].text);
+              else if (occ[ci2].type === 'output_text' || occ[ci2].type === 'text') ot += textOf(occ[ci2]);
+            }
+          }
+        }
+        if (ot) emit(ot, false);
+      }
+    }
+    function tryParseData(){
+      if (!data.length) return false;
+      var raw = data.join('\n');
+      var trimmed = String(raw || '').trim();
+      if (trimmed === '[DONE]'){
+        data = [];
+        done = true;
+        return true;
+      }
+      if (!trimmed) return false;
+      try {
+        var j = JSON.parse(trimmed);
+        data = [];
+        dispatch(j);
+        if (errHit){ done = true; return true; }
+        return false;
+      } catch (e) {
+        return false;
+      }
+    }
+    function flush(){
       if (!data.length) return false;
       var raw = data.join('\n'); data = [];
-      if (raw === '[DONE]') return true;
-      try {
-        var j = JSON.parse(raw);
-        if (j.usage) onUsage(j.usage);
-        var ch = j.choices && j.choices[0];
-        var d = ch && (ch.delta || ch.message) || {};
-        if (d.content) { onDelta(d.content, false); emitted = true; }
-        var r = reasonOf(d);   /* v0.4.x：走 quirksNow().reasoningField（P1-5） */
-        if (r) { onDelta(r, true); emitted = true; }
-      } catch (e) { /* 坏事件忽略，不中断流 */ }
-      return false;
+      dispatch(parseJsonSafe(raw));
+      return errHit || done;
     }
-    // 整包 JSON 兜底：部分服务不走 SSE，直接回一个完整 JSON（无 data: 前缀）；
-    // 此时逐行解析全程落空，end() 时用累积缓冲按完成态响应解析一次
+    function parseJsonSafe(raw){
+      raw = String(raw || '').trim();
+      if (!raw || raw === '[DONE]'){ if (raw === '[DONE]') done = true; return null; }
+      try { return JSON.parse(raw); } catch (e) { return null; }
+    }
+    // 整包 JSON 兜底：部分服务不走 SSE
     function flushWholeJson(){
-      if (done || emitted) return false;
-      var t = (buf + data.join('\n')).trim();
-      if (!t || t[0] !== '{') return false;
+      if (done || errHit || emitted) return false;
+      var t = (buf + (data.length ? data.join('\n') : '')).trim();
+      if (!t || (t[0] !== '{' && t[0] !== '[')) return false;
       try {
         var j = JSON.parse(t);
-        if (j.error) return false; // 错误对象交由上层 HTTP/错误通道处理
-        if (j.usage) onUsage(j.usage);
-        var ch = j.choices && j.choices[0];
-        var d = ch && (ch.delta || ch.message) || {};
-        if (d.content) { onDelta(d.content, false); emitted = true; }
-        var r = reasonOf(d);   /* v0.4.x：走 quirksNow().reasoningField（P1-5） */
-        if (r) { onDelta(r, true); emitted = true; }
+        if (Array.isArray(j)){ for (var i = 0; i < j.length; i++) dispatch(j[i]); }
+        else dispatch(j);
         return emitted;
       } catch (e) { return false; }
     }
+    function processLine(line){
+      if (line === ''){ if (flush() || errHit){ done = true; return true; } return done || errHit; }
+      if (line[0] === ':') return done || errHit;
+      if (line.indexOf('event:') === 0) return done || errHit;
+      if (line.indexOf('data:') === 0){
+        data.push(line.slice(5).replace(/^\s?/, ''));
+        if (tryParseData()){ if (errHit){ done = true; } return done || errHit; }
+        return done || errHit;
+      }
+      /* 裸 JSON 行（没有 data: 前缀） */
+      var lt = line.replace(/^\s+/, '');
+      if (lt[0] === '{' || lt[0] === '['){
+        if (data.length) flush();
+        if (errHit) return true;
+        dispatch(parseJsonSafe(lt));
+        if (errHit){ done = true; return true; }
+        return done || errHit;
+      }
+      /* 未知行（id:/retry:/event: 之外）直接忽略，不进入事件缓冲 */
+      return done || errHit;
+    }
     return {
       feed: function(text){
-      try { if (window.__scRaw != null) window.__scRaw = (window.__scRaw + text).slice(-9000); } catch (e) {} // v0.3.58：原始流抓取（调试用，平时为 null）
+        try { if (window.__scRaw != null) window.__scRaw = (window.__scRaw + text).slice(-9000); } catch (e) {}
+        if (errHit) return true;
         buf += text;
         var i;
         while ((i = buf.indexOf('\n')) >= 0){
           var line = buf.slice(0, i); buf = buf.slice(i + 1);
           if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
-          if (line === ''){ if (flush()){ done = true; return true; } continue; }
-          if (line[0] === ':') continue; // 注释/心跳
-          if (line.indexOf('data:') === 0) data.push(line.slice(5).replace(/^\s/, ''));
+          if (processLine(line)) return true;
         }
-        return done; // v0.3.36：把「已收到 [DONE]」告诉调用方
+        return done || errHit;
       },
-      end: function(){ flush(); if (!done) flushWholeJson(); return done; }
+      end: function(){
+        if (!errHit){
+          if (buf.length){
+            var line = buf;
+            buf = '';
+            if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+            if (processLine(line)) return done || errHit;
+          }
+          flush();
+          if (!done && !errHit) flushWholeJson();
+        }
+        return done || errHit;
+      }
     };
   }
 
@@ -1405,11 +1599,6 @@ var NET = (function(){
     var p = S.cfg.protocol || 'openai-chat';
     return PROTOCOLS[p] ? p : 'openai-chat';
   }
-  function textOf(c){
-    if (typeof c === 'string') return c;
-    if (Array.isArray(c)) return c.map(function(p){ return p && p.type === 'text' ? p.text : ''; }).join('');
-    return '';
-  }
   function aParts(c){
     if (typeof c === 'string') return [{ type: 'text', text: c || ' ' }];
     var out = [];
@@ -1679,60 +1868,54 @@ var NET = (function(){
       if (d && d.tool_calls) acc.feed(d.tool_calls);
     });
   }
-  function createParserFor(proto, onDelta, onUsage){
-    if (proto === 'anthropic-messages') return sseParser(function(j){
-      var t = j.type || '';
-      if (t === 'content_block_delta' && j.delta){
-        if (j.delta.type === 'text_delta' && j.delta.text) onDelta(j.delta.text, false);
-        else if (j.delta.type === 'thinking_delta' && j.delta.thinking) onDelta(j.delta.thinking, true);
-      } else if (t === 'message_start' && j.message && j.message.usage){
-        onUsage({ prompt_tokens: j.message.usage.input_tokens || 0, completion_tokens: 0, partial: true });
-      } else if (t === 'message_delta' && j.usage){
-        onUsage({ prompt_tokens: 0, completion_tokens: j.usage.output_tokens || 0, partial: true });
-      }
-    });
-    if (proto === 'gemini') return sseParser(function(j){
-      var cand = (j.candidates || [])[0] || {};
-      var parts = (cand.content && cand.content.parts) || [];
-      for (var i = 0; i < parts.length; i++){
-        var p = parts[i];
-        if (p && p.text) onDelta(p.text, !!p.thought);
-      }
-      if (j.usageMetadata) onUsage({ prompt_tokens: j.usageMetadata.promptTokenCount || 0,
-        completion_tokens: j.usageMetadata.candidatesTokenCount || 0, partial: true });
-    });
-    if (proto === 'openai-responses') return sseParser(function(j){
-      var t = j.type || '';
-      if (t === 'response.output_text.delta' && j.delta) onDelta(j.delta, false);
-      else if (t === 'response.reasoning_summary_text.delta' && j.delta) onDelta(j.delta, true);
-      else if (t === 'response.completed' && j.response && j.response.usage)
-        onUsage({ prompt_tokens: j.response.usage.input_tokens || 0, completion_tokens: j.response.usage.output_tokens || 0 });
-    });
-    return createParser(onDelta, onUsage);
+  function createParserFor(proto, onDelta, onUsage, onErr){
+    return createParser(onDelta, onUsage, onErr);
   }
-  /* 非流式响应 → 统一 message（{content}） */
+  /* 非流式响应 → 统一 message（{content, reasoning}），多形状兜底 */
   function parseNonStream(j){
     if (!j) return null;
-    var proto = protocolNow();
-    if (proto === 'anthropic-messages'){
-      var t = (j.content || []).filter(function(c){ return c && c.type === 'text'; })
-        .map(function(c){ return c.text || ''; }).join('');
-      return t ? { content: t } : null;
-    }
-    if (proto === 'gemini'){
-      var c = ((j.candidates || [])[0] || {}).content || {};
-      var t2 = (c.parts || []).filter(function(p){ return p && p.text && !p.thought; })
-        .map(function(p){ return p.text; }).join('');
-      return t2 ? { content: t2 } : null;
-    }
-    if (proto === 'openai-responses'){
-      var t3 = '';
-      (j.output || []).forEach(function(o){
-        (o.content || []).forEach(function(c2){ if (c2 && c2.type === 'output_text') t3 += c2.text || ''; });
+    var content = '', reasoning = '', proto = protocolNow();
+    /* Anthropic */
+    if (proto === 'anthropic-messages' || (Array.isArray(j.content) && j.role === 'assistant')){
+      (j.content || []).forEach(function(c){
+        if (!c) return;
+        if (c.type === 'text') content += textOf(c.text);
+        else if (c.type === 'thinking') reasoning += textOf(c.thinking || c.text);
       });
-      return t3 ? { content: t3 } : null;
     }
-    return (j.choices && j.choices[0] && j.choices[0].message) || null;
+    /* Gemini */
+    if (!content && (proto === 'gemini' || j.candidates)){
+      var cand = ((j.candidates || [])[0] || {});
+      var parts = (cand.content && cand.content.parts) || [];
+      for (var i = 0; i < parts.length; i++){
+        var p = parts[i]; if (!p) continue;
+        if (p.thought) reasoning += textOf(p.text);
+        else if (p.text) content += textOf(p.text);
+      }
+    }
+    /* Responses */
+    if (!content && (proto === 'openai-responses' || j.output)){
+      (j.output || []).forEach(function(o){
+        (o.content || []).forEach(function(c2){
+          if (!c2) return;
+          if (c2.type === 'output_text' || c2.type === 'text') content += textOf(c2.text != null ? c2.text : c2);
+        });
+      });
+    }
+    /* OpenAI chat */
+    if (!content && j.choices && j.choices[0]){
+      var ch = j.choices[0];
+      var msg = ch.message || ch.delta || ch;
+      content = textOf(msg.content) || textOf(msg.text) || textOf(ch.text);
+      reasoning = reasoning || reasonOf(msg, j);
+    }
+    /* 顶层兜底 */
+    if (!content) content = textOf(j.text) || (Array.isArray(j.content) ? textOf(j.content) : '');
+    if (!reasoning) reasoning = reasonOf(j, j) || reasonOf((j.choices && j.choices[0] && (j.choices[0].message || j.choices[0].delta)) || {}, j);
+    if (!content && !reasoning) return null;
+    var out = { content: content || '' };
+    if (reasoning) out.reasoning = reasoning;
+    return out;
   }
   /* v0.4.x：非流式 JSON 里的 tool_calls 归一到 makeToolAcc 的输入（P1-4） */
   function nonStreamCalls(j, proto){
@@ -1764,6 +1947,7 @@ var NET = (function(){
   function classify(err){
     if (err && err.name === 'AbortError') return { msg: ERR.EABORT, code: 'abort' };
     var m = err && err.message || String(err);
+    if (m.indexOf('上游错误：') === 0) return { msg: '上游返回错误：' + m.slice(5), code: 'upstream' };
     var st = /HTTP (\d+)/.exec(m);
     if (st){
       var c = +st[1];
