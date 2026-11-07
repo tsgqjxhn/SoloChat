@@ -1634,9 +1634,55 @@ function fetchStream(opt){
     });
   }
 
+  function rawStream(opt){
+    var url = opt.url;
+    var headers = hostHeaders(opt.headers || {}, url);
+    var to = opt.timeout == null ? 180000 : opt.timeout;
+    var timer = null, finished = false;
+    var ac = opt.signal ? null : (typeof AbortController !== 'undefined' ? new AbortController() : null);
+    var signal = opt.signal || (ac && ac.signal);
+    function clear(){ if (timer){ clearTimeout(timer); timer = null; } }
+    function arm(){ clear(); if (to > 0) timer = setTimeout(function(){ fail(Object.assign(new Error('请求超时（' + Math.round(to / 1000) + 's）'), { tmo: 'idle' })); }, to); }
+    function done(status){ if (finished) return; finished = true; clear(); try { opt.onDone && opt.onDone(status); } catch (e) {} }
+    function fail(e){ if (finished) return; finished = true; clear(); try { opt.onError && opt.onError(e); } catch (e2) {} }
+    arm();
+    if (signal && signal.addEventListener) try { signal.addEventListener('abort', function(){ fail(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true }); } catch (e) {}
+    if (bridge.ok && S.cfg.useBridge){
+      var id = 'rs' + (++bridge.seq);
+      bridge.pend[id] = {
+        onChunk: function(t){ if (finished) return; arm(); try { opt.onChunk && opt.onChunk(t); } catch (e) {} },
+        onDone: function(status){ delete bridge.pend[id]; done(status); },
+        onError: function(e){ delete bridge.pend[id]; fail(e); }
+      };
+      bridge.send({ t: 'http', id: id, direct: isDirectHost(url), url: url, method: opt.method || 'POST', headers: headers, body: opt.body == null ? '' : opt.body });
+      return { abort: function(){ if (finished) return; try { bridge.abort(id); } catch (e) {} delete bridge.pend[id]; fail(Object.assign(new Error('aborted'), { name: 'AbortError' })); } };
+    }
+    fetch(url, { method: opt.method || 'GET', headers: headers, body: opt.body, signal: signal })
+      .then(function(res){
+        var reader = res.body && res.body.getReader ? res.body.getReader() : null;
+        var dec = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null;
+        if (!reader){
+          return res.text().then(function(t){ if (finished) return; if (t) try { opt.onChunk && opt.onChunk(t); } catch (e) {} done(res.status); });
+        }
+        function pump(){
+          return reader.read().then(function(r){
+            if (finished) return;
+            if (r.done){ done(res.status); return; }
+            arm();
+            var txt = dec ? dec.decode(r.value, { stream: true }) : String(r.value || '');
+            try { opt.onChunk && opt.onChunk(txt); } catch (e) {}
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(function(e){ if (!finished) fail(e); });
+    return { abort: function(){ if (finished) return; try { if (ac) ac.abort(); } catch (e) {} fail(Object.assign(new Error('aborted'), { name: 'AbortError' })); } };
+  }
+
   return {
     send: send,
     raw: raw,
+    rawStream: rawStream,
     buildBody: buildBody,
     fetchModels: fetchModels,
     guessCtx: guessCtx,

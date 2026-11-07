@@ -691,6 +691,21 @@ function buildSettings(){
         b.appendChild(el('div', { class: 'hint', text: 'AI 仅在授权目录内相对路径读写，写入逐次确认；每会话绑定一个文件夹，开始后锁定。' }));
         setTimeout(refreshFsRoots, 0); // v0.3.2：此处 #fs-roots 还没进 DOM
       }, false));
+
+      p.appendChild(acc('生图', function(b){
+        b.appendChild(field('生图模型', cfgInput('imgModel', 'text', 'gpt-image-1'),
+          '用于 /v1/images/generations 的模型名，默认 gpt-image-1。'));
+        var sz = el('select', { class: 'f-in', 'data-cfg': 'imgSize' });
+        ['1024x1024','1024x1536','1536x1024'].forEach(function(v){
+          sz.appendChild(el('option', { value: v, text: v, selected: (S.cfg.imgSize || '1024x1024') === v ? '' : null }));
+        });
+        b.appendChild(field('尺寸', sz));
+        var ip = el('select', { class: 'f-in', 'data-cfg': 'imgPartial' });
+        [0,1,2,3].forEach(function(v){
+          ip.appendChild(el('option', { value: String(v), text: String(v), selected: String(S.cfg.imgPartial != null ? S.cfg.imgPartial : 2) === String(v) ? '' : null }));
+        });
+        b.appendChild(field('partial_images', ip, '流式生成时的中间帧数量（0–3）；上游不支持时会自动降级为非流式。'));
+      }, false));
     });
 
     /* —— 页② 通用设置（v1.5.1：主题 / 代理 / 全局参数 / 数据 四合一） —— */

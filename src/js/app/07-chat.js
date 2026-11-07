@@ -1532,6 +1532,8 @@ function sendMessage(){
     }
     renderWsBtn();
     renderCtxRing();
+    var imgBtn = $('#btn-img');
+    if (imgBtn){ var ok = (typeof IMG !== 'undefined' && IMG.available && IMG.available()); imgBtn.disabled = !ok; imgBtn.classList.toggle('is-disabled', !ok); if (!ok) imgBtn.title = '生成图片（先在设置里配置连接）'; else imgBtn.title = '生成图片（输入描述后生成，支持流式预览）'; }
     if (typeof notifyQuickState === 'function') notifyQuickState(); // 小窗 Chat/Agent、联网状态回显
   }
   /* 上下文估算（v2.9 重做 / v3.0 修正口径）
@@ -1901,6 +1903,205 @@ function sendMessage(){
       setCfg({ prompts: a2 }); S._pRefresh(); return;
     }
   }
+  /* ---------- 生图（P2） ---------- */
+  function revokeImgFrames(card){
+    if (!card) return;
+    var urls = card._frameUrls || [];
+    for (var i = 0; i < urls.length; i++){ try { URL.revokeObjectURL(urls[i]); } catch(e){} }
+    card._frameUrls = [];
+  }
+  function openImgGen(){
+    if (typeof IMG === 'undefined' || !IMG.available()){
+      UI.toast('先在设置里配置连接', true);
+      return;
+    }
+    var ta = el('textarea', { class: 'f-in', rows: '4', placeholder: '描述你想画的画面…', style: 'width:100%;min-height:90px;resize:vertical' });
+    var sz = el('select', { class: 'f-in' });
+    ['1024x1024','1024x1536','1536x1024'].forEach(function(v){
+      sz.appendChild(el('option', { value: v, text: v, selected: (S.cfg.imgSize || '1024x1024') === v ? '' : null }));
+    });
+    var nn = el('select', { class: 'f-in' });
+    [1,2].forEach(function(v){ nn.appendChild(el('option', { value: String(v), text: String(v) })); });
+    var box = el('div', { class: 'img-gen-modal' }, [
+      el('h3', { text: '生成图片' }),
+      el('div', { class: 'f-row' }, [el('label', { text: '提示词' }), ta]),
+      el('div', { class: 'f-row f-row-2' }, [
+        el('div', {}, [el('label', { text: '尺寸' }), sz]),
+        el('div', {}, [el('label', { text: '张数' }), nn])
+      ]),
+      el('div', { class: 'f-actions' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '取消', 'data-m': 'close' }),
+        el('button', { class: 'btn btn-primary', type: 'button', text: '生成', id: 'img-gen-go' })
+      ])
+    ]);
+    UI.openModal(box);
+    setTimeout(function(){ try { ta.focus(); } catch(e){} }, 0);
+    var go = box.querySelector('#img-gen-go');
+    if (go) go.addEventListener('click', function(){
+      var prompt = String(ta.value || '').trim();
+      if (!prompt){ UI.toast('请输入描述', true); return; }
+      UI.closeModal();
+      startImgGen(prompt, sz.value, parseInt(nn.value, 10) || 1);
+    });
+  }
+  function startImgGen(prompt, size, n, targetId){
+    if (typeof IMG === 'undefined'){ UI.toast('生图模块未加载', true); return; }
+    var s = curSession() || createSession('图片生成');
+    var asstMsg = null;
+    if (targetId){
+      var idx = findMsg(targetId);
+      if (idx >= 0) asstMsg = S.msgs[idx];
+    }
+    if (!asstMsg){
+      var userMsg = { id: uuid(), sid: s.id, role: 'user', content: prompt, status: 'ok', ts: Date.now(), attachments: [], imgAsk: 1 };
+      asstMsg = { id: uuid(), sid: s.id, role: 'assistant', content: '', status: 'streaming', ts: Date.now(), attachments: [],
+        imgCard: { prompt: prompt, frames: [], final: '', _frameUrls: [] } };
+      S.msgs.push(userMsg);
+      S.msgs.push(asstMsg);
+      try { DB.putMessage(userMsg); } catch(e){}
+      try { DB.putMessage(asstMsg); } catch(e){}
+      touchSession(prompt.slice(0, 18));
+      appendMsgNode(userMsg);
+      appendMsgNode(asstMsg);
+      updateEmpty();
+    } else {
+      revokeImgFrames(asstMsg.imgCard);
+      if (asstMsg.imgCard && asstMsg.imgCard._finalUrl){ try { URL.revokeObjectURL(asstMsg.imgCard._finalUrl); } catch(e){} asstMsg.imgCard._finalUrl = ''; }
+      asstMsg.status = 'streaming';
+      asstMsg.errMsg = '';
+      asstMsg.attachments = [];
+      asstMsg.content = '';
+      asstMsg.imgCard = { prompt: prompt, frames: [], final: '', _frameUrls: [] };
+      try { DB.putMessage(asstMsg); } catch(e){}
+      repaintMsg(asstMsg.id);
+    }
+    maybeScroll(true);
+    var runOne = function(i, done){
+      IMG.generate({
+        prompt: prompt,
+        size: size || S.cfg.imgSize || '1024x1024',
+        n: 1,
+        partial: S.cfg.imgPartial != null ? S.cfg.imgPartial : 2,
+        onPartial: function(blob){
+          if (!blob) return;
+          var card = asstMsg.imgCard;
+          if (!card) return;
+          var url = URL.createObjectURL(blob);
+          card._frameUrls = card._frameUrls || [];
+          card._frameUrls.push(url);
+          while (card._frameUrls.length > 3){
+            var old = card._frameUrls.shift();
+            try { URL.revokeObjectURL(old); } catch(e){}
+          }
+          repaintMsg(asstMsg.id);
+        },
+        onFinal: function(blob){
+          if (!blob){
+            asstMsg.status = 'error';
+            asstMsg.errMsg = '未返回图片数据';
+            try { DB.putMessage(asstMsg); } catch(e){}
+            repaintMsg(asstMsg.id);
+            if (done) done(new Error('no image'));
+            return;
+          }
+          var aid = uuid();
+          var name = 'gen-' + Date.now() + '.png';
+          var att = { id: aid, sid: s.id, name: name, mime: 'image/png', blob: blob, ts: Date.now() };
+          DB.putAttachment(att).then(function(){
+            var card = asstMsg.imgCard || { prompt: prompt };
+            revokeImgFrames(card);
+            if (card._finalUrl){ try { URL.revokeObjectURL(card._finalUrl); } catch(e){} }
+            card._finalUrl = URL.createObjectURL(blob);
+            card.final = aid;
+            asstMsg.imgCard = { prompt: prompt, final: aid, _finalUrl: card._finalUrl };
+            asstMsg.attachments = [aid];
+            asstMsg.status = 'ok';
+            asstMsg.content = '';
+            asstMsg.errMsg = '';
+            try { DB.putMessage(asstMsg); } catch(e){}
+            repaintMsg(asstMsg.id);
+            maybeScroll(true);
+            if (done) done(null);
+          }).catch(function(e){
+            // still show final from blob url
+            var card = asstMsg.imgCard || { prompt: prompt };
+            revokeImgFrames(card);
+            card._finalUrl = URL.createObjectURL(blob);
+            asstMsg.imgCard = { prompt: prompt, final: '', _finalUrl: card._finalUrl };
+            asstMsg.status = 'ok';
+            asstMsg.errMsg = '';
+            try { DB.putMessage(asstMsg); } catch(e){}
+            repaintMsg(asstMsg.id);
+            if (done) done(null);
+          });
+        },
+        onError: function(e){
+          var card = asstMsg.imgCard;
+          if (card) revokeImgFrames(card);
+          asstMsg.status = 'error';
+          asstMsg.errMsg = (e && e.message) ? e.message : String(e || '生成失败');
+          try { DB.putMessage(asstMsg); } catch(e2){}
+          repaintMsg(asstMsg.id);
+          if (done) done(e);
+        }
+      });
+    };
+    if (n > 1){
+      // generate first; for simplicity create additional messages for 2nd
+      runOne(0, function(err){
+        if (err) return;
+        var asst2 = { id: uuid(), sid: s.id, role: 'assistant', content: '', status: 'streaming', ts: Date.now(), attachments: [],
+          imgCard: { prompt: prompt, frames: [], final: '', _frameUrls: [] } };
+        S.msgs.push(asst2);
+        try { DB.putMessage(asst2); } catch(e){}
+        appendMsgNode(asst2);
+        var old = asstMsg; asstMsg = asst2;
+        runOne(1, function(){ asstMsg = old; });
+      });
+    } else {
+      runOne(0);
+    }
+  }
+  function imgCopyPrompt(id){
+    var i = findMsg(id); if (i < 0) return;
+    var m = S.msgs[i];
+    var p = (m.imgCard && m.imgCard.prompt) || m.content || '';
+    copyText(p).then(function(){ UI.toast('已复制 prompt'); }).catch(function(){ UI.toast('复制失败', true); });
+  }
+  function imgDownload(id){
+    var i = findMsg(id); if (i < 0) return;
+    var m = S.msgs[i];
+    function dlBlob(blob, name){
+      if (!blob){ UI.toast('没有可下载的图片', true); return; }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = name || 'image.png';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ try { a.remove(); URL.revokeObjectURL(url); } catch(e){} }, 500);
+    }
+    var aid = (m.imgCard && m.imgCard.final) || (m.attachments && m.attachments[0]);
+    if (aid){
+      DB.getAttachment(aid).then(function(a){
+        if (a && a.blob) dlBlob(a.blob, a.name || 'gen.png');
+        else if (m.imgCard && m.imgCard._finalUrl) fetch(m.imgCard._finalUrl).then(function(r){ return r.blob(); }).then(function(b){ dlBlob(b, 'gen.png'); }).catch(function(){ UI.toast('下载失败', true); });
+        else UI.toast('没有可下载的图片', true);
+      }).catch(function(){ UI.toast('下载失败', true); });
+      return;
+    }
+    if (m.imgCard && m.imgCard._finalUrl){
+      fetch(m.imgCard._finalUrl).then(function(r){ return r.blob(); }).then(function(b){ dlBlob(b, 'gen.png'); }).catch(function(){ UI.toast('下载失败', true); });
+      return;
+    }
+    UI.toast('没有可下载的图片', true);
+  }
+  function imgRegen(id){
+    var i = findMsg(id); if (i < 0) return;
+    var m = S.msgs[i];
+    var prompt = (m.imgCard && m.imgCard.prompt) || '';
+    if (!prompt){ UI.toast('没有可用的 prompt', true); return; }
+    startImgGen(prompt, S.cfg.imgSize || '1024x1024', 1, m.id);
+  }
+
   /* ==================================================================
      v3.0 模块（30 项改进）。全部为零依赖纯前端实现。
      ================================================================== */
@@ -2609,6 +2810,7 @@ function sendMessage(){
     editCancel: editCancel, deleteMsg: deleteMsg, copyMsg: copyMsg, copyText: copyText,
     addFiles: addFiles, renderChips: renderChips, onScroll: onScroll,
     repaintMsg: repaintMsg, appendMsgNode: appendMsgNode,
+    openImgGen: openImgGen, imgDownload: imgDownload, imgCopyPrompt: imgCopyPrompt, imgRegen: imgRegen,
     autosize: autosize, doExport: doExport, doImport: doImport, reloadSessions: reloadSessions,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
@@ -2789,6 +2991,9 @@ $('#sidebar').addEventListener('click', function(e){
         case 'varprev': UI.variantStep(id, -1); break;
         case 'varnext': UI.variantStep(id, 1); break;
       case 'continue': UI.continueMsg(id); break;
+      case 'img-dl': UI.imgDownload(id); break;
+      case 'img-regen': UI.imgRegen(id); break;
+      case 'img-copy': UI.imgCopyPrompt(id); break;
       case 'fs-apply': { var fa = b.closest('.msg'); if (fa) FS.apply(fa.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
         case 'fs-applyall': { var mm2 = b.closest('.msg'); if (mm2) FS.applyAll(mm2.getAttribute('data-id')); break; }
       case 'fs-reject': { var fr = b.closest('.msg'); if (fr) FS.reject(fr.getAttribute('data-id'), b.getAttribute('data-path')); break; }
@@ -2811,6 +3016,7 @@ $('#sidebar').addEventListener('click', function(e){
     var t = e.target;
     if (t.closest('#btn-send')) return void UI.sendMessage(); // 生成中：同一按钮变停止键
     if (t.closest('#btn-attach')) return void $('#file-input').click();
+    if (t.closest('#btn-img')) return void UI.openImgGen();
     if (t.closest('#btn-web')){
       S.cfg.webSearch = !S.cfg.webSearch;
       saveCfg();
@@ -3138,6 +3344,8 @@ $('#sidebar').addEventListener('click', function(e){
       setCfg({ maxDocMB: clamp(parseInt(v, 10) || 20, 1, 100) });
     } else if (ck === 'maxImgMB'){
       setCfg({ maxImgMB: clamp(parseInt(v, 10) || 10, 1, 100) });
+    } else if (ck === 'imgPartial'){
+      setCfg({ imgPartial: clamp(parseInt(v, 10) || 0, 0, 3) });
     } else {
       var patch = {}; patch[ck] = v;
       setCfg(patch);

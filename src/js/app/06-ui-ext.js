@@ -911,6 +911,62 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     frag.appendChild(det);
     return frag;
   }
+  function renderImgCard(m){
+    var card = m.imgCard || {};
+    var fig = el('figure', { class: 'img-gen', 'data-mid': m.id });
+    var view = el('div', { class: 'img-gen-view' });
+    var statusText = '';
+    var hasFrame = false;
+    if (m.status === 'streaming'){
+      var frames = card._frameUrls || [];
+      if (frames.length){
+        hasFrame = true;
+        var img = el('img', { src: frames[frames.length - 1], alt: '生成预览' });
+        img.className = 'img-gen-img' + (frames.length > 1 ? ' blur-in' : ' blur');
+        view.appendChild(img);
+        statusText = '正在生成…（已收到 ' + frames.length + ' 帧）';
+      } else {
+        view.appendChild(el('div', { class: 'img-gen-skel' }));
+        statusText = '正在生成…';
+      }
+    } else if (m.status === 'error'){
+      view.appendChild(el('div', { class: 'img-gen-skel err' }));
+      statusText = m.errMsg || '生成失败';
+    } else {
+      // final：优先用已落库的附件（刷新后旧的 blob URL 已失效）
+      if (card.final || (m.attachments && m.attachments[0])){
+        view.appendChild(el('div', { class: 'img-gen-skel' }));
+        var aid = card.final || m.attachments[0];
+        DB.getAttachment(aid).then(function(a){
+          if (!a || !a.blob) return;
+          var url = URL.createObjectURL(a.blob);
+          try { S.previewUrls.push(url); } catch(e){}
+          card._finalUrl = url;
+          view.textContent = '';
+          view.appendChild(el('img', { class: 'img-gen-img', src: url, alt: a.name || '生成图片' }));
+        });
+      } else if (card._finalUrl){
+        hasFrame = true;
+        view.appendChild(el('img', { class: 'img-gen-img', src: card._finalUrl, alt: '生成图片' }));
+      } else if (card._frameUrls && card._frameUrls.length){
+        view.appendChild(el('img', { class: 'img-gen-img', src: card._frameUrls[card._frameUrls.length - 1], alt: '生成图片' }));
+      } else {
+        view.appendChild(el('div', { class: 'img-gen-skel' }));
+      }
+    }
+    fig.appendChild(view);
+    var meta = el('div', { class: 'img-gen-meta' });
+    if (statusText) meta.appendChild(el('div', { class: 'img-gen-status', text: statusText }));
+    if (card.prompt) meta.appendChild(el('div', { class: 'img-gen-prompt', text: card.prompt, title: card.prompt }));
+    fig.appendChild(meta);
+    var bar = el('div', { class: 'img-gen-bar' });
+    bar.appendChild(el('button', { class: 'btn btn-sec btn-sm', 'data-act': 'img-dl', 'data-id': m.id, text: '下载' }));
+    bar.appendChild(el('button', { class: 'btn btn-sec btn-sm', 'data-act': m.status === 'error' ? 'img-regen' : 'img-regen', 'data-id': m.id, text: m.status === 'error' ? '重试' : '重新生成' }));
+    bar.appendChild(el('button', { class: 'btn btn-sec btn-sm', 'data-act': 'img-copy', 'data-id': m.id, text: '复制 prompt' }));
+    fig.appendChild(bar);
+    return fig;
+  }
+
   function msgNode(m){
     /* v0.2.1：工具结果不再以「你」的身份出现 —— 新消息 role=tool，旧数据按 [fs-result]/[run-result] 前缀识别 */
     var workTool = m.role === 'tool' || /^\[run-result\]/.test((m.content || '').trim()); // Work 工具结果 → 紧凑卡片
@@ -943,7 +999,10 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var _sf = sf; // v0.3.34：先建后挂，保证顺序是正文→来源
   } // v0.3.32：来源页脚（对标 Perplexity）
     var body = el('div', { class: 'msg-body md' });
-    if (m.status === 'streaming' && !m.content){
+    if (m.imgCard){
+      body.classList.remove('md');
+      body.appendChild(renderImgCard(m));
+    } else if (m.status === 'streaming' && !m.content){
       body.appendChild(el('div', { class: 'skel' }, [el('i'), el('i'), el('i')]));
     } else if (workTool){
       body.appendChild(renderToolBody(m)); // v0.2.1：Work 工具结果 → 紧凑卡片（一行一个工具），原始输出折叠
@@ -994,7 +1053,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       n.appendChild(imgsBox);
     }
     /* v1.8：正文不再自动折叠（原先超 2000px 自动收起，每次都要点「展开全文」） */
-    if (m.attachments && m.attachments.length){
+    if (m.attachments && m.attachments.length && !(m.imgCard && m.imgCard.final)){
       var ats = el('div', { class: 'msg-atts' });
       for (var i = 0; i < m.attachments.length; i++){
         (function(aid){
