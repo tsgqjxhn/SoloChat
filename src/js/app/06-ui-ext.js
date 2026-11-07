@@ -967,6 +967,36 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     return fig;
   }
 
+  /* C4：把正文里的 [1]/[2] 换成上标角标，悬停出标题/域名/摘要，点击滚到来源 */
+  function decorateCites(root, srcs){
+    if (!srcs || !srcs.length) return;
+    try {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), nodes = [], n;
+      while ((n = walker.nextNode())){
+        var p = n.parentNode;
+        if (!p || /^(PRE|CODE|A|SUP|SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)) continue;
+        if (/\[\d{1,2}\]/.test(n.nodeValue)) nodes.push(n);
+      }
+      nodes.forEach(function(t){
+        var s = t.nodeValue, re = /\[(\d{1,2})\]/g, last = 0, mm, frag = document.createDocumentFragment(), hit = false;
+        while ((mm = re.exec(s))){
+          var i = +mm[1], x = srcs[i - 1];
+          if (!x) continue;
+          hit = true;
+          frag.appendChild(document.createTextNode(s.slice(last, mm.index)));
+          var host = '';
+          try { host = new URL(x.u).hostname.replace(/^www\./, ''); } catch (e) {}
+          var tip = (x.t || x.u || '') + (host ? ' · ' + host : '') + (x.s ? '\n' + String(x.s).slice(0, 120) : '');
+          var a = document.createElement('a');
+          a.className = 'cite'; a.href = '#src-' + i; a.textContent = String(i);
+          a.title = tip; a.setAttribute('data-tip', tip);
+          frag.appendChild(a);
+          last = mm.index + mm[0].length;
+        }
+        if (hit){ frag.appendChild(document.createTextNode(s.slice(last))); t.parentNode.replaceChild(frag, t); }
+      });
+    } catch (e) {}
+  }
   function msgNode(m){
     /* v0.2.1：工具结果不再以「你」的身份出现 —— 新消息 role=tool，旧数据按 [fs-result]/[run-result] 前缀识别 */
     var workTool = m.role === 'tool' || /^\[run-result\]/.test((m.content || '').trim()); // Work 工具结果 → 紧凑卡片
@@ -994,7 +1024,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     sf.appendChild(el('span', { class: 'msg-srcs-h', text: '来源' }));
     m.srcs.forEach(function(x, k){
       var _hr = /^https?:\/\//i.test(String(x.u || '')) ? x.u : '#'; // v0.3.33：只放行 http(s)，避免 javascript: 之类被点开
-      sf.appendChild(el('a', { class: 'msg-src', href: _hr, target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
+      sf.appendChild(el('a', { class: 'msg-src', id: 'src-' + (k + 1), href: _hr, target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
     });
     var _sf = sf; // v0.3.34：先建后挂，保证顺序是正文→来源
   } // v0.3.32：来源页脚（对标 Perplexity）
@@ -1012,6 +1042,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       body.textContent = m.content;
     }
     n.appendChild(body);
+    if (m.srcs && m.srcs.length) decorateCites(body, m.srcs);
   if (typeof _sf !== 'undefined' && _sf) n.appendChild(_sf);
     /* v1.28.4：证据条 —— 已生成 / 已保存 / 已运行 / 已验证；没有 verify 就标「未验证」 */
     if (m.role === 'assistant' && m.content){

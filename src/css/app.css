@@ -961,6 +961,12 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .msg-src{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--muted);text-decoration:none}
 .msg-src:hover{color:var(--primary);text-decoration:underline}
+/* C4：正文引用角标 + 悬停卡片 + 来源高亮 */
+.cite{position:relative;display:inline-block;min-width:13px;height:13px;line-height:13px;padding:0 3px;margin:0 1px;border-radius:4px;background:var(--soft);color:var(--primary);font-size:10px;font-weight:600;text-align:center;text-decoration:none;vertical-align:super;cursor:pointer}
+.cite:hover{background:var(--primary);color:#fff}
+.cite::after{content:attr(data-tip);position:absolute;left:0;bottom:1.7em;z-index:80;display:none;width:max-content;max-width:320px;white-space:pre-line;padding:6px 9px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font-size:11px;font-weight:400;line-height:1.5;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.cite:hover::after{display:block}
+.msg-src:target{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}

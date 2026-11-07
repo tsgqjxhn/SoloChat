@@ -356,8 +356,11 @@ var MD = (function(){
   })();
 
   function render(src, opts){
-    var noMedia = !!(opts && opts.noMedia); // v2.4：流式期不建 <img>/<video>（反复重建会重复请求、抖动），收尾再全量渲染
+    var noMedia = opts ? opts.noMedia : false; // false 全量 / 'stream' 只放行 blob:data: / true 全禁
+    var streamMode = noMedia === 'stream';
     src = esc(src == null ? '' : String(src));
+    /* C3：未闭合围栏先生成一个临时闭合，避免流式期代码块闪成裸文本 */
+    if (((src.match(/```/g) || []).length % 2) === 1) src += '\n```';
 
     /* 1. 抽出围栏代码块；占位符用私用区哨兵 */
     var codes = [];
@@ -410,14 +413,14 @@ var MD = (function(){
         return pre + (t.length >= 60 ? shortUrl(t) : t) + trail;
       });
       s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, function(m, alt, u){
-        if (noMedia) return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + (alt || u) + '</a>'; // 流式期先当链接，收尾再变图
+        if (noMedia && !(streamMode && /^(blob:|data:)/i.test(u))) return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + (alt || u) + '</a>'; // 流式期：远程图先当链接，本地 blob 直接出图
         return mediaTag(u, alt);
       });
       s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
       s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function(m, t, u){
         /* v2.6：模型常把图片写成 [文字](图链) 而非 ![说明](图链)——按扩展名判媒体则内嵌（mediaTag 自带锚点可点开原图） */
-        if (!noMedia && (IMG_RE.test(u) || VID_RE.test(u))) return mediaTag(u, t);
+        if ((!noMedia || (streamMode && /^(blob:|data:)/i.test(u))) && (IMG_RE.test(u) || VID_RE.test(u))) return mediaTag(u, t);
         return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + t + '</a>';
       });
       /* 公式：块级占位符 → 行内；\(...\)；谨慎的 $...$（含数学特征才认，避免误伤货币） */

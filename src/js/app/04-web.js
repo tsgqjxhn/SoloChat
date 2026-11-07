@@ -855,7 +855,7 @@ function fitSide(){
 function mdStream(acc){
   var t = acc;
   if (((t.match(/```/g) || []).length % 2) === 1) t += '\n```';
-  return MD.render(t, { noMedia: true }); // v2.4：流式期不出图/视频，收尾时 endStream 全量渲染
+  return MD.render(t, { noMedia: 'stream' }); // C3：流式期远程媒体仍延后，未闭合围栏先闭合，避免闪成裸文本
 }
 
 /* 文档解析（v1.4）：docx/xlsx/pptx = zip + 原生 DecompressionStream 解压；

@@ -976,6 +976,12 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .msg-src{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--muted);text-decoration:none}
 .msg-src:hover{color:var(--primary);text-decoration:underline}
+/* C4：正文引用角标 + 悬停卡片 + 来源高亮 */
+.cite{position:relative;display:inline-block;min-width:13px;height:13px;line-height:13px;padding:0 3px;margin:0 1px;border-radius:4px;background:var(--soft);color:var(--primary);font-size:10px;font-weight:600;text-align:center;text-decoration:none;vertical-align:super;cursor:pointer}
+.cite:hover{background:var(--primary);color:#fff}
+.cite::after{content:attr(data-tip);position:absolute;left:0;bottom:1.7em;z-index:80;display:none;width:max-content;max-width:320px;white-space:pre-line;padding:6px 9px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font-size:11px;font-weight:400;line-height:1.5;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.cite:hover::after{display:block}
+.msg-src:target{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}
@@ -1357,7 +1363,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.7';
+var APP_VER = 'v0.4.8';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -5596,8 +5602,11 @@ var MD = (function(){
   })();
 
   function render(src, opts){
-    var noMedia = !!(opts && opts.noMedia); // v2.4：流式期不建 <img>/<video>（反复重建会重复请求、抖动），收尾再全量渲染
+    var noMedia = opts ? opts.noMedia : false; // false 全量 / 'stream' 只放行 blob:data: / true 全禁
+    var streamMode = noMedia === 'stream';
     src = esc(src == null ? '' : String(src));
+    /* C3：未闭合围栏先生成一个临时闭合，避免流式期代码块闪成裸文本 */
+    if (((src.match(/```/g) || []).length % 2) === 1) src += '\n```';
 
     /* 1. 抽出围栏代码块；占位符用私用区哨兵 */
     var codes = [];
@@ -5650,14 +5659,14 @@ var MD = (function(){
         return pre + (t.length >= 60 ? shortUrl(t) : t) + trail;
       });
       s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, function(m, alt, u){
-        if (noMedia) return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + (alt || u) + '</a>'; // 流式期先当链接，收尾再变图
+        if (noMedia && !(streamMode && /^(blob:|data:)/i.test(u))) return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + (alt || u) + '</a>'; // 流式期：远程图先当链接，本地 blob 直接出图
         return mediaTag(u, alt);
       });
       s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
       s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function(m, t, u){
         /* v2.6：模型常把图片写成 [文字](图链) 而非 ![说明](图链)——按扩展名判媒体则内嵌（mediaTag 自带锚点可点开原图） */
-        if (!noMedia && (IMG_RE.test(u) || VID_RE.test(u))) return mediaTag(u, t);
+        if ((!noMedia || (streamMode && /^(blob:|data:)/i.test(u))) && (IMG_RE.test(u) || VID_RE.test(u))) return mediaTag(u, t);
         return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + t + '</a>';
       });
       /* 公式：块级占位符 → 行内；\(...\)；谨慎的 $...$（含数学特征才认，避免误伤货币） */
@@ -7736,7 +7745,7 @@ function fitSide(){
 function mdStream(acc){
   var t = acc;
   if (((t.match(/```/g) || []).length % 2) === 1) t += '\n```';
-  return MD.render(t, { noMedia: true }); // v2.4：流式期不出图/视频，收尾时 endStream 全量渲染
+  return MD.render(t, { noMedia: 'stream' }); // C3：流式期远程媒体仍延后，未闭合围栏先闭合，避免闪成裸文本
 }
 
 /* 文档解析（v1.4）：docx/xlsx/pptx = zip + 原生 DecompressionStream 解压；
@@ -10939,6 +10948,36 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     return fig;
   }
 
+  /* C4：把正文里的 [1]/[2] 换成上标角标，悬停出标题/域名/摘要，点击滚到来源 */
+  function decorateCites(root, srcs){
+    if (!srcs || !srcs.length) return;
+    try {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), nodes = [], n;
+      while ((n = walker.nextNode())){
+        var p = n.parentNode;
+        if (!p || /^(PRE|CODE|A|SUP|SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)) continue;
+        if (/\[\d{1,2}\]/.test(n.nodeValue)) nodes.push(n);
+      }
+      nodes.forEach(function(t){
+        var s = t.nodeValue, re = /\[(\d{1,2})\]/g, last = 0, mm, frag = document.createDocumentFragment(), hit = false;
+        while ((mm = re.exec(s))){
+          var i = +mm[1], x = srcs[i - 1];
+          if (!x) continue;
+          hit = true;
+          frag.appendChild(document.createTextNode(s.slice(last, mm.index)));
+          var host = '';
+          try { host = new URL(x.u).hostname.replace(/^www\./, ''); } catch (e) {}
+          var tip = (x.t || x.u || '') + (host ? ' · ' + host : '') + (x.s ? '\n' + String(x.s).slice(0, 120) : '');
+          var a = document.createElement('a');
+          a.className = 'cite'; a.href = '#src-' + i; a.textContent = String(i);
+          a.title = tip; a.setAttribute('data-tip', tip);
+          frag.appendChild(a);
+          last = mm.index + mm[0].length;
+        }
+        if (hit){ frag.appendChild(document.createTextNode(s.slice(last))); t.parentNode.replaceChild(frag, t); }
+      });
+    } catch (e) {}
+  }
   function msgNode(m){
     /* v0.2.1：工具结果不再以「你」的身份出现 —— 新消息 role=tool，旧数据按 [fs-result]/[run-result] 前缀识别 */
     var workTool = m.role === 'tool' || /^\[run-result\]/.test((m.content || '').trim()); // Work 工具结果 → 紧凑卡片
@@ -10966,7 +11005,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     sf.appendChild(el('span', { class: 'msg-srcs-h', text: '来源' }));
     m.srcs.forEach(function(x, k){
       var _hr = /^https?:\/\//i.test(String(x.u || '')) ? x.u : '#'; // v0.3.33：只放行 http(s)，避免 javascript: 之类被点开
-      sf.appendChild(el('a', { class: 'msg-src', href: _hr, target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
+      sf.appendChild(el('a', { class: 'msg-src', id: 'src-' + (k + 1), href: _hr, target: '_blank', rel: 'noreferrer', title: x.u || '' }, [String(k + 1) + '. ' + String(x.t || x.u || '')]));
     });
     var _sf = sf; // v0.3.34：先建后挂，保证顺序是正文→来源
   } // v0.3.32：来源页脚（对标 Perplexity）
@@ -10984,6 +11023,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       body.textContent = m.content;
     }
     n.appendChild(body);
+    if (m.srcs && m.srcs.length) decorateCites(body, m.srcs);
   if (typeof _sf !== 'undefined' && _sf) n.appendChild(_sf);
     /* v1.28.4：证据条 —— 已生成 / 已保存 / 已运行 / 已验证；没有 verify 就标「未验证」 */
     if (m.role === 'assistant' && m.content){
