@@ -542,36 +542,17 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .pk-btn{position:relative}
 @keyframes pkIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-/* 「/」面板：与输入框同宽，贴着输入框上沿弹出 */
+/* 「/」统一扩展搜索 */
 #pk-slash{left:-1px;right:-1px;width:auto;max-height:min(58vh,470px);padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:14px}
-#pk-slash .pk-head{display:flex;align-items:baseline;gap:9px;padding:13px 15px 10px;flex:none}
+#pk-slash .pk-head{display:flex;align-items:baseline;gap:9px;padding:12px 14px 8px;flex:none}
 #pk-slash .pk-head b{font-size:13px;font-weight:600;color:var(--ink)}
 #pk-slash .pk-head span{font-size:11.5px;color:var(--faint)}
-#pk-slash .pk-tiles{display:flex;flex-wrap:wrap;gap:6px;padding:0 13px 12px;flex:none;border-bottom:1px solid var(--hairline-soft)}
-#pk-slash .pk-tile{display:flex;align-items:center;gap:6px;padding:7px 10px;background:var(--canvas);border:1px solid var(--hairline);border-radius:9px;cursor:pointer;font:inherit;font-size:12.5px;line-height:1.2;color:var(--body);transition:.12s}
-#pk-slash .pk-tile:hover{background:var(--soft);color:var(--ink)}
-#pk-slash .pk-tile.on{border-color:var(--ring-line);color:var(--ink);background:var(--soft);box-shadow:0 0 0 3px var(--ring)}
-#pk-slash .pk-tile .ic{width:14px;height:14px;color:var(--muted)}
-#pk-slash .pk-tile.on .ic{color:var(--primary)}
-#pk-slash .pk-tile em{font-style:normal;font-size:10.5px;color:var(--faint)}
-#pk-slash .pk-scroll{flex:1;min-height:0;overflow:auto;padding:6px}
-#pk-slash .pk-sec{border:0}
-#pk-slash .pk-sh{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink);transition:background .12s}
-#pk-slash .pk-sh:hover{background:var(--soft)}
-#pk-slash .pk-sh .ic{width:14px;height:14px;color:var(--muted)}
-#pk-slash .pk-sh .n{margin-left:auto;font-weight:400;font-size:11px;color:var(--faint)}
-#pk-slash .pk-sh .cv{width:12px;height:12px;color:var(--faint);transition:transform .15s}
-#pk-slash .pk-sec.open .pk-sh .cv{transform:rotate(90deg)}
-#pk-slash .pk-body{display:none;padding:0 0 4px}
-#pk-slash .pk-sec.open .pk-body{display:block}
-#pk-slash .pk-body .pk-it{padding-left:31px}
-#pk-slash .pk-foot{flex:none;display:flex;align-items:center;gap:8px;padding:9px 15px;border-top:1px solid var(--hairline-soft);font-size:11px;color:var(--faint)}
-#pk-slash .pk-foot kbd{font:inherit;font-size:10.5px;padding:1px 5px;border:1px solid var(--hairline);border-radius:4px;background:var(--soft);color:var(--muted)}
-#pk-slash .pk-empty{display:flex;flex-direction:column;align-items:center;gap:7px;padding:30px 22px 26px;text-align:center}
-#pk-slash .pk-empty .ic{width:26px;height:26px;color:var(--faint);margin-bottom:2px}
-#pk-slash .pk-empty-t{font-size:13px;font-weight:600;color:var(--ink)}
-#pk-slash .pk-empty-s{font-size:11.5px;line-height:1.65;color:var(--faint);max-width:380px}
-#pk-slash .pk-empty .btn{margin-top:9px}
+#pk-slash .pk-scroll{flex:1;min-height:0;overflow:auto;padding:4px 6px 8px}
+#pk-slash .pk-it{align-items:center;gap:8px}
+#pk-slash .pk-it .tag{font-size:10.5px;padding:1px 6px;border-radius:999px;background:var(--soft);color:var(--muted);border:1px solid var(--hairline);flex:none}
+#pk-slash .pk-it .tag.bi{background:color-mix(in srgb,var(--primary) 10%,var(--canvas));color:var(--primary);border-color:var(--ring-line)}
+#pk-slash .pk-it .ds{font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+#pk-slash .pk-foot{flex:none;padding:8px 14px;border-top:1px solid var(--hairline-soft);font-size:11px;color:var(--faint)}
 
 /* 侧栏项目组：项目=工作区文件夹 */
 .ss-proj{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:var(--r-md);cursor:pointer;color:var(--body);font-weight:500}
@@ -1668,25 +1649,23 @@ function loadCfg(){
     if (Object.prototype.hasOwnProperty.call(act, mk)) cfg[mk] = act[mk];
   }
   if (!Array.isArray(cfg.models)) cfg.models = [];
-  /* 迁移（一次性）：内置工具旧 id tool:<name> → builtin:<name>；只做一次，之后用户自建同名工具保持 tool: 前缀 */
-  if (!c.picksBuiltinMig){
+  /* 迁移（一次性）：内置工具旧 id tool:<name> → builtin:<name> */
+  if (!c.picksBuiltinMig) {
     try {
-      var _bn = (typeof EXT !== 'undefined' && EXT && EXT.BUILTIN) ? EXT.BUILTIN : [];
-      var _bset = {};
-      for (var _bi = 0; _bi < _bn.length; _bi++) _bset[_bn[_bi].id] = 1;
-      if (cfg.picks && typeof cfg.picks === 'object' && Array.isArray(cfg.picks.tool)){
-        var _p = {}; for (var _kk in cfg.picks) _p[_kk] = cfg.picks[_kk];
-        var _src = _p.tool, _dst = [];
-        for (var _tj = 0; _tj < _src.length; _tj++){
-          var _id = _src[_tj];
-          if (typeof _id === 'string' && _id.indexOf('tool:') === 0 && _bset[_id.slice(5)]) _id = 'builtin:' + _id.slice(5);
-          if (_dst.indexOf(_id) < 0) _dst.push(_id);
+      var _bset={web:1,crawl:1,search:1,get:1,browser:1,download:1,play:1,run:1,preview:1,'vfs-write':1,'vfs-list':1,'vfs-read':1,patch:1,'fs-read':1,'fs-write':1,'fs-edit':1,'fs-list':1,skill:1,sub:1,suball:1,agent:1,cmd:1,python:1,git:1,nav:1,chart:1,shot:1,time:1,calc:1,json:1,http:1};
+      if (cfg.picks && typeof cfg.picks==='object' && Array.isArray(cfg.picks.tool)){
+        var _p={}; for (var _k in cfg.picks) _p[_k]=cfg.picks[_k];
+        var _src=_p.tool, _dst=[];
+        for (var _i=0; _i<_src.length; _i++){
+          var _id=_src[_i];
+          if (typeof _id==='string' && _id.indexOf('tool:')===0 && _bset[_id.slice(5)]) _id='builtin:'+_id.slice(5);
+          if (_dst.indexOf(_id)<0) _dst.push(_id);
         }
-        _p.tool = _dst; cfg.picks = _p;
+        _p.tool=_dst; cfg.picks=_p;
       }
-    } catch (e) {}
+    } catch(e) {}
+    cfg.picksBuiltinMig = 1;
   }
-  cfg.picksBuiltinMig = 1;
   S.cfg = cfg;
 }
 var saveCfg = debounce(function(){
@@ -13519,64 +13498,54 @@ function sendMessage(){
     var pop = panel(b.getAttribute('data-pk')); b.appendChild(pop);
   });
   refreshBadges();
-  /* 「/」统一扩展搜索：保留符号，按 / 后的查询实时过滤全部扩展类型 */
-  function cnOf(it){ return it.kind === 'tool' ? (it.builtin ? '内置工具' : '工具') : (KEY[it.kind] || it.kind); }
+  /* 「/」统一扩展搜索：保留符号，按 / 后查询实时过滤全部 EXT.registry() */
+  function cnOf(it){ return it.kind==='tool' ? (it.builtin?'内置工具':'工具') : (KEY[it.kind]||it.kind); }
   function slashRow(it){
-    var ps = picks(), isP = it.kind === 'prompt';
-    var on = !isP && (ps[it.kind] || []).indexOf(it.id) >= 0;
-    var kids = [];
-    if (!isP) kids.push(el('span', { class: 'bx' }));
-    kids.push(el('span', { class: 'tag' + (it.builtin && it.kind === 'tool' ? ' bi' : ''), text: cnOf(it) }));
-    kids.push(el('span', { class: 'nm', text: it.title || it.name }));
-    if (it.desc) kids.push(el('span', { class: 'ds', text: String(it.desc).slice(0, 60) }));
-    var r = el('div', { class: 'pk-it' + (on ? ' on' : '') }, kids);
-    r.addEventListener('click', function(){
-      if (isP){ $input.value = it.body || ''; try { autosize(); } catch (e) {} closeAll(); $input.focus(); return; }
-      toggle(it.kind, it.id); r.classList.toggle('on');
-      /* 快速选用：选完清掉「/查询」并收起，输入框直接可以写问题；多选走左侧 pk 面板 */
-      $input.value = ''; try { autosize(); } catch (e) {} closeAll(); $input.focus();
+    var ps=picks(), isP=it.kind==='prompt', on=!isP && (ps[it.kind]||[]).indexOf(it.id)>=0;
+    var kids=[];
+    if(!isP) kids.push(el('span',{class:'bx'}));
+    kids.push(el('span',{class:'tag'+(it.builtin&&it.kind==='tool'?' bi':''),text:cnOf(it)}));
+    kids.push(el('span',{class:'nm',text:it.title||it.name}));
+    if(it.desc) kids.push(el('span',{class:'ds',text:String(it.desc).replace(/s+/g,' ').slice(0,64)}));
+    var r=el('div',{class:'pk-it'+(on?' on':'')},kids);
+    r.addEventListener('click',function(){
+      if(isP){ $input.value=it.body||''; try{autosize();}catch(e){} closeAll(); $input.focus(); return; }
+      toggle(it.kind,it.id); r.classList.toggle('on');
     });
     return r;
   }
-  function slashFilter(box, q){
-    var lst = box.querySelector('.pk-srch'); if (!lst) return;
-    while (lst.firstChild) lst.removeChild(lst.firstChild);
-    q = String(q || '').trim().toLowerCase();
-    var reg = []; try { reg = EXT.registry(); } catch (e2) {}
-    var shown = 0, i, it, hay;
-    for (i = 0; i < reg.length && shown < 60; i++){
-      it = reg[i];
-      hay = [it.name, it.title, it.desc, it.id, cnOf(it)].join(' ').toLowerCase();
-      if (q && hay.indexOf(q) < 0) continue;
+  function slashFilter(box,q){
+    var lst=box.querySelector('.pk-scroll'); if(!lst) return;
+    while(lst.firstChild) lst.removeChild(lst.firstChild);
+    q=String(q||'').trim().toLowerCase();
+    var reg=[]; try{reg=EXT.registry();}catch(e2){}
+    var shown=0;
+    for(var i=0;i<reg.length&&shown<60;i++){
+      var it=reg[i], hay=[it.name,it.title,it.desc,it.id,cnOf(it)].join(' ').toLowerCase();
+      if(q && hay.indexOf(q)<0) continue;
       lst.appendChild(slashRow(it)); shown++;
     }
-    if (!shown) lst.appendChild(el('div', { class: 'pk-it', style: 'cursor:default;color:var(--faint)', text: '没有匹配的扩展' }));
+    if(!shown) lst.appendChild(el('div',{class:'pk-it',style:'cursor:default;color:var(--faint)',text:'没有匹配的扩展'}));
   }
   function slashPanel(){
-    var box = el('div', { class: 'pk-pop', id: 'pk-slash' });
-    box.appendChild(el('div', { class: 'pk-head' }, [
-      el('b', { text: '扩展搜索' }),
-      el('span', { text: '输入 / 后继续打字，按名称 / 类型 / 说明筛选本轮要用的扩展' })
-    ]));
-    box.appendChild(el('div', { class: 'pk-scroll pk-srch' }));
-    box.appendChild(el('div', { class: 'pk-foot' }, [
-      el('span', { text: '输入字母筛选 · Esc 关闭 · 点选加入本轮' })
-    ]));
+    var box=el('div',{class:'pk-pop',id:'pk-slash'});
+    box.appendChild(el('div',{class:'pk-head'},[el('b',{text:'本轮扩展'}),el('span',{text:'输入字母筛选全部扩展'})]));
+    box.appendChild(el('div',{class:'pk-scroll'}));
+    box.appendChild(el('div',{class:'pk-foot',text:'输入字母筛选 · Esc 关闭 · 点选加入本轮'}));
     return box;
   }
-  document.addEventListener('keydown', function(e){
-    if (e.key !== 'Escape' || !document.querySelector('.pk-pop')) return;
-    e.stopPropagation();      /* 面板开着时 Esc 只收面板，别顺带把生成也停了 */
-    closeAll();
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Escape'||!document.querySelector('.pk-pop')) return;
+    e.stopPropagation(); closeAll();
   });
-  window.addEventListener('load', function(){
-    var inp = document.getElementById('input'); if (!inp) return;
-    inp.addEventListener('input', function(){
-      var v = inp.value || '', cur = document.getElementById('pk-slash');
-      if (v.charAt(0) === '/'){
-        if (!cur){ closeAll(); cur = slashPanel(); (document.querySelector('.cbox') || document.body).appendChild(cur); }
-        slashFilter(cur, v.slice(1));
-      } else if (cur) cur.remove();          /* 不以 / 开头就收起 */
+  window.addEventListener('load',function(){
+    var inp=document.getElementById('input'); if(!inp) return;
+    inp.addEventListener('input',function(){
+      var v=inp.value||'', cur=document.getElementById('pk-slash');
+      if(v.charAt(0)==='/'){
+        if(!cur){ closeAll(); cur=slashPanel(); (document.querySelector('.cbox')||document.body).appendChild(cur); }
+        slashFilter(cur,v.slice(1));
+      } else if(cur) cur.remove();
     });
   });
 })();
