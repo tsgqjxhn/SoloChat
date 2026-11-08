@@ -2396,6 +2396,8 @@ namespace SoloChatHost
                         break;
                     case "read": FsRead(req, id); break;
                     case "list": FsList(req, id); break;
+                    case "grep": FsGrep(req, id); break;
+                    case "glob": FsGlob(req, id); break;
                     case "write": FsWrite(req, id); break;
                     case "writeb64": FsWriteB64(req, id); break; /* v1.1.22：原样写图片/PDF/Office 等二进制附件 */
       case "restore": FsRestore(req, id); break;   /* v1.28.4：撤销上次写入 */
@@ -2430,6 +2432,136 @@ namespace SoloChatHost
                 path = rel, text = text, bytes = bytes.Length,
                 lines = text.Length == 0 ? 0 : text.Split('\n').Length
             }), null);
+        }
+
+        /* A1：检索 —— grep（正则逐行）/ glob（通配路径）。只走已授权根，跳过依赖/构建目录。 */
+        static bool WildMatch(string path, string pattern)
+        {
+            path = (path ?? "").Replace('\\', '/');
+            pattern = (pattern ?? "").Replace('\\', '/').Trim();
+            if (pattern == "") return true;
+            var sb = new StringBuilder("^");
+            for (int i = 0; i < pattern.Length; i++)
+            {
+                char c = pattern[i];
+                if (c == '*')
+                {
+                    if (i + 1 < pattern.Length && pattern[i + 1] == '*') { sb.Append(".*"); i++; }
+                    else sb.Append("[^/]*");
+                }
+                else if (c == '?') sb.Append("[^/]");
+                else sb.Append(Regex.Escape(c.ToString()));
+            }
+            sb.Append("$");
+            string target = pattern.Contains("/") ? path : Path.GetFileName(path);
+            return Regex.IsMatch(target, sb.ToString(), RegexOptions.IgnoreCase);
+        }
+
+        static readonly string[] SkipDirs = { ".git", "node_modules", "bin", "obj", "dist", ".vs", "__pycache__", ".idea" };
+
+        static void WalkFiles(string dir, List<string> outp, int depth, int cap)
+        {
+            if (depth > 12 || outp.Count >= cap) return;
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(dir))
+                {
+                    outp.Add(f);
+                    if (outp.Count >= cap) return;
+                }
+            }
+            catch { }
+            try
+            {
+                foreach (var d in Directory.EnumerateDirectories(dir))
+                {
+                    string name = Path.GetFileName(d);
+                    bool skip = false;
+                    foreach (var x in SkipDirs) if (string.Equals(x, name, StringComparison.OrdinalIgnoreCase)) { skip = true; break; }
+                    if (skip) continue;
+                    WalkFiles(d, outp, depth + 1, cap);
+                    if (outp.Count >= cap) return;
+                }
+            }
+            catch { }
+        }
+
+        void FsGlob(JsonElement req, string id)
+        {
+            string root = ReqRoot(req);
+            string rel = req.TryGetProperty("path", out JsonElement gpEl) ? (gpEl.GetString() ?? "") : "";
+            string pat = req.TryGetProperty("data", out JsonElement gdEl) ? (gdEl.GetString() ?? "") : "";
+            if (string.IsNullOrWhiteSpace(pat)) { PostFs(id, "fs.error", null, "glob 需要模式，如 **/*.cs"); return; }
+            string rootFull = FsRootFull(root).TrimEnd('\\');
+            string start = string.IsNullOrWhiteSpace(rel) ? rootFull : GuardPath(root, rel);
+            if (!Directory.Exists(start)) { PostFs(id, "fs.error", null, "目录不存在: " + rel); return; }
+            var all = new List<string>();
+            WalkFiles(start, all, 0, 20000);
+            var files = new List<string>();
+            foreach (var f in all)
+            {
+                string relp = f.Substring(rootFull.Length).TrimStart('\\').Replace('\\', '/');
+                if (WildMatch(relp, pat)) files.Add(relp);
+                if (files.Count >= 300) break;
+            }
+            PostFs(id, "fs.done", JsonSerializer.Serialize(new { files = files, truncated = files.Count >= 300, scanned = all.Count }), null);
+        }
+
+        void FsGrep(JsonElement req, string id)
+        {
+            string root = ReqRoot(req);
+            string rel = req.TryGetProperty("path", out JsonElement gpEl) ? (gpEl.GetString() ?? "") : "";
+            string data = req.TryGetProperty("data", out JsonElement gdEl) ? (gdEl.GetString() ?? "") : "";
+            string pattern = data, glob = "";
+            int max = 100;
+            if (data.TrimStart().StartsWith("{"))
+            {
+                try
+                {
+                    using (var doc = JsonDocument.Parse(data))
+                    {
+                        var r = doc.RootElement;
+                        pattern = r.TryGetProperty("pattern", out JsonElement pe) ? (pe.GetString() ?? "") : "";
+                        glob = r.TryGetProperty("glob", out JsonElement ge) ? (ge.GetString() ?? "") : "";
+                        if (r.TryGetProperty("max", out JsonElement me) && me.TryGetInt32(out int mv)) max = Math.Min(Math.Max(mv, 1), 200);
+                    }
+                }
+                catch { }
+            }
+            if (string.IsNullOrWhiteSpace(pattern)) { PostFs(id, "fs.error", null, "grep 需要正则（可写成 JSON: {\"pattern\":\"x\",\"glob\":\"*.cs\"}）"); return; }
+            string rootFull = FsRootFull(root).TrimEnd('\\');
+            string start = string.IsNullOrWhiteSpace(rel) ? rootFull : GuardPath(root, rel);
+            if (!Directory.Exists(start)) { PostFs(id, "fs.error", null, "目录不存在: " + rel); return; }
+            Regex re;
+            try { re = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2)); }
+            catch (Exception ex) { PostFs(id, "fs.error", null, "正则无效：" + ex.Message); return; }
+            var files = new List<string>();
+            WalkFiles(start, files, 0, 5000);
+            var hits = new List<object>();
+            bool trunc = false;
+            foreach (var f in files)
+            {
+                try
+                {
+                    var fi = new FileInfo(f);
+                    if (fi.Length > 1024 * 1024) continue;
+                    string relp = f.Substring(rootFull.Length).TrimStart('\\').Replace('\\', '/');
+                    if (glob != "" && !WildMatch(relp, glob)) continue;
+                    string[] lines;
+                    try { lines = File.ReadAllLines(f); } catch { continue; }
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        if (!re.IsMatch(lines[i])) continue;
+                        string txt = lines[i].Trim();
+                        if (txt.Length > 220) txt = txt.Substring(0, 220);
+                        hits.Add(new { path = relp, line = i + 1, text = txt });
+                        if (hits.Count >= max) { trunc = true; break; }
+                    }
+                }
+                catch { }
+                if (trunc) break;
+            }
+            PostFs(id, "fs.done", JsonSerializer.Serialize(new { matches = hits, truncated = trunc, scanned = files.Count }), null);
         }
 
         void FsList(JsonElement req, string id)

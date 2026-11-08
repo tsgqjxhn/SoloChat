@@ -1376,7 +1376,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.13';
+var APP_VER = 'v0.4.14';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -15299,6 +15299,8 @@ var FS = (function(){
     '工具（围栏首行是参数）：\n' +
     '```fs-list —— 列目录（相对路径，可空）。动手前先看结构。\n' +
     '```fs-read —— 读文件（相对路径）。长文件会被截断：先定位再读，别整读整写。\n' +
+    '```grep <正则> [--path 子目录] [--glob "*.js"] [--max 100] —— 全文检索，回「路径:行号: 文本」。\n' +
+    '```glob <**/*.cs> [--path 子目录] —— 按通配符找文件，回路径列表。\n' +
     '```fs-edit —— 局部替换，首选方式，省 token。参数行写路径，体内两段：\n' +
     '--- old（原文，带足够上下文保证唯一）\n--- new（新文）\n' +
     '匹配不到或多处匹配会失败并回告：补上下文重试，不要退回整文件重写。\n' +
@@ -15314,7 +15316,7 @@ var FS = (function(){
     '失败处理：读 [fs-result] 的错误原因（路径错/匹配不到/权限），修正参数重试一次；同一错误两次不成就停下说明卡点。\n' +
     '输出格式（三段写完就停）：① 改动清单（文件:行/函数）② 验证方式与结果 ③ 未验证项与风险。不要整篇重贴文件内容，只贴改动片段。';
 function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；路径为体首行）；容忍 \r\n */
-    var re = /```(fs-(?:read|list|write|edit|done|rej)|skill|cmd|git|python|sub|agent|suball|browser-read|browser-act|browser|web|crawl|time|calc|json|http|search|get)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(fs-(?:read|list|write|edit|done|rej)|grep|glob|skill|cmd|git|python|sub|agent|suball|browser-read|browser-act|browser|web|crawl|time|calc|json|http|search|get)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       var call = { op: m[1], path: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' };
@@ -15518,6 +15520,36 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
               next();
             }, function(e){ parts.push('[python] 执行失败：' + (e && e.message || e)); next(); });
           });
+        return;
+      }
+      if (c.op === 'grep' || c.op === 'glob'){
+        var gws = ws0;
+        if (!gws){ parts.push('[' + c.op + '] 需要先绑定 Agent 工作区'); next(); return; }
+        var garg = String(c.path || '').trim(), gbody = String(c.body || '').trim();
+        if (c.op === 'glob'){
+          var gdir = '', gpat = garg;
+          var gm = /--path\s+(?:"([^"]*)"|(\S+))/.exec(gbody);
+          if (gm) gdir = gm[1] != null ? gm[1] : gm[2];
+          if (!gpat){ parts.push('[glob] 需要模式，如 ```glob **/*.cs'); next(); return; }
+          NET.fs('glob', gdir, gpat, gws).then(function(r){
+            var fs2 = (r && r.files) || [];
+            parts.push('[glob] ' + fs2.length + ' 个文件' + (r && r.truncated ? '（已截断）' : '') + '\n' + fs2.slice(0, 200).join('\n'));
+            next();
+          }, function(e){ parts.push('[glob] 失败：' + ((e && e.message) || e)); next(); });
+          return;
+        }
+        var gdir2 = '', gglob = '', gmax = 100;
+        var pm = /--path\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (pm) gdir2 = pm[1] != null ? pm[1] : pm[2];
+        var fm = /--glob\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (fm) gglob = fm[1] != null ? fm[1] : fm[2];
+        var mm = /--max\s+(\d+)/.exec(gbody); if (mm) gmax = parseInt(mm[1], 10) || 100;
+        if (!garg){ parts.push('[grep] 需要正则，如 ```grep TODO'); next(); return; }
+        NET.fs('grep', gdir2, JSON.stringify({ pattern: garg, glob: gglob, max: gmax }), gws).then(function(r){
+          var hits = (r && r.matches) || [];
+          var L = ['[grep] ' + hits.length + ' 处' + (r && r.truncated ? '（已截断）' : '') + '（扫描 ' + ((r && r.scanned) || 0) + ' 文件）'];
+          hits.forEach(function(h){ L.push(h.path + ':' + h.line + ': ' + h.text); });
+          parts.push(L.join('\n'));
+          next();
+        }, function(e){ parts.push('[grep] 失败：' + ((e && e.message) || e)); next(); });
         return;
       }
       if (c.op === 'cmd' || c.op === 'git'){
@@ -15878,6 +15910,8 @@ var EXT = (function(){
     { id: 'fs-write',   kind: 'tool', title: '写本地文件', brief: '新建 / 整文件替换', modes: ['agent'] },
     { id: 'fs-edit',    kind: 'tool', title: '局部修改',   brief: '唯一匹配替换', modes: ['agent'] },
     { id: 'fs-list',    kind: 'tool', title: '列目录',     brief: '工作区结构', modes: ['agent'] },
+    { id: 'grep',       kind: 'tool', title: '全文检索',   brief: '正则搜索工作区，回 路径:行号', modes: ['agent'] },
+    { id: 'glob',       kind: 'tool', title: '按名找文件', brief: '通配路径 → 文件列表', modes: ['agent'] },
     { id: 'skill',      kind: 'tool', title: '调用技能',   brief: '按名字取技能说明', modes: ['work','agent'] },
     { id: 'sub',        kind: 'tool', title: '派子智能体（单任务）', brief: '独立上下文跑子任务，只回结果', modes: ['work'] },
     { id: 'suball',     kind: 'tool', title: '并行派活',   brief: '多个子智能体同时跑', modes: ['work', 'agent'] },
@@ -16062,6 +16096,8 @@ var SPECS = {
   'fs-list': { form: 'fs-list <相对路径>' , arg: '可空，空 = 工作区根', ret: '[fs-result] list 路径（N 项）+ 条目', note: '动手前先看结构。', limit: '只能在工作区内；出界要逐次确认。' },
   'fs-write': { form: 'fs-write <相对路径>' + '\n' + '（紧跟完整内容）', arg: '第一行路径，剩下是全文', ret: '[fs-result] write 路径 + 结果', note: '新建文件或整文件替换。', limit: '工作区内直接写；工作区外每次都要你确认（显示完整路径与内容）。大改用这个，小改别用。' },
   'fs-edit': { form: 'fs-edit <相对路径>' + '\n--- old（原文）' + '\n--- new（新文）', arg: '路径 + old/new 两段', ret: '[fs-result] edit 路径 + 结果', note: '唯一匹配替换，省 token 的首选。', limit: '匹配不到或匹配到多处会失败，需要补上下文重试，不要退回整文件重写。' },
+  grep: { form: 'grep <正则>' + '\n' + '[--path 子目录] [--glob "*.js"] [--max 100]', arg: '正则 + 可选目录/文件名过滤/上限', ret: '[grep] N 处（扫描 M 文件）+ 路径:行号: 文本', note: '在工作区里按正则逐行搜索；默认跳过 .git/node_modules/bin/obj/dist 等目录，单文件 >1MB 跳过。', limit: '只看文本文件；最多 200 处；正则 2s 超时；结果路径相对工作区。' },
+  glob: { form: 'glob <通配路径>' + '\n' + '[--path 子目录]', arg: '如 **/*.cs 或 src/*.js', ret: '[glob] N 个文件 + 路径列表', note: '按通配符找文件：** 跨目录、* 单段、? 单字符。', limit: '最多 300 个；只列文件不列目录；大小写不敏感。' },
   python: { form: 'python' + '\n（紧跟完整代码）', arg: 'Python 3.11 脚本正文', ret: '[python] 退出码 + STDOUT/STDERR', note: '在 Agent 工作区里执行 Python 脚本；运行时从插件市场安装。', limit: '仅 Agent 模式；需要已安装 Python 3.11 运行时；执行前确认。' },
   skill: { form: 'skill <技能名>', arg: '技能条目的 name', ret: '该技能的说明正文', note: '按名字把技能说明取进上下文，相当于临时加载一份手册。', limit: '技能不存在会回错误；只读，不改技能内容。' },
   sub: { form: 'sub <角色> <任务>', arg: '角色名 + 任务描述（可多行）', ret: '子智能体的最终答复（不回过程）', note: '开一个独立上下文的子智能体跑一段活，只把结果拿回来。', limit: '仅 Work；子智能体受各自的工具白名单限制。' },
