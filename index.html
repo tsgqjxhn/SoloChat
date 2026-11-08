@@ -982,6 +982,19 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .cite::after{content:attr(data-tip);position:absolute;left:0;bottom:1.7em;z-index:80;display:none;width:max-content;max-width:320px;white-space:pre-line;padding:6px 9px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font-size:11px;font-weight:400;line-height:1.5;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.18)}
 .cite:hover::after{display:block}
 .msg-src:target{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+/* C5：画布弹层 */
+.cv-mask{position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center}
+.cv-box{width:min(880px,88vw);height:min(660px,82vh);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden}
+.cv-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--hairline)}
+.cv-title{font-size:13px}
+.cv-docs{max-width:300px;height:28px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
+.cv-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.cv-btn:hover{background:var(--lift)}
+.cv-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.cv-ta{flex:1;width:100%;box-sizing:border-box;padding:14px 16px;border:0;outline:0;resize:none;background:var(--bg);color:var(--text);font:13px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace}
+.cv-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--hairline)}
+.cv-vers{max-width:240px;height:26px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
+.cv-status{flex:1;color:var(--muted);font-size:12px}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}
@@ -1363,7 +1376,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.9';
+var APP_VER = 'v0.4.10';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -11111,6 +11124,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         row.appendChild(el('span', { class: 'var-pos', text: (vi + 1) + '/' + m.variants.length }));
         row.appendChild(el('button', { 'data-act': 'varnext', 'data-id': m.id, title: '下一版', text: '>', disabled: vi >= m.variants.length - 1 }));
       }
+      row.appendChild(el('button', { 'data-act': 'canvas', 'data-id': m.id, title: '在画布中编辑（C5）' }, [icon('edit'), '画布']));
       row.appendChild(el('button', { 'data-act': 'regen', 'data-id': m.id, title: '重新生成' }, [icon('retry'), '重新生成']));
     }
     row.appendChild(el('button', { 'data-act': 'delmsg', 'data-id': m.id, title: '删除' }, [icon('trash'), '删除']));
@@ -11865,6 +11879,10 @@ function sendMessage(){
       if (!_l7.length){ UI.toast('读不到限制常量', true); return; }
       UI.toast('自主执行边界：' + _l7.join(' · '));
       return;
+    }
+    if (cmd === '/canvas'){ /* C5：把最后一条回答放进画布 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (window.CANVAS) window.CANVAS.openLast(); return;
     }
     if (cmd === '/rewind'){ /* C6：撤销编辑重发造成的截断（2 分钟内） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
@@ -14557,6 +14575,7 @@ $('#sidebar').addEventListener('click', function(e){
       case 'img-dl': UI.imgDownload(id); break;
       case 'img-regen': UI.imgRegen(id); break;
       case 'img-copy': UI.imgCopyPrompt(id); break;
+      case 'canvas': if (window.CANVAS) window.CANVAS.fromMsg(id); break;
       case 'fs-apply': { var fa = b.closest('.msg'); if (fa) FS.apply(fa.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
         case 'fs-applyall': { var mm2 = b.closest('.msg'); if (mm2) FS.applyAll(mm2.getAttribute('data-id')); break; }
       case 'fs-reject': { var fr = b.closest('.msg'); if (fr) FS.reject(fr.getAttribute('data-id'), b.getAttribute('data-path')); break; }
@@ -18527,6 +18546,182 @@ var WORK = (function(){
   };
   try { window.IMG = IMG; } catch(e){}
   try { if (typeof module !== 'undefined') module.exports = IMG; } catch(e){}
+})();
+/* C5：Chat 文档画布 —— 长文/代码产物可编辑、保存、版本回退。
+   存储沿用快照思路：按会话分文档，localStorage 键 sc.canvas.v1。
+   入口：消息「画布」按钮 / /canvas。 */
+(function(){
+  'use strict';
+  var KEY = 'sc.canvas.v1';
+  function st(){
+    try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function put(o){ try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {} }
+  function sid(){ try { return (window._S && window._S.sid) || 'draft'; } catch (e) { return 'draft'; } }
+  function mk(tag, cls, txt){
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt != null) n.textContent = txt;
+    return n;
+  }
+  function titleOf(t){
+    var s = String(t || '').replace(/```[\s\S]*?```/g, ' ').replace(/[#>*`_\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    return (s.slice(0, 24) || '未命名');
+  }
+  function hm(ts){
+    var d = new Date(ts || Date.now());
+    function p(n){ return (n < 10 ? '0' : '') + n; }
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function docsOf(o, s){
+    if (!Array.isArray(o[s])) o[s] = [];
+    return o[s];
+  }
+  function curOf(o, s){
+    var list = docsOf(o, s);
+    var id = o._cur && o._cur[s];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return list[0] || null;
+  }
+  var refs = null;
+  function close(){
+    var m = document.querySelector('.cv-mask');
+    if (m) m.remove();
+    refs = null;
+  }
+  function render(){
+    var s = sid(), o = st(), list = docsOf(o, s);
+    var doc = curOf(o, s);
+    if (!doc){
+      doc = { id: 'cv' + Date.now().toString(36), title: '未命名', text: '', ts: Date.now(), versions: [] };
+      list.unshift(doc);
+      o._cur = o._cur || {}; o._cur[s] = doc.id;
+      put(o);
+    }
+    var old = document.querySelector('.cv-mask');
+    if (old) old.remove();
+    var mask = mk('div', 'cv-mask');
+    var box = mk('div', 'cv-box');
+    var head = mk('div', 'cv-head');
+    head.appendChild(mk('b', 'cv-title', '画布'));
+    var sel = mk('select', 'cv-docs');
+    list.forEach(function(d){
+      var op = mk('option', null, d.title + '（' + hm(d.ts) + '）');
+      op.value = d.id;
+      if (d.id === doc.id) op.selected = true;
+      sel.appendChild(op);
+    });
+    head.appendChild(sel);
+    var bNew = mk('button', 'cv-btn', '新建');
+    var bClose = mk('button', 'cv-btn', '关闭');
+    head.appendChild(bNew); head.appendChild(bClose);
+    var ta = mk('textarea', 'cv-ta');
+    ta.value = doc.text || '';
+    ta.placeholder = '在这里写长文或改代码；保存后进版本历史，可回退。';
+    var foot = mk('div', 'cv-foot');
+    var vs = mk('select', 'cv-vers');
+    var vlist = doc.versions || [];
+    vs.appendChild(mk('option', null, vlist.length ? '历史版本（' + vlist.length + '）' : '暂无历史版本'));
+    vs.firstChild.value = '';
+    vlist.forEach(function(v, i){
+      var op = mk('option', null, hm(v.ts) + ' · ' + String(v.t || '').replace(/\s+/g, ' ').slice(0, 20));
+      op.value = String(i);
+      vs.appendChild(op);
+    });
+    var bBack = mk('button', 'cv-btn', '回退');
+    var status = mk('span', 'cv-status', '');
+    var bSave = mk('button', 'cv-btn cv-primary', '保存');
+    foot.appendChild(vs); foot.appendChild(bBack); foot.appendChild(status); foot.appendChild(bSave);
+    box.appendChild(head); box.appendChild(ta); box.appendChild(foot);
+    mask.appendChild(box);
+    document.body.appendChild(mask);
+    refs = { mask: mask, ta: ta, status: status, sel: sel, vs: vs, doc: doc, s: s };
+
+    function autosave(){
+      doc.text = ta.value;
+      doc.ts = Date.now();
+      if (!doc.title || doc.title === '未命名') doc.title = titleOf(ta.value);
+      put(o);
+    }
+    function refreshVers(){
+      vs.innerHTML = '';
+      vs.appendChild(mk('option', null, vlist.length ? '历史版本（' + vlist.length + '）' : '暂无历史版本'));
+      vs.firstChild.value = '';
+      vlist.forEach(function(v, i){
+        var op = mk('option', null, hm(v.ts) + ' · ' + String(v.t || '').replace(/\s+/g, ' ').slice(0, 20));
+        op.value = String(i);
+        vs.appendChild(op);
+      });
+    }
+    bSave.onclick = function(){
+      autosave();
+      var last = doc.versions && doc.versions[0];
+      if (!last || last.t !== doc.text){
+        doc.versions.unshift({ t: doc.text, ts: Date.now() });
+        if (doc.versions.length > 20) doc.versions.length = 20;
+      }
+      put(o);
+      refreshVers();
+      sel.options[sel.selectedIndex] && (sel.options[sel.selectedIndex].text = doc.title + '（' + hm(doc.ts) + '）');
+      status.textContent = '已保存 ' + hm(doc.ts);
+    };
+    bBack.onclick = function(){
+      var i = vs.value;
+      if (i === '' || !vlist[+i]){ status.textContent = '先选一个历史版本'; return; }
+      ta.value = vlist[+i].t;
+      status.textContent = '已载入 ' + hm(vlist[+i].ts) + ' 的版本，点保存生效';
+    };
+    bNew.onclick = function(){
+      autosave();
+      var d = { id: 'cv' + Date.now().toString(36), title: '未命名', text: '', ts: Date.now(), versions: [] };
+      list.unshift(d);
+      o._cur[s] = d.id;
+      put(o);
+      render();
+    };
+    bClose.onclick = close;
+    sel.onchange = function(){
+      autosave();
+      o._cur[s] = sel.value;
+      put(o);
+      render();
+    };
+    ta.addEventListener('keydown', function(e){
+      if (e.key === 'Escape'){ e.preventDefault(); close(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')){ e.preventDefault(); bSave.onclick(); }
+    });
+    mask.addEventListener('click', function(e){ if (e.target === mask) close(); });
+    ta.focus();
+  }
+  function open(text, title){
+    var s = sid(), o = st(), list = docsOf(o, s);
+    if (text != null){
+      var d = { id: 'cv' + Date.now().toString(36), title: title || titleOf(text), text: String(text), ts: Date.now(), versions: [] };
+      list.unshift(d);
+      o._cur = o._cur || {}; o._cur[s] = d.id;
+      put(o);
+    }
+    render();
+  }
+  function fromMsg(id){
+    try {
+      var msgs = (window._S && window._S.msgs) || [];
+      for (var i = 0; i < msgs.length; i++){
+        if (msgs[i] && msgs[i].id === id){ open(msgs[i].content || '', titleOf(msgs[i].content)); return; }
+      }
+    } catch (e) {}
+    open('', '未命名');
+  }
+  function openLast(){
+    try {
+      var msgs = (window._S && window._S.msgs) || [];
+      for (var i = msgs.length - 1; i >= 0; i--){
+        if (msgs[i] && msgs[i].role === 'assistant' && msgs[i].content){ open(msgs[i].content, titleOf(msgs[i].content)); return; }
+      }
+    } catch (e) {}
+    open('', '未命名');
+  }
+  window.CANVAS = { open: open, fromMsg: fromMsg, openLast: openLast, close: close };
 })();
 /* 调试钩子（仅当 localStorage['sc.debug']==='1'）：便于自动化测试 Work 沙箱的纯函数 */
 try {

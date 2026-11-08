@@ -1130,6 +1130,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         row.appendChild(el('span', { class: 'var-pos', text: (vi + 1) + '/' + m.variants.length }));
         row.appendChild(el('button', { 'data-act': 'varnext', 'data-id': m.id, title: '下一版', text: '>', disabled: vi >= m.variants.length - 1 }));
       }
+      row.appendChild(el('button', { 'data-act': 'canvas', 'data-id': m.id, title: '在画布中编辑（C5）' }, [icon('edit'), '画布']));
       row.appendChild(el('button', { 'data-act': 'regen', 'data-id': m.id, title: '重新生成' }, [icon('retry'), '重新生成']));
     }
     row.appendChild(el('button', { 'data-act': 'delmsg', 'data-id': m.id, title: '删除' }, [icon('trash'), '删除']));

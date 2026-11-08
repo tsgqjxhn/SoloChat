@@ -967,6 +967,19 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .cite::after{content:attr(data-tip);position:absolute;left:0;bottom:1.7em;z-index:80;display:none;width:max-content;max-width:320px;white-space:pre-line;padding:6px 9px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font-size:11px;font-weight:400;line-height:1.5;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.18)}
 .cite:hover::after{display:block}
 .msg-src:target{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+/* C5：画布弹层 */
+.cv-mask{position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center}
+.cv-box{width:min(880px,88vw);height:min(660px,82vh);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden}
+.cv-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--hairline)}
+.cv-title{font-size:13px}
+.cv-docs{max-width:300px;height:28px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
+.cv-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.cv-btn:hover{background:var(--lift)}
+.cv-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.cv-ta{flex:1;width:100%;box-sizing:border-box;padding:14px 16px;border:0;outline:0;resize:none;background:var(--bg);color:var(--text);font:13px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace}
+.cv-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--hairline)}
+.cv-vers{max-width:240px;height:26px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
+.cv-status{flex:1;color:var(--muted);font-size:12px}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}

@@ -344,6 +344,10 @@ function sendMessage(){
       UI.toast('自主执行边界：' + _l7.join(' · '));
       return;
     }
+    if (cmd === '/canvas'){ /* C5：把最后一条回答放进画布 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (window.CANVAS) window.CANVAS.openLast(); return;
+    }
     if (cmd === '/rewind'){ /* C6：撤销编辑重发造成的截断（2 分钟内） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       doRewind(); return;
@@ -3035,6 +3039,7 @@ $('#sidebar').addEventListener('click', function(e){
       case 'img-dl': UI.imgDownload(id); break;
       case 'img-regen': UI.imgRegen(id); break;
       case 'img-copy': UI.imgCopyPrompt(id); break;
+      case 'canvas': if (window.CANVAS) window.CANVAS.fromMsg(id); break;
       case 'fs-apply': { var fa = b.closest('.msg'); if (fa) FS.apply(fa.getAttribute('data-id'), b.getAttribute('data-path'), b); break; }
         case 'fs-applyall': { var mm2 = b.closest('.msg'); if (mm2) FS.applyAll(mm2.getAttribute('data-id')); break; }
       case 'fs-reject': { var fr = b.closest('.msg'); if (fr) FS.reject(fr.getAttribute('data-id'), b.getAttribute('data-path')); break; }
