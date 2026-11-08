@@ -995,6 +995,18 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .cv-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--hairline)}
 .cv-vers{max-width:240px;height:26px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
 .cv-status{flex:1;color:var(--muted);font-size:12px}
+/* Soul：长期记忆弹层 */
+.soul-mask{position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+.soul-box{width:min(760px,90vw);max-height:86vh;display:flex;flex-direction:column;gap:8px;padding:16px 18px;background:var(--bg);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:auto}
+.soul-head{display:flex;align-items:center;justify-content:space-between}
+.soul-lbl{color:var(--muted);font-size:12px;margin-top:6px}
+.soul-ta{width:100%;box-sizing:border-box;min-height:80px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font:12px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
+.soul-ta-lg{min-height:150px}
+.soul-foot{display:flex;align-items:center;gap:8px;margin-top:6px}
+.soul-status{flex:1;color:var(--muted);font-size:12px}
+.soul-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.soul-btn:hover{background:var(--lift)}
+.soul-primary{background:var(--primary);border-color:var(--primary);color:#fff}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}
@@ -1376,7 +1388,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.14';
+var APP_VER = 'v0.5.0';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1673,7 +1685,7 @@ function loadCfg(){
     if (Array.isArray(c.presets)) c.presets = c.presets.filter(function(p){ return p && typeof p === 'object'; }); // v0.3.9：脏预置不许炸启动
     for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
   /* 迁移（一次性，v2.0）：旧 fileOps 布尔 → mode 三态；迁完删旧键 */
-  if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent'].indexOf(cfg.mode) < 0)
+  if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent', 'soul'].indexOf(cfg.mode) < 0)
     cfg.mode = c.fileOps ? 'agent' : 'chat';
   delete cfg.fileOps;
   /* v1.1.24：连接/首字/空闲超时全部取消；旧配置里的 60/30 也不再生效 */
@@ -3329,7 +3341,7 @@ var NET = (function(){
   /* 构造请求体：上下文裁剪（§4.3） */
   /* v1.1.21：工作区附件清单（系统提示级，确保模型知道附件已落盘，可读原文） */
   function workspaceManifestPrompt(msgs){
-    if (!S || !S.cfg || (S.cfg.mode !== 'work' && S.cfg.mode !== 'agent')) return '';
+    if (!S || !S.cfg || (S.cfg.mode !== 'work' && S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul')) return '';
     var refs = [], seen = {};
     (msgs || []).forEach(function(m){
       if (!(m && m.role === 'user' && m.fileRefs)) return;
@@ -3346,7 +3358,7 @@ var NET = (function(){
       });
     });
     if (!refs.length) return '';
-    var tool = S.cfg.mode === 'agent' ? 'fs-read' : 'vfs-read';
+    var tool = (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') ? 'fs-read' : 'vfs-read';
     return '[工作区附件]\n本会话上传的附件已自动导入工作区，原文件原样保存。文本内容用 ```' + tool + ' 路径``` 读取 .md/.txt；图片/原文件用右侧预览/下载，不要凭记忆猜：\n'
       + refs.slice(-24).join('\n');
   }
@@ -3370,7 +3382,7 @@ var NET = (function(){
     var mdl = sessModel(session);
     var cs = curSession();
     sys += '\n\n' + MEDIA_HINT; // v2.3：告诉模型可以内嵌图片/视频（否则多数模型不会主动用）
-    if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
+    if ((S.cfg.mode === 'agent' || S.cfg.mode === 'soul') && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent/Soul 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
 sys += '\n\n' + RULES_CORE;      // v1.29.4：通用纪律
@@ -3378,12 +3390,13 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var pickBlock = PICK.block(S.cfg.mode); if (pickBlock) sys += '\n\n' + pickBlock; // v0.4.0c：本轮勾选的扩展
-    if (S.cfg.mode === 'work' || S.cfg.mode === 'agent') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
+    if (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
+    if (S.cfg.mode === 'soul'){ var _sp = (window.SOUL && window.SOUL.prompt && window.SOUL.prompt()) || ''; if (_sp) sys += '\n\n' + _sp; } // Soul S1：长期记忆每轮注入
     var _attMan = workspaceManifestPrompt(msgs); if (_attMan) sys += '\n\n' + _attMan; // v1.1.21：工作区附件清单
     var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
   var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
-    if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
+    if (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
@@ -3502,7 +3515,7 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
         }
       }
     }
-    if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent')){
+    if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul')){
       try {
         var ts = toolSchemas();
         if (ts.length){
@@ -5902,7 +5915,7 @@ var MD = (function(){
   /* fs-* 围栏→文件工具卡片（c.code 已整体转义） */
   /* v1.28.1：当前模式没有的工具围栏 —— 别让它看着像在跑 */
   function deadCard(c){
-    var mn = { chat: 'Chat', work: 'Work', agent: 'Agent' }[S.cfg.mode] || S.cfg.mode;
+    var mn = { chat: 'Chat', work: 'Work', agent: 'Agent', soul: 'Soul' }[S.cfg.mode] || S.cfg.mode;
     return '<div class="tool-card dead"><div class="th"><span class="tag">' + esc(c.lang) + '</span>' +
       '<span>本轮不执行</span><span class="meta">' + esc(mn) + ' 模式没有这个工具</span></div>' +
       '<div class="tb"><pre><code>' + c.code + '</code></pre></div></div>'; /* c.code 已在 render 入口统一转义，不能再 esc 一次 */
@@ -7123,7 +7136,7 @@ function bindWeb(){
   function renderWs(){
     bindOnce();
     if (!bound) return;
-    if ((S.cfg.mode || 'chat') === 'agent') return renderAgentWs();   // v1.13：Agent 看真实文件夹
+    if ((S.cfg.mode || 'chat') === 'agent' || S.cfg.mode === 'soul') return renderAgentWs();   // v1.13：Agent/Soul 看真实文件夹
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
     var sid = (typeof S !== 'undefined' && S.sid) || null;
@@ -10683,7 +10696,8 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     if (allowEmpty) sel.appendChild(el('option', { value: '', text: '跟随分组 / 全局' }));
     sel.appendChild(el('option', { value: 'chat', text: 'Chat' }));
     sel.appendChild(el('option', { value: 'work', text: 'Work' }));
-    if (cur && cur !== 'chat' && cur !== 'work') // 兼容旧的 agent 会话，避免显示空白
+    sel.appendChild(el('option', { value: 'soul', text: 'Soul（长期记忆）' }));
+    if (cur && cur !== 'chat' && cur !== 'work' && cur !== 'soul') // 兼容旧的 agent 会话，避免显示空白
       sel.appendChild(el('option', { value: cur, text: cur === 'agent' ? 'Agent' : cur }));
     sel.value = cur || (allowEmpty ? '' : 'chat');
     return sel;
@@ -11458,7 +11472,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var s = curSession();
     $title.textContent = s ? (s.title || '未命名会话') : 'SoloChat';
     if (!s){ renderMsgs(); renderWsBtn(); attachStreamView(); return; }
-    var _savedMode = (['chat', 'work', 'agent'].indexOf(s.mode) >= 0) ? s.mode : '';
+    var _savedMode = (['chat', 'work', 'agent', 'soul'].indexOf(s.mode) >= 0) ? s.mode : '';
     if (_savedMode && _savedMode !== S.cfg.mode){
       S.cfg.mode = _savedMode;
       try { saveCfg(); renderComposerCtl(); } catch (e) {}
@@ -11649,8 +11663,8 @@ function holdBusy(d, sid){
     var modes = el('div', { class: 'e-modes' });
     /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
     var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
-      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具' });
-    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1]].forEach(function(t){
+      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具 / Soul 长期记忆' });
+    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
       var b = el('button', { type: 'button', 'data-mode': t[0] });
       b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
       b.appendChild(document.createTextNode(t[1]));
@@ -11663,6 +11677,20 @@ function holdBusy(d, sid){
       var ic = icon(name, fill ? 'fill' : '');
       ic.setAttribute('style', 'width:76px;height:76px;color:var(--primary)');
       return ic;
+    }
+    if (S.cfg.mode === 'soul'){ // Soul：长期记忆 · 一起成长
+      core.appendChild(bigIcon('user', true));
+      core.appendChild(el('h1', { text: 'Soul：长期记忆 · 一起成长' }));
+      core.appendChild(modes);
+      extra.appendChild(el('button', {
+        id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
+        title: '关联工作区文件夹（可选）：Soul 需要读文件时只能访问这里'
+      }, [icon('ws'), el('span', { id: 'ws-label', text: ws ? (ws.split(/[\\/]/).filter(Boolean).pop() || ws) : '选择文件夹（可选）' })]));
+      renderWsBtn();
+      var smem = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-mem', text: '编辑长期记忆（/memory）' });
+      smem.addEventListener('click', function(){ if (window.SOUL) window.SOUL.open(); });
+      extra.appendChild(el('div', { class: 'row' }, [smem]));
+      return;
     }
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
@@ -11916,6 +11944,11 @@ function sendMessage(){
       UI.toast('自主执行边界：' + _l7.join(' · '));
       return;
     }
+    if (cmd === '/memory'){ /* Soul S1：编辑长期记忆 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (window.SOUL) window.SOUL.open(); else UI.toast('记忆组件未加载', true);
+      return;
+    }
     if (cmd === '/canvas'){ /* C5：把最后一条回答放进画布 */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       if (window.CANVAS) window.CANVAS.openLast(); return;
@@ -12033,7 +12066,7 @@ function sendMessage(){
     if (cmd === '/skills'){ /* v0.3.77：看当前模式可用的技能（对标 OpenHands 的技能清单） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _sk = []; try { _sk = EXT.skillNames(S.cfg.mode) || []; } catch (e) { _sk = []; }
-      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
+      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'], soul: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'grep', 'glob', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
       if (!_sk.length){ UI.toast('当前模式没有可用工具', true); return; }
       UI.toast('本模式可用工具 ' + _sk.length + ' 个：' + _sk.join(', ') + '（用三反引号 + 工具名调用）');
     }
@@ -12479,7 +12512,7 @@ function sendMessage(){
     var cs = (typeof sessionById === 'function') ? sessionById(sid) : null;
     var mode = (cs && cs.mode) || S.cfg.mode || 'chat';
     /* Agent 有真实工作区时落真实目录；Work / Chat / 未选目录的 Agent 用 VFS */
-    if (mode === 'agent' && cs && cs.workspace && NET.fs){
+    if ((mode === 'agent' || mode === 'soul') && cs && cs.workspace && NET.fs){
       return NET.fs('write', path, truncBytes(body, 240 * 1024), cs.workspace).then(function(){}, function(){});
     }
     if (typeof WORK !== 'undefined' && WORK.vfsWrite){
@@ -12492,7 +12525,7 @@ function sendMessage(){
   function writeAttachmentBinary(sid, path, r){
     var cs = (typeof sessionById === 'function') ? sessionById(sid) : null;
     var mode = (cs && cs.mode) || S.cfg.mode || 'chat';
-    if (mode === 'agent' && cs && cs.workspace && NET.fs){
+    if ((mode === 'agent' || mode === 'soul') && cs && cs.workspace && NET.fs){
       return DB.getAttachment(r.id).then(function(a){
         var src = a && (a.rawBlob || a.blob);
         if (!src) return false;
@@ -13073,7 +13106,7 @@ function sendMessage(){
   }
   function routeHint(from, to){
     var b = document.getElementById('route-hint'); if (!b) return;
-    var nm = { chat: 'Chat', work: 'Work', agent: 'Agent' };
+    var nm = { chat: 'Chat', work: 'Work', agent: 'Agent', soul: 'Soul' };
     var nFrom = nm[from] || from, nTo = nm[to] || to;
     b.textContent = '';
     b.appendChild(el('span', { class: 'rh-t' }, ['已按本轮输入切到 ', el('b', { text: nTo }), '（原 ' + nFrom + '）']));
@@ -18960,6 +18993,83 @@ var WORK = (function(){
     open('', '未命名');
   }
   window.CANVAS = { open: open, fromMsg: fromMsg, openLast: openLast, close: close };
+})();
+/* Soul S1：长期记忆核心（文件优先的网页版）——USER / MEMORY 两层，每轮注入。
+   存储：localStorage sc.soul.v1；可导出 Markdown。入口：/memory 或模式 Soul。 */
+(function(){
+  'use strict';
+  var KEY = 'sc.soul.v1';
+  function load(){
+    try { var o = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; return { user: String(o.user || ''), memory: String(o.memory || ''), updated: o.updated || 0 }; }
+    catch (e) { return { user: '', memory: '', updated: 0 }; }
+  }
+  function save(o){
+    o.updated = Date.now();
+    try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {}
+  }
+  function prompt(){
+    var o = load(), L = [];
+    if (o.user.trim()) L.push('【用户画像】\n' + o.user.trim().slice(0, 600));
+    if (o.memory.trim()) L.push('【长期记忆】\n' + o.memory.trim().slice(0, 1200));
+    return L.length ? 'Soul 记忆（长期、跨会话；以此为准，冲突时问用户）：\n' + L.join('\n\n') : '';
+  }
+  function remember(text){
+    var t = String(text || '').trim();
+    if (!t) return '';
+    var o = load();
+    var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
+    var stamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    o.memory = (o.memory.trim() ? o.memory.trim() + '\n' : '') + '- [' + stamp + '] ' + t.replace(/\s+/g, ' ');
+    save(o);
+    return stamp;
+  }
+  function mk(tag, cls, txt){ var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
+  function open(){
+    var o = load();
+    var mask = mk('div', 'soul-mask');
+    var box = mk('div', 'soul-box');
+    var head = mk('div', 'soul-head');
+    head.appendChild(mk('b', null, 'Soul · 长期记忆'));
+    var close = mk('button', 'soul-btn', '关闭');
+    head.appendChild(close);
+    var uLbl = mk('div', 'soul-lbl', 'USER.md · 用户画像（称呼、语气、忌讳、长期项目；≤600 字）');
+    var uTa = mk('textarea', 'soul-ta');
+    uTa.value = o.user; uTa.placeholder = '例：称呼我「老公」；喜欢简洁直接的答案；常做 SoloChat / Echo 项目。';
+    var mLbl = mk('div', 'soul-lbl', 'MEMORY.md · 长期事实（决定、约定、重要事件；≤1200 字）');
+    var mTa = mk('textarea', 'soul-ta soul-ta-lg');
+    mTa.value = o.memory; mTa.placeholder = '例：- [2026-11-08] 决定把主应用保持单文件 index.html。';
+    var foot = mk('div', 'soul-foot');
+    var status = mk('span', 'soul-status', '本地保存，不上传');
+    var exp = mk('button', 'soul-btn', '导出 .md');
+    var clr = mk('button', 'soul-btn', '清空');
+    var sv = mk('button', 'soul-btn soul-primary', '保存');
+    foot.appendChild(status); foot.appendChild(exp); foot.appendChild(clr); foot.appendChild(sv);
+    box.appendChild(head); box.appendChild(uLbl); box.appendChild(uTa); box.appendChild(mLbl); box.appendChild(mTa); box.appendChild(foot);
+    mask.appendChild(box); document.body.appendChild(mask);
+    function closeFn(){ mask.remove(); }
+    close.onclick = closeFn;
+    mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
+    uTa.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeFn(); });
+    sv.onclick = function(){
+      save({ user: uTa.value.slice(0, 600), memory: mTa.value.slice(0, 1200) });
+      status.textContent = '已保存 ' + new Date().toLocaleTimeString();
+    };
+    clr.onclick = function(){
+      if (!confirm('清空 USER 与 MEMORY？此操作不可撤销（建议先导出）。')) return;
+      save({ user: '', memory: '' });
+      uTa.value = ''; mTa.value = ''; status.textContent = '已清空';
+    };
+    exp.onclick = function(){
+      var cur = load();
+      var md = '# USER.md\n\n' + cur.user + '\n\n# MEMORY.md\n\n' + cur.memory + '\n';
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      a.download = 'soul-memory.md'; a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 3000);
+    };
+    uTa.focus();
+  }
+  window.SOUL = { prompt: prompt, remember: remember, open: open, load: load, save: save };
 })();
 /* 调试钩子（仅当 localStorage['sc.debug']==='1'）：便于自动化测试 Work 沙箱的纯函数 */
 try {

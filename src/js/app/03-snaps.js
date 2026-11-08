@@ -634,7 +634,7 @@ var MD = (function(){
   /* fs-* 围栏→文件工具卡片（c.code 已整体转义） */
   /* v1.28.1：当前模式没有的工具围栏 —— 别让它看着像在跑 */
   function deadCard(c){
-    var mn = { chat: 'Chat', work: 'Work', agent: 'Agent' }[S.cfg.mode] || S.cfg.mode;
+    var mn = { chat: 'Chat', work: 'Work', agent: 'Agent', soul: 'Soul' }[S.cfg.mode] || S.cfg.mode;
     return '<div class="tool-card dead"><div class="th"><span class="tag">' + esc(c.lang) + '</span>' +
       '<span>本轮不执行</span><span class="meta">' + esc(mn) + ' 模式没有这个工具</span></div>' +
       '<div class="tb"><pre><code>' + c.code + '</code></pre></div></div>'; /* c.code 已在 render 入口统一转义，不能再 esc 一次 */

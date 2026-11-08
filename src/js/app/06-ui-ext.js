@@ -679,7 +679,8 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     if (allowEmpty) sel.appendChild(el('option', { value: '', text: '跟随分组 / 全局' }));
     sel.appendChild(el('option', { value: 'chat', text: 'Chat' }));
     sel.appendChild(el('option', { value: 'work', text: 'Work' }));
-    if (cur && cur !== 'chat' && cur !== 'work') // 兼容旧的 agent 会话，避免显示空白
+    sel.appendChild(el('option', { value: 'soul', text: 'Soul（长期记忆）' }));
+    if (cur && cur !== 'chat' && cur !== 'work' && cur !== 'soul') // 兼容旧的 agent 会话，避免显示空白
       sel.appendChild(el('option', { value: cur, text: cur === 'agent' ? 'Agent' : cur }));
     sel.value = cur || (allowEmpty ? '' : 'chat');
     return sel;
@@ -1454,7 +1455,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var s = curSession();
     $title.textContent = s ? (s.title || '未命名会话') : 'SoloChat';
     if (!s){ renderMsgs(); renderWsBtn(); attachStreamView(); return; }
-    var _savedMode = (['chat', 'work', 'agent'].indexOf(s.mode) >= 0) ? s.mode : '';
+    var _savedMode = (['chat', 'work', 'agent', 'soul'].indexOf(s.mode) >= 0) ? s.mode : '';
     if (_savedMode && _savedMode !== S.cfg.mode){
       S.cfg.mode = _savedMode;
       try { saveCfg(); renderComposerCtl(); } catch (e) {}

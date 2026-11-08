@@ -77,8 +77,8 @@ function holdBusy(d, sid){
     var modes = el('div', { class: 'e-modes' });
     /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
     var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
-      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具' });
-    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1]].forEach(function(t){
+      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具 / Soul 长期记忆' });
+    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
       var b = el('button', { type: 'button', 'data-mode': t[0] });
       b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
       b.appendChild(document.createTextNode(t[1]));
@@ -91,6 +91,20 @@ function holdBusy(d, sid){
       var ic = icon(name, fill ? 'fill' : '');
       ic.setAttribute('style', 'width:76px;height:76px;color:var(--primary)');
       return ic;
+    }
+    if (S.cfg.mode === 'soul'){ // Soul：长期记忆 · 一起成长
+      core.appendChild(bigIcon('user', true));
+      core.appendChild(el('h1', { text: 'Soul：长期记忆 · 一起成长' }));
+      core.appendChild(modes);
+      extra.appendChild(el('button', {
+        id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
+        title: '关联工作区文件夹（可选）：Soul 需要读文件时只能访问这里'
+      }, [icon('ws'), el('span', { id: 'ws-label', text: ws ? (ws.split(/[\\/]/).filter(Boolean).pop() || ws) : '选择文件夹（可选）' })]));
+      renderWsBtn();
+      var smem = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-mem', text: '编辑长期记忆（/memory）' });
+      smem.addEventListener('click', function(){ if (window.SOUL) window.SOUL.open(); });
+      extra.appendChild(el('div', { class: 'row' }, [smem]));
+      return;
     }
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
@@ -344,6 +358,11 @@ function sendMessage(){
       UI.toast('自主执行边界：' + _l7.join(' · '));
       return;
     }
+    if (cmd === '/memory'){ /* Soul S1：编辑长期记忆 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (window.SOUL) window.SOUL.open(); else UI.toast('记忆组件未加载', true);
+      return;
+    }
     if (cmd === '/canvas'){ /* C5：把最后一条回答放进画布 */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       if (window.CANVAS) window.CANVAS.openLast(); return;
@@ -461,7 +480,7 @@ function sendMessage(){
     if (cmd === '/skills'){ /* v0.3.77：看当前模式可用的技能（对标 OpenHands 的技能清单） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _sk = []; try { _sk = EXT.skillNames(S.cfg.mode) || []; } catch (e) { _sk = []; }
-      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
+      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'], soul: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'grep', 'glob', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
       if (!_sk.length){ UI.toast('当前模式没有可用工具', true); return; }
       UI.toast('本模式可用工具 ' + _sk.length + ' 个：' + _sk.join(', ') + '（用三反引号 + 工具名调用）');
     }
@@ -907,7 +926,7 @@ function sendMessage(){
     var cs = (typeof sessionById === 'function') ? sessionById(sid) : null;
     var mode = (cs && cs.mode) || S.cfg.mode || 'chat';
     /* Agent 有真实工作区时落真实目录；Work / Chat / 未选目录的 Agent 用 VFS */
-    if (mode === 'agent' && cs && cs.workspace && NET.fs){
+    if ((mode === 'agent' || mode === 'soul') && cs && cs.workspace && NET.fs){
       return NET.fs('write', path, truncBytes(body, 240 * 1024), cs.workspace).then(function(){}, function(){});
     }
     if (typeof WORK !== 'undefined' && WORK.vfsWrite){
@@ -920,7 +939,7 @@ function sendMessage(){
   function writeAttachmentBinary(sid, path, r){
     var cs = (typeof sessionById === 'function') ? sessionById(sid) : null;
     var mode = (cs && cs.mode) || S.cfg.mode || 'chat';
-    if (mode === 'agent' && cs && cs.workspace && NET.fs){
+    if ((mode === 'agent' || mode === 'soul') && cs && cs.workspace && NET.fs){
       return DB.getAttachment(r.id).then(function(a){
         var src = a && (a.rawBlob || a.blob);
         if (!src) return false;
@@ -1501,7 +1520,7 @@ function sendMessage(){
   }
   function routeHint(from, to){
     var b = document.getElementById('route-hint'); if (!b) return;
-    var nm = { chat: 'Chat', work: 'Work', agent: 'Agent' };
+    var nm = { chat: 'Chat', work: 'Work', agent: 'Agent', soul: 'Soul' };
     var nFrom = nm[from] || from, nTo = nm[to] || to;
     b.textContent = '';
     b.appendChild(el('span', { class: 'rh-t' }, ['已按本轮输入切到 ', el('b', { text: nTo }), '（原 ' + nFrom + '）']));

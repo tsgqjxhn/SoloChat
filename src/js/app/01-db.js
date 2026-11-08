@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.14';
+var APP_VER = 'v0.5.0';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -338,7 +338,7 @@ function loadCfg(){
     if (Array.isArray(c.presets)) c.presets = c.presets.filter(function(p){ return p && typeof p === 'object'; }); // v0.3.9：脏预置不许炸启动
     for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
   /* 迁移（一次性，v2.0）：旧 fileOps 布尔 → mode 三态；迁完删旧键 */
-  if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent'].indexOf(cfg.mode) < 0)
+  if (typeof cfg.mode !== 'string' || ['chat', 'work', 'agent', 'soul'].indexOf(cfg.mode) < 0)
     cfg.mode = c.fileOps ? 'agent' : 'chat';
   delete cfg.fileOps;
   /* v1.1.24：连接/首字/空闲超时全部取消；旧配置里的 60/30 也不再生效 */
@@ -1994,7 +1994,7 @@ var NET = (function(){
   /* 构造请求体：上下文裁剪（§4.3） */
   /* v1.1.21：工作区附件清单（系统提示级，确保模型知道附件已落盘，可读原文） */
   function workspaceManifestPrompt(msgs){
-    if (!S || !S.cfg || (S.cfg.mode !== 'work' && S.cfg.mode !== 'agent')) return '';
+    if (!S || !S.cfg || (S.cfg.mode !== 'work' && S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul')) return '';
     var refs = [], seen = {};
     (msgs || []).forEach(function(m){
       if (!(m && m.role === 'user' && m.fileRefs)) return;
@@ -2011,7 +2011,7 @@ var NET = (function(){
       });
     });
     if (!refs.length) return '';
-    var tool = S.cfg.mode === 'agent' ? 'fs-read' : 'vfs-read';
+    var tool = (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') ? 'fs-read' : 'vfs-read';
     return '[工作区附件]\n本会话上传的附件已自动导入工作区，原文件原样保存。文本内容用 ```' + tool + ' 路径``` 读取 .md/.txt；图片/原文件用右侧预览/下载，不要凭记忆猜：\n'
       + refs.slice(-24).join('\n');
   }
@@ -2035,7 +2035,7 @@ var NET = (function(){
     var mdl = sessModel(session);
     var cs = curSession();
     sys += '\n\n' + MEDIA_HINT; // v2.3：告诉模型可以内嵌图片/视频（否则多数模型不会主动用）
-    if (S.cfg.mode === 'agent' && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent 模式且有工作区/mock 时）
+    if ((S.cfg.mode === 'agent' || S.cfg.mode === 'soul') && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent/Soul 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
 sys += '\n\n' + RULES_CORE;      // v1.29.4：通用纪律
@@ -2043,12 +2043,13 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var pickBlock = PICK.block(S.cfg.mode); if (pickBlock) sys += '\n\n' + pickBlock; // v0.4.0c：本轮勾选的扩展
-    if (S.cfg.mode === 'work' || S.cfg.mode === 'agent') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
+    if (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
+    if (S.cfg.mode === 'soul'){ var _sp = (window.SOUL && window.SOUL.prompt && window.SOUL.prompt()) || ''; if (_sp) sys += '\n\n' + _sp; } // Soul S1：长期记忆每轮注入
     var _attMan = workspaceManifestPrompt(msgs); if (_attMan) sys += '\n\n' + _attMan; // v1.1.21：工作区附件清单
     var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
   var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
-    if (S.cfg.mode === 'agent') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
+    if (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
     var p = effParams(session, S.cfg);
@@ -2167,7 +2168,7 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
         }
       }
     }
-    if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent')){
+    if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul')){
       try {
         var ts = toolSchemas();
         if (ts.length){

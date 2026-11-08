@@ -980,6 +980,18 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .cv-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--hairline)}
 .cv-vers{max-width:240px;height:26px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
 .cv-status{flex:1;color:var(--muted);font-size:12px}
+/* Soul：长期记忆弹层 */
+.soul-mask{position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+.soul-box{width:min(760px,90vw);max-height:86vh;display:flex;flex-direction:column;gap:8px;padding:16px 18px;background:var(--bg);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:auto}
+.soul-head{display:flex;align-items:center;justify-content:space-between}
+.soul-lbl{color:var(--muted);font-size:12px;margin-top:6px}
+.soul-ta{width:100%;box-sizing:border-box;min-height:80px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font:12px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
+.soul-ta-lg{min-height:150px}
+.soul-foot{display:flex;align-items:center;gap:8px;margin-top:6px}
+.soul-status{flex:1;color:var(--muted);font-size:12px}
+.soul-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.soul-btn:hover{background:var(--lift)}
+.soul-primary{background:var(--primary);border-color:var(--primary);color:#fff}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
 .msg.streaming .code-bar{opacity:0;pointer-events:none}
 .code-bar{transition:opacity .18s var(--ease, ease)}

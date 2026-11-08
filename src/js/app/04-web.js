@@ -211,7 +211,7 @@ function bindWeb(){
   function renderWs(){
     bindOnce();
     if (!bound) return;
-    if ((S.cfg.mode || 'chat') === 'agent') return renderAgentWs();   // v1.13：Agent 看真实文件夹
+    if ((S.cfg.mode || 'chat') === 'agent' || S.cfg.mode === 'soul') return renderAgentWs();   // v1.13：Agent/Soul 看真实文件夹
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
     var sid = (typeof S !== 'undefined' && S.sid) || null;
