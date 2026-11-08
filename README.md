@@ -91,6 +91,15 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
+## Android 版（v0.1.0，悬浮截图问答）
+
+`dist/SoloChat-Android-0.1.0.apk`（**386,070 字节**，debug 签名，自用/内测）
+
+- 原生壳 + 内置 `index.html`：聊天、Soul 记忆可用；`AndroidBridge` 提供流式 `http`、`mem`、`notify`。
+- **悬浮球截屏 → 框选 → 直接问模型**：截图只在内存里，Base64 直传，**不写相册**、不经过中转服务器。
+- 长按悬浮球进设置（Base URL / Key / 模型 / 提示词）；设置页可导出/导入记忆 `.md`。
+- 构建与限制见 `android/README.md`。
+
 内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。
 
 ## 项目结构
