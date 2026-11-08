@@ -1370,6 +1370,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       model: dc.model || '',                         // 空=跟随分组/全局，不复制全局模型
       systemPrompt: dc.systemPrompt || '',           // 空=跟随分组/全局
       params: dc.params || {},                       // 仅存显式覆盖项，空=跟随
+      picks: JSON.parse(JSON.stringify(S.cfg.picks || {})), // 工具/插件/技能勾选随会话建立
       workspace: S.pendWs || '', msgCount: 0, temp: tmp
     };
     S.pendWs = '';
@@ -1391,6 +1392,17 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     return s;
   }
   /* 草稿不落库；首条建会话。session groups v0.4.2：可预选分组，并重置草稿配置 */
+  function syncPickBadges(){
+    try {
+      var ps = S.cfg.picks || {};
+      var bs = document.querySelectorAll('.pk-btn');
+      for (var i = 0; i < bs.length; i++){
+        var k = bs[i].getAttribute('data-pk'), n = (ps[k] || []).length, sp = bs[i].querySelector('.pk-badge');
+        if (sp){ sp.hidden = !n; sp.textContent = String(n); }
+        bs[i].classList.toggle('on', !!n);
+      }
+    } catch (e) {}
+  }
   function newDraft(groupId){
     dropTempSessions(); // v2.8：新建即丢弃上一个临时会话（不写历史、不留痕）
     revokePreviews(); // v2.2：新建草稿不中止其它会话的生成
@@ -1398,6 +1410,14 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     S.sugSeed = (Math.random() * 2147483647) | 0; // v2.9：新草稿换一批建议
     S.follow = true; // v2.1：新建草稿恢复跟随（配合 renderMsgs 不再强制滚动）
     S.draftCfg = mkDraftCfg(groupId || ''); // 干净草稿（带 groupId 则预选分组）
+    /* 会话隔离：新会话不带上一会话的模型/模式/工具勾选 */
+    try {
+      var _ng = groupById(groupId || '');
+      S.cfg.picks = {};
+      S.cfg.mode = (_ng && _ng.mode) ? _ng.mode : 'chat';
+      S.cfg.currentModel = S.cfg.defaultModel || S.cfg.currentModel;
+      syncPickBadges();
+    } catch (e) {}
     S.pendGroup = '';
     renderSessions(); renderMsgs();
     renderComposerCtl();
@@ -1439,6 +1459,12 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       S.cfg.mode = _savedMode;
       try { saveCfg(); renderComposerCtl(); } catch (e) {}
     }
+    /* 会话隔离：模型与工具勾选跟随会话，不沿用上一个会话 */
+    try {
+      S.cfg.picks = (s.picks && typeof s.picks === 'object') ? JSON.parse(JSON.stringify(s.picks)) : {};
+      S.cfg.currentModel = sessModel(s) || S.cfg.defaultModel || S.cfg.currentModel;
+      syncPickBadges();
+    } catch (e) {}
     DB.msgsBySid(sid).then(function(list){
       if (S.sid !== sid) return; // 已切走，丢弃过期结果
       list.sort(function(a, b){ return a.ts - b.ts; });

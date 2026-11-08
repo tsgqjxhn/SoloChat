@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.10';
+var APP_VER = 'v0.4.11';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -400,6 +400,8 @@ function loadCfg(){
     cfg.picksBuiltinMig = 1;
   }
   S.cfg = cfg;
+  /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
+  try { if (!cfg.defaultModel) cfg.defaultModel = cfg.currentModel || ''; } catch (e) {}
 }
 var saveCfg = debounce(function(){
   try {
@@ -474,6 +476,13 @@ function setCfg(patch){
         _cs.mode = patch.mode;
         if (typeof DB !== 'undefined' && DB.putSession) DB.putSession(_cs);
       }
+    } catch (e) {}
+  }
+  /* 会话隔离：工具/插件/技能等勾选写回当前会话，切会话时再按会话恢复 */
+  if (patch && patch.picks && typeof S !== 'undefined' && S.sid){
+    try {
+      var _cp = curSession();
+      if (_cp){ _cp.picks = JSON.parse(JSON.stringify(patch.picks)); if (DB && DB.putSession) DB.putSession(_cp); }
     } catch (e) {}
   }
   saveCfg();

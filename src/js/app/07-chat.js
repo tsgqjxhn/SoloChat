@@ -1550,6 +1550,7 @@ function sendMessage(){
     if (dblBtn) dblBtn.style.display = (S.cfg.mode === 'chat') ? '' : 'none';
     if (S.cfg.mode !== 'chat' && S.cfg.dual){ setCfg({ dual: false }); document.body.classList.remove('dual-on'); }
     var selM = $('#sel-model'), selT = $('#sel-think'), act = document.activeElement;
+    var _effM = sessModel(curSession()) || S.cfg.currentModel; // 会话自己的模型优先
     if (selM && act !== selM){
       var ps = S.cfg.presets || [];
       selM.textContent = '';
@@ -1560,7 +1561,7 @@ function sendMessage(){
         if (!ms.length) og.appendChild(el('option', { value: pg.id + '\x01', text: '选择模型', disabled: true }));
         for (var k = 0; k < ms.length; k++)
           og.appendChild(el('option', { value: pg.id + '\x01' + ms[k], text: modelLabel(ms[k]),
-            selected: (pg.id === S.cfg.activePreset && ms[k] === S.cfg.currentModel) ? '' : null }));
+            selected: (pg.id === S.cfg.activePreset && ms[k] === _effM) ? '' : null }));
         selM.appendChild(og);
       }
     }
@@ -1568,9 +1569,9 @@ function sendMessage(){
       var list = String(S.cfg.thinkList || 'Default').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
       if (list.indexOf('Default') < 0) list.unshift('Default');
       /* v0.2.5：优先用「该模型自动探测到的档位」（GPT-5 → minimal/low/medium/high；Qwen/GLM → enabled/disabled） */
-      var effL = (MODE.efforts && MODE.efforts()) || ((NET.reasonProfile && NET.reasonProfile(S.cfg.currentModel) || {}).efforts) || null;
+      var effL = (MODE.efforts && MODE.efforts()) || ((NET.reasonProfile && NET.reasonProfile(_effM) || {}).efforts) || null;
       if (effL && effL.length) list = ['Default'].concat(effL);
-      var cur = (S.cfg.thinkByModel && S.cfg.thinkByModel[S.cfg.currentModel]) || 'Default';
+      var cur = (S.cfg.thinkByModel && S.cfg.thinkByModel[_effM]) || 'Default';
       selT.textContent = '';
       for (var i = 0; i < list.length; i++)
         selT.appendChild(el('option', { value: list[i], text: list[i], selected: list[i] === cur ? '' : null }));
@@ -3447,7 +3448,15 @@ $('#sidebar').addEventListener('click', function(e){
     if (t.id === 'sel-model'){
       var sep = t.value.indexOf('\x01');
       if (sep > 0) UI.applyPreset(t.value.slice(0, sep), t.value.slice(sep + 1));
-      else setCfg({ currentModel: t.value });
+      else {
+        /* 会话隔离：模型写当前会话（草稿写 draft），不改全局默认 */
+        var _mv = t.value;
+        var _msess = curSession();
+        if (_msess){ _msess.model = _mv; try { DB.putSession(_msess); } catch (e) {} }
+        else { var _md = S.draftCfg || (S.draftCfg = mkDraftCfg()); _md.model = _mv; }
+        S.cfg.currentModel = _mv;
+        try { UI.renderComposerCtl(); } catch (e) {}
+      }
       UI.metaLazy(); // v2.9：能力静默补全
       return;
     }

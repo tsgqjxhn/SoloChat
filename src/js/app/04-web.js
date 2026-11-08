@@ -1513,6 +1513,7 @@ var UI = (function(){
     var p = AP();
     S.cfg.baseURL = p.baseURL || ''; S.cfg.apiKey = p.apiKey || '';
     S.cfg.models = p.models || []; S.cfg.currentModel = p.currentModel || '';
+    S.cfg.defaultModel = p.currentModel || ''; // 全局默认（会话没自己的 model 时用它）
     S.cfg.provId = p.provId || ''; S.cfg.protocol = p.protocol || 'openai-chat';
     S.cfg.authType = p.authType || 'bearer'; S.cfg.chatPath = p.chatPath || '';
     S.cfg.modelsPath = p.modelsPath || ''; S.cfg.quirks = p.quirks || {};
