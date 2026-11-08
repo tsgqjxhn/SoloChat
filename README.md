@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.5.3 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.5.4 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -10,7 +10,7 @@
 
 ### 对话与会话
 
-- **Chat / Work / Agent / Soul 四种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认；Soul 长期记忆 + 本地工具（`/memory` 编辑 USER/MEMORY，说「记住…」自动写入，每轮注入）。
+- **Chat / Work / Agent / Soul 四种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认；Soul 长期记忆 + 本地工具（`/memory` 四页签、说「记住…」写入、`/dream` 巩固、`/learn` 沉淀技能、`/cron` 定时提醒，记忆落 `%USERPROFILE%\SoloChat\memory`）。
 - **教材式公式**：`$…$` / `$$…$$` 里的 LaTeX 由内置解析器转成 MathML —— 分式分子在上、分母在下，根号罩住内容，上下标和各路括号按数学排版走；不联网、无第三方库。
 - **Work / Agent 看页面**：`browser-read` 读渲染后的标题/正文/链接，`browser-act` 点按钮/填框/滚动/等待/前进后退；Steam 合集、加载更多、无限滚动都能先读 → 点 → 再读。
 - **Agent 检索**：`grep <正则>` 逐行搜工作区回「路径:行号: 文本」，`glob **/*.cs` 按通配找文件；自动跳过依赖/构建目录。
@@ -85,10 +85,10 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,293,696 字节**（v0.5.3，FileVersion 0.5.3.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,131,921 字节 / 19,350 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,131,993 字节**（模板 + css/svg/js 分段） |
-| 宿主源码 | `host/Program.cs` **198,814 字节 / 3,742 行** |
+| 发布产物 | `dist/SoloChatHost.exe` **3,321,344 字节**（v0.5.4，FileVersion 0.5.4.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,155,669 字节 / 19,766 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,155,741 字节**（模板 + css/svg/js 分段） |
+| 宿主源码 | `host/Program.cs` **201,454 字节 / 3,784 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
 内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。

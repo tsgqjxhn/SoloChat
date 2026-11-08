@@ -993,6 +993,19 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .soul-ta-lg{min-height:150px}
 .soul-foot{display:flex;align-items:center;gap:8px;margin-top:6px}
 .soul-status{flex:1;color:var(--muted);font-size:12px}
+.soul-pre{max-height:56vh;overflow:auto;white-space:pre-wrap;word-break:break-word;background:var(--soft);border:1px solid var(--hairline-soft);border-radius:8px;padding:10px 12px;font:12px/1.6 ui-monospace,Consolas,monospace}
+.soul-heart{margin-top:10px;color:var(--faint);font-size:12px}
+.cron-card{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:10px 12px;border:1px solid var(--hairline);border-radius:10px;background:var(--soft)}
+.cron-card .cron-txt{flex:1;min-width:160px;font-size:13px}
+.soul-tabs{display:flex;gap:6px;margin:2px 0 8px}
+.soul-tab{height:26px;padding:0 10px;border:1px solid var(--hairline);border-radius:999px;background:var(--card);color:var(--muted);font:inherit;font-size:12px;cursor:pointer}
+.soul-tab.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.soul-pane{display:none}
+.soul-search{width:100%;box-sizing:border-box;height:30px;margin-bottom:6px;padding:0 10px;border:1px solid var(--hairline);border-radius:7px;background:var(--card);color:var(--text);font:inherit;font-size:12px}
+.soul-hits{display:none;white-space:pre-wrap;background:var(--soft);border:1px solid var(--hairline-soft);border-radius:7px;padding:6px 8px;margin-bottom:6px;font:12px/1.5 ui-monospace,Consolas,monospace;max-height:16vh;overflow:auto}
+.soul-skills{max-height:40vh;overflow:auto}
+.soul-skill-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--hairline-soft);font-size:12px}
+.soul-skill-row span{flex:1}
 .soul-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
 .soul-btn:hover{background:var(--lift)}
 .soul-primary{background:var(--primary);border-color:var(--primary);color:#fff}

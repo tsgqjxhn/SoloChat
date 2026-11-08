@@ -30,6 +30,9 @@ NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){ saveCfg(); }); // 迁移：把旧 localStorage 明文密钥入保险库并脱敏重写
 UI.init();
+try { window.NET = NET; } catch (e) {} // Soul：记忆巩固/落盘要用 NET.chatOnce / NET.mem
+try { if (window.SOUL && SOUL.hydrate) SOUL.hydrate(); } catch (e) {} // S7：宿主内把磁盘记忆读回（文件优先）
+try { if (window.SOUL && SOUL.tick){ setTimeout(function(){ SOUL.tick(); }, 4000); setInterval(function(){ SOUL.tick(); }, 60000); } } catch (e) {} // S6：到点提醒（页面开着才跑）
 MODE.mountUI(); // v0.6.0：自定义模式按钮
 UI.DUAL.init(); // v1.4：双开视图
 if (!Vault.avail) UI.toast('未连接宿主：API Key 将明文存于浏览器 localStorage，建议使用桌面版', true);

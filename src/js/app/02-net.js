@@ -208,6 +208,8 @@ function fetchStream(opt){
       else if (d.t === 'pkg.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '导出失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
+      else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data); } /* v0.5.4：Soul 记忆落盘回包 */
+      else if (d.t === 'mem.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '记忆操作失败')); }
       else if (d.t === 'cmd.done'){
         delete bridge.pend[d.id];
         var cd = null; try { cd = JSON.parse(d.data); } catch(e){}
@@ -474,6 +476,17 @@ function fetchStream(opt){
   }
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  /* v0.5.4：Soul 记忆落盘（宿主 mem op；文件优先，浏览器里退回 localStorage） */
+  function memCall(op, name, text){
+    return new Promise(function(res, rej){
+      if (!bridge.ok){ rej(new Error('记忆落盘需要 SoloChat 宿主（浏览器版仍在 localStorage）')); return; }
+      var id = 'm' + (++bridge.seq);
+      bridge.pend[id] = { onChunk: function(){}, onDone: res, onError: rej };
+      bridge.send({ t: 'mem', id: id, op: op || 'load', name: name || '', text: text == null ? '' : text });
+      setTimeout(function(){ if (bridge.pend[id]){ delete bridge.pend[id]; rej(new Error('记忆操作超时')); } }, 15000);
+    });
+  }
 
   /* ---- 联网搜索管线：查询预处理 → LLM 改写 → 九源检索 → 网页正文抓取 → 结构化注入 ---- */
   var SEARCH_HEADS = ['请帮我查', '请帮我搜索', '请帮我', '麻烦帮我', '能不能帮我', '可以帮我', '麻烦', '请你', '请问',
@@ -1739,7 +1752,8 @@ function fetchStream(opt){
     lastRaw: function(){ return _lastRaw || NET._lastRaw || ''; },
     _lastRaw: '',
   bridge: bridge,
-    fs: fsCall
+    fs: fsCall,
+    mem: memCall,
   };
 })();
 /*  */

@@ -104,6 +104,10 @@ function holdBusy(d, sid){
       var smem = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-mem', text: '编辑长期记忆（/memory）' });
       smem.addEventListener('click', function(){ if (window.SOUL) window.SOUL.open(); });
       extra.appendChild(el('div', { class: 'row' }, [smem]));
+      try {
+        var _hb = (window.SOUL && SOUL.heartbeat) ? SOUL.heartbeat() : null;
+        if (_hb) extra.appendChild(el('div', { class: 'soul-heart', text: '上次聊到「' + (_hb.last || '—') + '」 · 今天 ' + _hb.turns + ' 轮 · 记忆 ' + _hb.mem + ' 条' }));
+      } catch (e) {}
       return;
     }
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
@@ -364,6 +368,92 @@ function sendMessage(){
       try { _l7.push('子智能体层级 ' + SUB.MAX_DEPTH); } catch (e) {}
       if (!_l7.length){ UI.toast('读不到限制常量', true); return; }
       UI.toast('自主执行边界：' + _l7.join(' · '));
+      return;
+    }
+    if (cmd === '/cron'){ /* S6：定时任务 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _cr = text.slice(5).trim();
+      if (!window.SOUL){ UI.toast('记忆组件未加载', true); return; }
+      if (!_cr || _cr === 'list'){
+        var _cl = window.SOUL.cronList();
+        UI.toast(_cl.length ? ('定时任务 ' + _cl.length + ' 条：' + _cl.map(function(t){ return t.at + ' ' + t.prompt.slice(0, 20) + '（' + t.id + '）'; }).join('；'))
+          : '没有定时任务。用法：/cron add 09:00 每日简报');
+        return;
+      }
+      if (_cr.indexOf('add ') === 0){
+        var _m = /^add\s+(\S+)\s+([\s\S]+)$/.exec(_cr);
+        if (!_m){ UI.toast('用法：/cron add 09:00 每日简报', true); return; }
+        var _r = window.SOUL.cronAdd(_m[1], _m[2]);
+        UI.toast(_r.ok ? ('已添加：每天 ' + _m[1] + '（' + _r.id + '）') : _r.msg, !_r.ok);
+        return;
+      }
+      if (_cr.indexOf('del ') === 0){
+        var _n = window.SOUL.cronDel(_cr.slice(4).trim());
+        UI.toast(_n ? '已删除' : '没有这个任务号', !_n);
+        return;
+      }
+      UI.toast('用法：/cron add 09:00 内容 / /cron list / /cron del 任务号', true);
+      return;
+    }
+    if (cmd === '/learn'){ /* S5：把这次会话沉淀成技能草稿 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _nm = text.slice(6).trim();
+      var _ms = (S.msgs || []).filter(function(m){ return m.role === 'user' || m.role === 'assistant'; });
+      if (_ms.length < 2){ UI.toast('先聊一轮再 /learn', true); return; }
+      var _first = ''; for (var _i = 0; _i < _ms.length; _i++){ if (_ms[_i].role === 'user'){ _first = String(_ms[_i].content || ''); break; } }
+      var _steps = [], _pits = [], _vers = [];
+      _ms.forEach(function(m){
+        if (m.role !== 'assistant') return;
+        String(m.content || '').split('\n').forEach(function(l){
+          var s = l.trim();
+          if (!s) return;
+          if (/^(\d+[.、)]|[-*])\s+/.test(s) && _steps.length < 14) _steps.push(s.replace(/^(\d+[.、)]|[-*])\s+/, ''));
+          if (/(注意|坑|失败|错误|不要|否则|谨慎)/.test(s) && _pits.length < 6) _pits.push(s.slice(0, 160));
+          if (/(验证|检查|确认|测试)/.test(s) && _vers.length < 4) _vers.push(s.slice(0, 160));
+        });
+      });
+      if (!_steps.length) _steps = ['按本次对话的步骤复现（模型未给出编号步骤）'];
+      var _slug = (_nm || ('skill-' + new Date().toISOString().slice(0, 10))).replace(/\s+/g, '-').slice(0, 40);
+      var _md = '# ' + _slug + '\n\n## 何时用\n' + _first.slice(0, 200) + '\n\n## 步骤\n' + _steps.map(function(s, i){ return (i + 1) + '. ' + s; }).join('\n')
+        + '\n\n## 坑\n' + (_pits.length ? _pits.map(function(s){ return '- ' + s; }).join('\n') : '- （本次未记录）')
+        + '\n\n## 验证\n' + (_vers.length ? _vers.map(function(s){ return '- ' + s; }).join('\n') : '- 复跑一次，确认步骤可重复');
+      try {
+        EXT.add({ kind: 'skill', name: _slug, title: _slug, desc: '由 /learn 从本次会话生成（草稿）', body: _md });
+        UI.toast('已生成技能草稿：' + _slug + '（/skills 可查看）');
+      } catch (e) { UI.toast('生成失败：' + (e && e.message || e), true); }
+      return;
+    }
+    if (cmd === '/skills'){ /* S5：列出技能 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _skl = [];
+      try { _skl = EXT.registry().filter(function(x){ return x.kind === 'skill'; }).map(function(x){ return x.name; }); } catch (e) {}
+      UI.toast(_skl.length ? ('技能 ' + _skl.length + ' 个：' + _skl.join('、')) : '还没有技能，完成任务后 /learn 生成');
+      return;
+    }
+    if (cmd === '/skill-drop'){ /* S5：删除技能 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _dn = text.slice(11).trim();
+      if (!_dn){ UI.toast('用法：/skill-drop 技能名', true); return; }
+      try { EXT.del(_dn); UI.toast('已删除技能：' + _dn); } catch (e) { UI.toast('删除失败：' + (e && e.message || e), true); }
+      return;
+    }
+    if (cmd === '/dream'){ /* S4：巩固记忆 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!window.SOUL){ UI.toast('记忆组件未加载', true); return; }
+      UI.toast('正在巩固最近 7 天对话…');
+      window.SOUL.dream().then(function(r){ UI.toast('巩固完成：新增/更新 ' + r.added + ' 条'); })
+        .catch(function(e){ UI.toast('巩固失败：' + (e && e.message || e), true); });
+      return;
+    }
+    if (cmd === '/dreams'){ /* S4：查看巩固记录 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (window.SOUL && window.SOUL.openDreams) window.SOUL.openDreams(); else UI.toast('记忆组件未加载', true);
+      return;
+    }
+    if (cmd === '/rollback'){ /* S4：回滚上一次巩固 */
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      var _rb = window.SOUL ? window.SOUL.rollback() : false;
+      UI.toast(_rb ? '已回滚到上一次巩固前的 MEMORY' : '没有可回滚的快照', !_rb);
       return;
     }
     if (cmd === '/forget'){ /* Soul S2：按关键词删记忆 */
@@ -813,6 +903,13 @@ function sendMessage(){
         } catch (e) {}
       })();
       if (!err){
+        try {
+          if (S.cfg.mode === 'soul' && window.SOUL && window.SOUL.logTurn){
+            var _lu = '';
+            for (var _ui = msgs.length - 1; _ui >= 0; _ui--){ if (msgs[_ui].role === 'user'){ _lu = String(msgs[_ui].content || ''); break; } }
+            window.SOUL.logTurn(_lu, st.msg.content || '');
+          }
+        } catch (e) {}
         endStream(st, 'ok', null, st.msg.tokens ? { total_tokens: st.msg.tokens } : null);
         FS.handleTurn(asst); // 文件 Agent 回合循环入口（v1.1）：扫 fs-* 标记并续跑
         WORK.handleTurn(asst); // Work 回合循环入口（v2.0）：扫 run/vfs-* 标记并续跑
