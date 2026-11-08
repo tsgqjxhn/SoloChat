@@ -331,6 +331,11 @@ function sendMessage(){
   }
     var text = $input.value.trim();
     if (!text && !S.pendAtts.length){ quickPending = false; return; }
+    /* S2 显式记忆：用户说「记住…」→ 直接写 MEMORY.md（仍照常发消息） */
+    try {
+      var _mk = /^(?:请)?(?:记住|记下|帮我记住)[:：,，\s]+([\s\S]+)$/.exec(text);
+      if (_mk && window.SOUL){ window.SOUL.remember(_mk[1]); UI.toast('已记入 MEMORY.md（/memory 可查看）'); }
+    } catch (e) {}
   /* v0.3.30：斜杠命令（对标 Claude Code 的 /clear、/compact） */
   if (text.charAt(0) === '/'){
     var cmd = text.split(/\s+/)[0].toLowerCase();
