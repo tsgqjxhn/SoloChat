@@ -842,11 +842,12 @@ namespace SoloChatHost
                         }
                     }));
                 }
-                else if (wop == "read") /* v1.29：读当前应用内浏览器页面 → {title,url,text,links} */
+                else if (wop == "read") /* v1.29：读当前应用内浏览器页面 → {title,url,text,links}；html=1 时带 outerHTML（P5 提取用） */
                 {
                     string rUrl = root.TryGetProperty("url", out JsonElement rUrlEl) ? rUrlEl.GetString() : "";
+                    bool rHtml = root.TryGetProperty("html", out JsonElement rHtmlEl) && rHtmlEl.ValueKind == JsonValueKind.True;
                     var selfR = this;
-                    BeginInvoke((Action)(async () => { await selfR.WebPanelReadAsync(id, rUrl); }));
+                    BeginInvoke((Action)(async () => { await selfR.WebPanelReadAsync(id, rUrl, rHtml); }));
                 }
                 else if (wop == "act") /* v1.29：操作当前应用内浏览器页面（click/type/scroll/wait/back/forward） */
                 {
@@ -1155,7 +1156,7 @@ namespace SoloChatHost
             return true;
         }
 
-        async Task WebPanelReadAsync(string id, string url)
+        async Task WebPanelReadAsync(string id, string url, bool wantHtml)
         {
             id = id ?? ("wvr" + Environment.TickCount);
             try
@@ -1190,7 +1191,7 @@ namespace SoloChatHost
                     }
                 }
 
-                const string script =
+                string script =
                     "(function(){try{" +
                     "var links=[],seen={},as=document.querySelectorAll('a[href^=\"http\"]');" +
                     "for(var i=0;i<as.length&&links.length<100;i++){" +
@@ -1202,6 +1203,7 @@ namespace SoloChatHost
                     "txt=txt.replace(/\\r/g,'').replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim();" +
                     "if(txt.length>20000)txt=txt.slice(0,20000);" +
                     "return JSON.stringify({title:document.title||'',url:location.href,text:txt,links:links," +
+                    "html:" + (wantHtml ? "document.documentElement.outerHTML.slice(0,200000)" : "''") + "," +
                     "frames:document.querySelectorAll('iframe').length});" +
                     "}catch(e){return JSON.stringify({error:String((e&&e.message)||e)});}})()";
 

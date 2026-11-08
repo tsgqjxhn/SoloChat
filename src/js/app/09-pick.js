@@ -986,6 +986,118 @@ var BROWSER_TOOL = (function(){
   return { ready: ready, call: call, parseAct: parseAct, read: read, act: act, fmtRead: fmtRead, fmtAct: fmtAct };
 })();
 
+/* P5：结构化提取 —— 从渲染后的 HTML 里按 CSS 选择器抓字段，输出 CSV。
+   宿主模式走 browser-read(html)，纯网页模式走同源 fetch（只测/降级用）。 */
+var EXTRACT = (function(){
+  function splitFields(s){
+    var out = [];
+    String(s || '').split(',').forEach(function(part){
+      var p = part.trim(); if (!p) return;
+      var i = p.indexOf(':');
+      if (i <= 0) return;
+      out.push({ k: p.slice(0, i).trim(), sel: p.slice(i + 1).trim() });
+    });
+    return out;
+  }
+  function parseArgs(arg, body){
+    var s = (String(arg || '') + ' ' + String(body || '')).replace(/\r/g, ' ');
+    function opt(name, def){
+      var m = new RegExp('--' + name + '\\s+(?:"([^"]*)"|\'([^\']*)\'|(\\S+))').exec(s);
+      return m ? (m[1] != null ? m[1] : (m[2] != null ? m[2] : m[3])) : (def == null ? '' : def);
+    }
+    var url = String(arg || '').trim().split(/\s+/)[0] || '';
+    if (url === '-' || url === 'current') url = '';
+    return {
+      url: url,
+      items: opt('items', ''),
+      fields: splitFields(opt('fields', '')),
+      next: opt('next', ''),
+      pages: Math.max(1, parseInt(opt('pages', '1'), 10) || 1),
+      dedupe: opt('dedupe', ''),
+      out: opt('out', 'extract.csv')
+    };
+  }
+  function parseHtml(html, items, fields){
+    var doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    var els = doc.querySelectorAll(items), rows = [];
+    for (var i = 0; i < els.length; i++){
+      var el = els[i], row = {};
+      for (var j = 0; j < fields.length; j++){
+        var sel = fields[j].sel, attr = '';
+        var at = sel.lastIndexOf('@');
+        if (at > 0){ attr = sel.slice(at + 1); sel = sel.slice(0, at); }
+        var n = sel ? el.querySelector(sel) : el;
+        var v = '';
+        if (n){ v = attr ? (n.getAttribute(attr) || '') : (n.textContent || ''); }
+        row[fields[j].k] = String(v).replace(/\s+/g, ' ').trim();
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  function csvCell(v){
+    var s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function toCsv(rows, fields){
+    var head = fields.map(function(f){ return csvCell(f.k); }).join(',');
+    var lines = rows.map(function(r){ return fields.map(function(f){ return csvCell(r[f.k]); }).join(','); });
+    return [head].concat(lines).join('\n') + '\n';
+  }
+  function dedupeRows(rows, key){
+    if (!key) return rows;
+    var seen = {}, out = [];
+    rows.forEach(function(r){ var v = r[key]; if (v == null || v === '') { out.push(r); return; } if (seen[v]) return; seen[v] = 1; out.push(r); });
+    return out;
+  }
+  function fetchHtml(url){
+    if (typeof BROWSER_TOOL !== 'undefined' && BROWSER_TOOL.ready()){
+      return BROWSER_TOOL.call('read', { url: url || '', html: true }).then(function(d){
+        if (d.error) throw new Error(d.error);
+        return d.html || '';
+      });
+    }
+    var u = url;
+    if (!u && typeof location !== 'undefined') u = location.href;
+    if (!u) return Promise.reject(new Error('没有 URL，且当前页不可读'));
+    return fetch(u, { credentials: 'same-origin' }).then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    });
+  }
+  function run(sid, arg, body){
+    var a = parseArgs(arg, body);
+    if (!a.items) return Promise.reject(new Error('缺少 --items "选择器"'));
+    if (!a.fields.length) return Promise.reject(new Error('缺少 --fields "字段:.选择器,..."'));
+    var all = [], page = 0, lastCount = -1;
+    function step(){
+      page++;
+      return fetchHtml(a.url).then(function(html){
+        var rows = parseHtml(html, a.items, a.fields);
+        all = all.concat(rows);
+        if (page >= a.pages || !a.next || rows.length === 0 || rows.length === lastCount) return;
+        lastCount = rows.length;
+        if (typeof BROWSER_TOOL === 'undefined' || !BROWSER_TOOL.ready()) return; // 纯网页模式只能单页
+        return BROWSER_TOOL.act('click ' + a.next).then(function(){ return new Promise(function(r){ setTimeout(r, 800); }); }).then(step);
+      });
+    }
+    return step().then(function(){
+      var rows = dedupeRows(all, a.dedupe);
+      var csv = toCsv(rows, a.fields);
+      var p = a.out || 'extract.csv';
+      var save = (typeof WORK !== 'undefined' && WORK.vfsWrite && sid) ? WORK.vfsWrite(sid, p, csv) : Promise.reject(new Error('无工作区'));
+      return save.then(function(rec){
+        return '[extract] 已保存：' + ((rec && rec.path) || p) + '（' + rows.length + ' 行，' + a.fields.length + ' 列）\n' +
+          rows.slice(0, 3).map(function(r){ return a.fields.map(function(f){ return f.k + '=' + r[f.k]; }).join(' | '); }).join('\n') +
+          (rows.length > 3 ? '\n…' : '');
+      }, function(){
+        return '[extract] 已提取 ' + rows.length + ' 行（未落盘）\n' + csv.slice(0, 2000);
+      });
+    });
+  }
+  return { parseArgs: parseArgs, parseHtml: parseHtml, toCsv: toCsv, dedupeRows: dedupeRows, run: run };
+})();
+
 var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
@@ -996,6 +1108,7 @@ var WORK = (function(){
     '```browser URL —— 应用内浏览器打开网页（要登录态、要看页面本身时用）。\n' +
     '```browser-read [URL] —— 读应用内浏览器当前页（或先打开 URL）：回标题 + 正文 + 链接；JS 渲染、点过「加载更多」的页面用这个。\n' +
     '```browser-act click #more —— 操作页面：click 选择器 / type 选择器 | 文本 / scroll 像素 / wait 选择器或毫秒 / back / forward。\n' +
+    '```extract <url|-> --items ".item" --fields "name:.title,price:.price" [--next "#more"] [--pages 3] [--dedupe name] [--out games.csv] —— 按选择器抓字段并落 CSV。\n' +
     '```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 search。\n' +
     '```search 查询词 —— 联网检索，回标题+链接+摘要。\n' +
     '```nav JSON —— 航海图：{"type":"bearing","heading":45,"trueBearing":120,"target":"灯塔A"}；\n' +
@@ -1024,7 +1137,7 @@ var WORK = (function(){
     '纪律：绝不回答「我无法访问网络」——先调工具，只有工具真的失败才回报原因（附失败输出要点）。\n' +
     '输出：结论在前；有产物给「文件清单 + 怎么打开/运行」；有失败给「失败原因 + 建议下一步」。';
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|extract|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -1224,7 +1337,7 @@ var WORK = (function(){
       UI.holdBusy(-1, sid0);
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview|play|download|get|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play|download|get|extract|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
@@ -1521,6 +1634,15 @@ var WORK = (function(){
         return;
       }
       /* ---- v1.29（P4）：读当前应用内浏览器页面（渲染后的 DOM + 链接） ---- */
+      if (c.op === 'extract'){
+        var _t0ex = Date.now();
+        EXTRACT.run(sid0, c.arg, c.body).then(function(t){
+          add(t, { op: 'extract', ok: true, ms: Date.now() - _t0ex, brief: (t.split('\n')[0] || '').slice(0, 60) });
+        }, function(e){
+          add('[extract] 失败：' + ((e && e.message) || e), { op: 'extract', ok: false, brief: '失败' });
+        }).then(next);
+        return;
+      }
       if (c.op === 'browser-read'){
         var brU = String(c.arg || '').trim();
         if (brU){
