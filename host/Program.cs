@@ -2768,6 +2768,90 @@ namespace SoloChatHost
                     Post(id, "runtime.done", "{\"removed\":true}", null, 200);
                     return;
                 }
+                if (op == "sandbox")
+                {
+                    /* P6：Work 临时沙箱 —— 把 VFS 文件写进临时目录，跑 Python，再把改动读回来。
+                       目录只在本次调用内存在，结束即删；路径禁止 .. 与绝对路径。 */
+                    string rid = req.TryGetProperty("runtimeId", out JsonElement sbRidEl) ? (sbRidEl.GetString() ?? "") : "";
+                    string code = req.TryGetProperty("code", out JsonElement sbCodeEl) ? (sbCodeEl.GetString() ?? "") : "";
+                    var rec = list.Find(x => x != null && string.Equals(x.id, rid, StringComparison.OrdinalIgnoreCase));
+                    if (rec == null) throw new Exception("运行时未安装：" + rid + "（请到 设置 → 扩展 → 插件市场安装）");
+                    string py = Path.Combine(rec.path, rec.entry);
+                    if (!File.Exists(py)) throw new Exception("运行时文件缺失，请重新安装");
+                    string dir = Path.Combine(Path.GetTempPath(), "SoloChat", "sbx_" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(dir);
+                    string dirPrefix = dir.EndsWith("\\", StringComparison.Ordinal) ? dir : dir + "\\";
+                    try
+                    {
+                        if (req.TryGetProperty("files", out JsonElement filesEl) && filesEl.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var prop in filesEl.EnumerateObject())
+                            {
+                                string rel = (prop.Name ?? "").Replace('\\', '/').TrimStart('/');
+                                if (rel == "" || rel.Contains("..") || Path.IsPathRooted(rel)) continue;
+                                string full = Path.GetFullPath(Path.Combine(dir, rel.Replace('/', '\\')));
+                                if (!full.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                                string parent = Path.GetDirectoryName(full);
+                                if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+                                File.WriteAllText(full, prop.Value.GetString() ?? "", new UTF8Encoding(false));
+                            }
+                        }
+                        File.WriteAllText(Path.Combine(dir, "main.py"), code, new UTF8Encoding(false));
+                        int timeoutMs = 60000;
+                        if (req.TryGetProperty("timeoutMs", out JsonElement sbTmoEl) && sbTmoEl.TryGetInt32(out int sbTmoVal) && sbTmoVal > 0)
+                            timeoutMs = Math.Min(sbTmoVal, 120000);
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = py,
+                            Arguments = "-u main.py",
+                            WorkingDirectory = dir,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            StandardOutputEncoding = Encoding.UTF8,
+                            StandardErrorEncoding = Encoding.UTF8
+                        };
+                        psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+                        var t0 = DateTime.UtcNow;
+                        using (var p = new Process { StartInfo = psi })
+                        {
+                            Func<Task<string>, string> take = delegate (Task<string> t)
+                            {
+                                try { return t.Wait(3000) ? (t.Result ?? "") : ""; } catch { return ""; }
+                            };
+                            p.Start();
+                            var soTask = p.StandardOutput.ReadToEndAsync();
+                            var seTask = p.StandardError.ReadToEndAsync();
+                            bool exited = p.WaitForExit(timeoutMs);
+                            if (!exited)
+                            {
+                                try { p.Kill(); } catch { }
+                                KillProcessTree(p.Id);
+                                Post(id, "runtime.done",
+                                    JsonSerializer.Serialize(new { code = -1, stdout = take(soTask), stderr = take(seTask), timeout = true, files = new { } }),
+                                    "超时（>" + timeoutMs + "ms）", 200);
+                                return;
+                            }
+                            string stdout = soTask.GetAwaiter().GetResult();
+                            string stderr = seTask.GetAwaiter().GetResult();
+                            var outFiles = new System.Collections.Generic.Dictionary<string, string>();
+                            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                            {
+                                string rel = f.Substring(dir.Length + 1).Replace('\\', '/');
+                                if (rel == "main.py" || rel.Contains("__pycache__") || rel.EndsWith(".pyc", StringComparison.OrdinalIgnoreCase)) continue;
+                                try { if (new FileInfo(f).Length <= 200 * 1024) outFiles[rel] = File.ReadAllText(f, Encoding.UTF8); } catch { }
+                            }
+                            var data = JsonSerializer.Serialize(new { code = p.ExitCode, stdout = stdout, stderr = stderr, ms = (long)(DateTime.UtcNow - t0).TotalMilliseconds, timeout = false, files = outFiles });
+                            Post(id, "runtime.done", data, null, 200);
+                        }
+                    }
+                    finally
+                    {
+                        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+                    }
+                    return;
+                }
                 if (op == "run")
                 {
                     string rid = req.TryGetProperty("runtimeId", out JsonElement ridEl3) ? (ridEl3.GetString() ?? "") : "";

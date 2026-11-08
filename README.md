@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.12 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.13 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -13,6 +13,7 @@
 - **Chat / Work / Agent 三种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认。
 - **Work / Agent 看页面**：`browser-read` 读渲染后的标题/正文/链接，`browser-act` 点按钮/填框/滚动/等待/前进后退；Steam 合集、加载更多、无限滚动都能先读 → 点 → 再读。
 - **Work 结构化提取**：`extract <url|-> --items ".item" --fields "name:.title,price:.price"` 按选择器抓字段，支持 `@属性`、`--next` 分页、`--dedupe`，输出 CSV 到工作区。
+- **Work Python 沙箱**：`py` 围栏把工作区文本文件带进临时目录跑脚本，跑完把改动写回，目录即删；需安装 Python 3.11 运行时。
 - **Chat 富文本**：任务列表、表格列对齐 + 横向滚动、脚注、定义列表、最多 3 层嵌套引用；9 种语言代码高亮（js/ts/py/java/cs/go/rs/sh/sql）。
 - **Chat 生图 + 图片流**：输入区生图按钮，弹窗填提示词/尺寸/张数；支持上游 partial 帧渐进显示，完成后图片入附件库，刷新仍在，可下载/重新生成。
 - **引用角标**：正文 `[1]` 变上标，悬停看标题/域名/摘要，点击跳到来源并高亮；没有来源的编号保持原文。
@@ -82,10 +83,10 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,257,344 字节**（v0.4.12，FileVersion 0.4.12.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,105,895 字节 / 18,935 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **16 个文件 / 1,105,967 字节**（模板 + css/svg/js 分段） |
-| 宿主源码 | `host/Program.cs` **186,067 字节 / 3,526 行** |
+| 发布产物 | `dist/SoloChatHost.exe` **3,265,536 字节**（v0.4.13，FileVersion 0.4.13.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,109,099 字节 / 18,968 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **16 个文件 / 1,109,171 字节**（模板 + css/svg/js 分段） |
+| 宿主源码 | `host/Program.cs` **192,118 字节 / 3,610 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
 内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。

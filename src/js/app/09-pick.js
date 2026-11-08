@@ -1109,6 +1109,7 @@ var WORK = (function(){
     '```browser-read [URL] —— 读应用内浏览器当前页（或先打开 URL）：回标题 + 正文 + 链接；JS 渲染、点过「加载更多」的页面用这个。\n' +
     '```browser-act click #more —— 操作页面：click 选择器 / type 选择器 | 文本 / scroll 像素 / wait 选择器或毫秒 / back / forward。\n' +
     '```extract <url|-> --items ".item" --fields "name:.title,price:.price" [--next "#more"] [--pages 3] [--dedupe name] [--out games.csv] —— 按选择器抓字段并落 CSV。\n' +
+    '```py —— 临时沙箱跑 Python（工作区文本文件自动带进去，改动的文件写回）；例：读 games.csv → 清洗 → 写 clean.csv。\n' +
     '```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 search。\n' +
     '```search 查询词 —— 联网检索，回标题+链接+摘要。\n' +
     '```nav JSON —— 航海图：{"type":"bearing","heading":45,"trueBearing":120,"target":"灯塔A"}；\n' +
@@ -1137,7 +1138,7 @@ var WORK = (function(){
     '纪律：绝不回答「我无法访问网络」——先调工具，只有工具真的失败才回报原因（附失败输出要点）。\n' +
     '输出：结论在前；有产物给「文件清单 + 怎么打开/运行」；有失败给「失败原因 + 建议下一步」。';
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|extract|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|extract|py|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -1337,7 +1338,7 @@ var WORK = (function(){
       UI.holdBusy(-1, sid0);
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
-      if (!/^\[(run-result|vfs|web|search|preview|play|download|get|extract|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
+      if (!/^\[(run-result|vfs|web|search|preview|play|download|get|extract|py|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
       note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
     }
     (function next(){
@@ -1634,6 +1635,36 @@ var WORK = (function(){
         return;
       }
       /* ---- v1.29（P4）：读当前应用内浏览器页面（渲染后的 DOM + 链接） ---- */
+      if (c.op === 'py'){
+        var pyCode = String(c.body || '');
+        if (!pyCode.trim()){ add('[py] 代码为空', { op: 'py', ok: false, brief: '代码为空' }); next(); return; }
+        if (!NET.bridge || !NET.bridge.runtime){ add('[py] 需要 exe 宿主，并先在插件市场安装 Python 3.11 运行时', { op: 'py', ok: false, brief: '无运行时' }); next(); return; }
+        UI.confirmBox({ title: '在临时沙箱运行 Python？', text: '会把本会话工作区的文本文件带进去，跑完把改动写回。\n\n' + pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''), okText: '运行', danger: true })
+          .then(function(ok){
+            if (!ok){ add('[py] 用户取消了本次执行', { op: 'py', ok: false, brief: '已取消' }); next(); return; }
+            var pt0 = Date.now();
+            DB.workfsBySid(sid0).then(function(list){
+              var files = {};
+              (list || []).forEach(function(f){
+                if (f && !f.binary && f.content != null && String(f.content).length < 200000) files[f.path] = String(f.content);
+              });
+              return NET.bridge.runtime('run', { runtimeId: 'python-3.11', op: 'sandbox', code: pyCode, files: files, timeoutMs: 60000 });
+            }).then(function(r){
+              var out = '[py] 退出码 ' + ((r && r.code) == null ? '?' : r.code) + '（' + (Date.now() - pt0) + 'ms）' +
+                (r && r.timeout ? ' · 超时（>60s）' : '') +
+                (r && r.stdout ? '\nSTDOUT:\n' + String(r.stdout).slice(0, 4000) : '') +
+                (r && r.stderr ? '\nSTDERR:\n' + String(r.stderr).slice(0, 3000) : '');
+              var fs = (r && r.files) || {}, names = Object.keys(fs);
+              var ps = names.map(function(k){ return vfsWrite(sid0, k, fs[k]); });
+              Promise.all(ps).then(function(){
+                out += '\n写回：' + (names.join(', ') || '（无文件变化）');
+                add(out, { op: 'py', ok: !(r && r.code), ms: Date.now() - pt0, brief: '退出码 ' + ((r && r.code) == null ? '?' : r.code) });
+                next();
+              }, function(e){ add(out + '\n写回失败：' + ((e && e.message) || e), { op: 'py', ok: false, brief: '写回失败' }); next(); });
+            }, function(e){ add('[py] 执行失败：' + ((e && e.message) || e), { op: 'py', ok: false, brief: '失败' }); next(); });
+          });
+        return;
+      }
       if (c.op === 'extract'){
         var _t0ex = Date.now();
         EXTRACT.run(sid0, c.arg, c.body).then(function(t){
