@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.2';
+var APP_VER = 'v0.5.3';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -2044,7 +2044,12 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var pickBlock = PICK.block(S.cfg.mode); if (pickBlock) sys += '\n\n' + pickBlock; // v0.4.0c：本轮勾选的扩展
     if (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
-    if (S.cfg.mode === 'soul'){ var _sp = (window.SOUL && window.SOUL.prompt && window.SOUL.prompt()) || ''; if (_sp) sys += '\n\n' + _sp; } // Soul S1：长期记忆每轮注入
+    if (S.cfg.mode === 'soul'){
+      var _lastU = '';
+      for (var _mi = msgs.length - 1; _mi >= 0; _mi--){ if (msgs[_mi].role === 'user'){ _lastU = String(msgs[_mi].content || ''); break; } }
+      var _sp = (window.SOUL && window.SOUL.prompt) ? window.SOUL.prompt(_lastU) : '';
+      if (_sp) sys += '\n\n' + _sp;
+    } /* Soul S3：按本轮问题检索 Top-K 注入 */
     var _attMan = workspaceManifestPrompt(msgs); if (_attMan) sys += '\n\n' + _attMan; // v1.1.21：工作区附件清单
     var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
   var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方

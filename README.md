@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.5.2 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.5.3 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,9 +85,9 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,289,088 字节**（v0.5.2，FileVersion 0.5.2.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,126,973 字节 / 19,231 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,127,045 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,293,696 字节**（v0.5.3，FileVersion 0.5.3.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,131,921 字节 / 19,350 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,131,993 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **198,814 字节 / 3,742 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 

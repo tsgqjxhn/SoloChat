@@ -1392,7 +1392,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.2';
+var APP_VER = 'v0.5.3';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -3395,7 +3395,12 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var pickBlock = PICK.block(S.cfg.mode); if (pickBlock) sys += '\n\n' + pickBlock; // v0.4.0c：本轮勾选的扩展
     if (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
-    if (S.cfg.mode === 'soul'){ var _sp = (window.SOUL && window.SOUL.prompt && window.SOUL.prompt()) || ''; if (_sp) sys += '\n\n' + _sp; } // Soul S1：长期记忆每轮注入
+    if (S.cfg.mode === 'soul'){
+      var _lastU = '';
+      for (var _mi = msgs.length - 1; _mi >= 0; _mi--){ if (msgs[_mi].role === 'user'){ _lastU = String(msgs[_mi].content || ''); break; } }
+      var _sp = (window.SOUL && window.SOUL.prompt) ? window.SOUL.prompt(_lastU) : '';
+      if (_sp) sys += '\n\n' + _sp;
+    } /* Soul S3：按本轮问题检索 Top-K 注入 */
     var _attMan = workspaceManifestPrompt(msgs); if (_attMan) sys += '\n\n' + _attMan; // v1.1.21：工作区附件清单
     var mb = (S._mem && S._mem[session.id]) ? S._mem[session.id] : ''; if (mb) sys += '\n\n' + mb; // v1.17：记忆注入
   var perPrompt = MODE.promptFor(); if (perPrompt) sys += '\n\n' + perPrompt; // v0.6.0：自定义模式配方
@@ -12025,7 +12030,10 @@ function sendMessage(){
     /* S2 显式记忆：用户说「记住…」→ 直接写 MEMORY.md（仍照常发消息） */
     try {
       var _mk = /^(?:请)?(?:记住|记下|帮我记住)[:：,，\s]+([\s\S]+)$/.exec(text);
-      if (_mk && window.SOUL){ window.SOUL.remember(_mk[1]); UI.toast('已记入 MEMORY.md（/memory 可查看）'); }
+      if (_mk && window.SOUL){
+        var _r = window.SOUL.remember(_mk[1]);
+        UI.toast(_r && _r.ok ? _r.msg : ('未写入：' + ((_r && _r.msg) || '未知原因')), !(_r && _r.ok));
+      }
     } catch (e) {}
   /* v0.3.30：斜杠命令（对标 Claude Code 的 /clear、/compact） */
   if (text.charAt(0) === '/'){
@@ -12052,6 +12060,14 @@ function sendMessage(){
       try { _l7.push('子智能体层级 ' + SUB.MAX_DEPTH); } catch (e) {}
       if (!_l7.length){ UI.toast('读不到限制常量', true); return; }
       UI.toast('自主执行边界：' + _l7.join(' · '));
+      return;
+    }
+    if (cmd === '/forget'){ /* Soul S2：按关键词删记忆 */
+      var _fk = text.slice(7).trim();
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!_fk){ UI.toast('用法：/forget 关键词', true); return; }
+      var _n = window.SOUL ? window.SOUL.forget(_fk) : 0;
+      UI.toast(_n ? ('已删除 ' + _n + ' 条相关记忆') : '没有匹配的记忆', !_n);
       return;
     }
     if (cmd === '/memory'){ /* Soul S1：编辑长期记忆 */
@@ -19111,11 +19127,16 @@ var WORK = (function(){
   }
   window.CANVAS = { open: open, fromMsg: fromMsg, openLast: openLast, close: close };
 })();
-/* Soul S1：长期记忆核心（文件优先的网页版）——USER / MEMORY 两层，每轮注入。
-   存储：localStorage sc.soul.v1；可导出 Markdown。入口：/memory 或模式 Soul。 */
+/* Soul 记忆核心（S1 + S2 + S3 网页版）
+   - USER（画像）/ MEMORY（长期事实）两层；localStorage sc.soul.v1
+   - S2：敏感信息拒写、相似条目替换（冲突不再并存）、/forget 删除
+   - S3：按本轮问题做词法检索，Top-K 注入（USER 始终注入），不再整段塞满
+   入口：/memory、/forget、Soul 空态按钮。 */
 (function(){
   'use strict';
   var KEY = 'sc.soul.v1';
+  var MEM_MAX = 1200, USER_MAX = 600, TOPK = 6;
+
   function load(){
     try { var o = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; return { user: String(o.user || ''), memory: String(o.memory || ''), updated: o.updated || 0 }; }
     catch (e) { return { user: '', memory: '', updated: 0 }; }
@@ -19124,21 +19145,119 @@ var WORK = (function(){
     o.updated = Date.now();
     try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {}
   }
-  function prompt(){
-    var o = load(), L = [];
-    if (o.user.trim()) L.push('【用户画像】\n' + o.user.trim().slice(0, 600));
-    if (o.memory.trim()) L.push('【长期记忆】\n' + o.memory.trim().slice(0, 1200));
-    return L.length ? 'Soul 记忆（长期、跨会话；以此为准，冲突时问用户）：\n' + L.join('\n\n') : '';
+  function stamp(){
+    var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function lines(mem){
+    return String(mem || '').split('\n').map(function(s){ return s.trim(); }).filter(function(s){ return /^- \[/.test(s); });
+  }
+  function entryOf(line){
+    var m = /^- \[([0-9-]{8,10})\]\s*([\s\S]*)$/.exec(line);
+    return { date: m ? m[1] : '', text: m ? m[2] : line, line: line };
+  }
+  function toks(s){
+    s = String(s || '').toLowerCase();
+    var out = (s.match(/[a-z0-9_]{2,}/g) || []).slice();
+    var cjk = s.replace(/[^\u4e00-\u9fa5]+/g, ' ');
+    cjk.split(/\s+/).forEach(function(seg){
+      for (var i = 0; i < seg.length - 1; i++) out.push(seg.slice(i, i + 2));
+    });
+    return out;
+  }
+  function sim(a, b){
+    var A = toks(a), B = toks(b);
+    if (!A.length || !B.length) return 0;
+    var sa = {}, sb = {}, inter = 0;
+    A.forEach(function(t){ sa[t] = 1; });
+    B.forEach(function(t){ sb[t] = 1; });
+    for (var k in sa) if (sb[k]) inter++;
+    return inter / Math.sqrt(Object.keys(sa).length * Object.keys(sb).length);
+  }
+  function daysAgo(d){
+    var t = Date.parse(d + 'T00:00:00');
+    if (isNaN(t)) return 365;
+    return Math.max(0, (Date.now() - t) / 86400000);
+  }
+  function prior(text){
+    return /(喜欢|偏好|习惯|决定|约定|承诺|不要|别|以后|每次|称呼|名字)/.test(text) ? 1 : 0.4;
+  }
+  function score(q, e){
+    var rel = sim(q, e.text);
+    if (rel <= 0.03) return 0;                    /* 与问题无关的记忆不因「新」而入选 */
+    var rec = Math.exp(-daysAgo(e.date) / 30);
+    return 0.55 * rel + 0.25 * rec + 0.20 * prior(e.text);
+  }
+  /* S2：敏感信息拒写（宁可少记，不可泄密） */
+  function sensitive(t){
+    return /(api[\s_-]?key|密钥|密码|passw(or)?d|secret|token|sk-[A-Za-z0-9_-]{8,}|身份证|银行卡|信用卡|卡号|\b\d{16,19}\b|家庭住址|门牌)/i.test(t);
   }
   function remember(text){
-    var t = String(text || '').trim();
-    if (!t) return '';
-    var o = load();
-    var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
-    var stamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-    o.memory = (o.memory.trim() ? o.memory.trim() + '\n' : '') + '- [' + stamp + '] ' + t.replace(/\s+/g, ' ');
+    var t = String(text || '').trim().replace(/\s+/g, ' ');
+    if (!t) return { ok: false, msg: '内容为空' };
+    if (sensitive(t)) return { ok: false, msg: '含密钥/密码/证件/卡号等敏感信息，已拒写' };
+    var o = load(), list = lines(o.memory), best = -1, bs = 0;
+    list.forEach(function(l, i){
+      var s = sim(t, entryOf(l).text);
+      if (s > bs){ bs = s; best = i; }
+    });
+    var d = stamp(), action = 'add', old = '';
+    if (best >= 0 && bs >= 0.38){
+      old = entryOf(list[best]).text;
+      list[best] = '- [' + d + '] ' + t;
+      action = 'update';
+    } else {
+      list.push('- [' + d + '] ' + t);
+    }
+    var mem = list.join('\n');
+    while (mem.length > MEM_MAX && list.length > 1){ list.shift(); mem = list.join('\n'); }
+    o.memory = mem.slice(-MEM_MAX);
     save(o);
-    return stamp;
+    return { ok: true, action: action, old: old, date: d, msg: action === 'update' ? '已更新：' + old + ' → ' + t : '已记入 MEMORY.md' };
+  }
+  function forget(q){
+    var o = load(), list = lines(o.memory), keep = [], n = 0;
+    list.forEach(function(l){
+      if (sim(q, entryOf(l).text) >= 0.3){ n++; } else keep.push(l);
+    });
+    o.memory = keep.join('\n');
+    save(o);
+    return n;
+  }
+  function search(q){
+    return lines(load().memory).map(entryOf).map(function(x){ return { e: x, s: score(q, x) }; })
+      .filter(function(x){ return x.s > 0.12; })
+      .sort(function(a, b){ return b.s - a.s; })
+      .slice(0, TOPK * 2)
+      .map(function(x){ return x.e; });
+  }
+  function prompt(q){
+    var o = load(), L = [], used = 0;
+    if (o.user.trim()) L.push('【用户画像】\n' + o.user.trim().slice(0, USER_MAX));
+    var list = lines(o.memory).map(entryOf);
+    if (list.length){
+      var picked;
+      var hasQ = !!(q && String(q).trim());
+      if (hasQ){
+        picked = list.map(function(e){ return { e: e, s: score(q, e) }; })
+          .filter(function(x){ return x.s > 0.12; })
+          .sort(function(a, b){ return b.s - a.s; })
+          .slice(0, TOPK).map(function(x){ return x.e; });
+      }
+      if ((!picked || !picked.length) && !hasQ) picked = list.slice(-TOPK); /* 无问题（如预热）才给最近几条 */
+      if (picked && picked.length){
+        var budget = 1200, out = [];
+        picked.forEach(function(e){
+          var line = '- [' + e.date + '] ' + e.text;
+          if (budget - line.length < 0) return;
+          out.push(line); budget -= line.length;
+        });
+        used = out.length;
+        if (out.length) L.push('【本轮相关记忆】\n' + out.join('\n'));
+      }
+    }
+    if (!L.length) return '';
+    return 'Soul 记忆（长期、跨会话；以文件为准，冲突时问用户；本轮用到 ' + used + ' 条）：\n' + L.join('\n\n');
   }
   function mk(tag, cls, txt){ var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
   function open(){
@@ -19168,7 +19287,7 @@ var WORK = (function(){
     mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
     uTa.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeFn(); });
     sv.onclick = function(){
-      save({ user: uTa.value.slice(0, 600), memory: mTa.value.slice(0, 1200) });
+      save({ user: uTa.value.slice(0, USER_MAX), memory: mTa.value.slice(-MEM_MAX) });
       status.textContent = '已保存 ' + new Date().toLocaleTimeString();
     };
     clr.onclick = function(){
@@ -19186,7 +19305,7 @@ var WORK = (function(){
     };
     uTa.focus();
   }
-  window.SOUL = { prompt: prompt, remember: remember, open: open, load: load, save: save };
+  window.SOUL = { prompt: prompt, remember: remember, forget: forget, search: search, open: open, load: load, save: save };
 })();
 /* 调试钩子（仅当 localStorage['sc.debug']==='1'）：便于自动化测试 Work 沙箱的纯函数 */
 try {

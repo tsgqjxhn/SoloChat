@@ -334,7 +334,10 @@ function sendMessage(){
     /* S2 显式记忆：用户说「记住…」→ 直接写 MEMORY.md（仍照常发消息） */
     try {
       var _mk = /^(?:请)?(?:记住|记下|帮我记住)[:：,，\s]+([\s\S]+)$/.exec(text);
-      if (_mk && window.SOUL){ window.SOUL.remember(_mk[1]); UI.toast('已记入 MEMORY.md（/memory 可查看）'); }
+      if (_mk && window.SOUL){
+        var _r = window.SOUL.remember(_mk[1]);
+        UI.toast(_r && _r.ok ? _r.msg : ('未写入：' + ((_r && _r.msg) || '未知原因')), !(_r && _r.ok));
+      }
     } catch (e) {}
   /* v0.3.30：斜杠命令（对标 Claude Code 的 /clear、/compact） */
   if (text.charAt(0) === '/'){
@@ -361,6 +364,14 @@ function sendMessage(){
       try { _l7.push('子智能体层级 ' + SUB.MAX_DEPTH); } catch (e) {}
       if (!_l7.length){ UI.toast('读不到限制常量', true); return; }
       UI.toast('自主执行边界：' + _l7.join(' · '));
+      return;
+    }
+    if (cmd === '/forget'){ /* Soul S2：按关键词删记忆 */
+      var _fk = text.slice(7).trim();
+      $input.value = ''; $input.style.height = ''; UI.autosize();
+      if (!_fk){ UI.toast('用法：/forget 关键词', true); return; }
+      var _n = window.SOUL ? window.SOUL.forget(_fk) : 0;
+      UI.toast(_n ? ('已删除 ' + _n + ' 条相关记忆') : '没有匹配的记忆', !_n);
       return;
     }
     if (cmd === '/memory'){ /* Soul S1：编辑长期记忆 */
