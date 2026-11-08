@@ -2025,11 +2025,12 @@ function sendMessage(){
     if (!asstMsg){
       var userMsg = { id: uuid(), sid: s.id, role: 'user', content: prompt, status: 'ok', ts: Date.now(), attachments: [], imgAsk: 1 };
       asstMsg = { id: uuid(), sid: s.id, role: 'assistant', content: '', status: 'streaming', ts: Date.now(), attachments: [],
-        imgCard: { prompt: prompt, frames: [], final: '', _frameUrls: [] } };
+        imgCard: { prompt: prompt, frames: [], final: '' } };
       S.msgs.push(userMsg);
       S.msgs.push(asstMsg);
-      try { DB.putMessage(userMsg); } catch(e){}
-      try { DB.putMessage(asstMsg); } catch(e){}
+      try { DB.putMessage(userMsg).catch(function(){}); } catch(e){}
+      try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
+      try { if (typeof DB.putSession === 'function' && s) DB.putSession(s).catch(function(){}); } catch(e){}
       touchSession(prompt.slice(0, 18));
       appendMsgNode(userMsg);
       appendMsgNode(asstMsg);
@@ -2041,8 +2042,8 @@ function sendMessage(){
       asstMsg.errMsg = '';
       asstMsg.attachments = [];
       asstMsg.content = '';
-      asstMsg.imgCard = { prompt: prompt, frames: [], final: '', _frameUrls: [] };
-      try { DB.putMessage(asstMsg); } catch(e){}
+      asstMsg.imgCard = { prompt: prompt, frames: [], final: '' };
+      try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
       repaintMsg(asstMsg.id);
     }
     maybeScroll(true);
@@ -2088,7 +2089,10 @@ function sendMessage(){
             asstMsg.status = 'ok';
             asstMsg.content = '';
             asstMsg.errMsg = '';
-            try { DB.putMessage(asstMsg); } catch(e){}
+            var pmsg = null;
+            try { pmsg = DB.putMessage(asstMsg); } catch(e){}
+            if (pmsg && pmsg.then) pmsg.catch(function(){});
+            try { if (typeof DB.putSession === 'function' && s) DB.putSession(s).catch(function(){}); } catch(e){}
             repaintMsg(asstMsg.id);
             maybeScroll(true);
             if (done) done(null);
@@ -2110,7 +2114,7 @@ function sendMessage(){
           if (card) revokeImgFrames(card);
           asstMsg.status = 'error';
           asstMsg.errMsg = (e && e.message) ? e.message : String(e || '生成失败');
-          try { DB.putMessage(asstMsg); } catch(e2){}
+          try { DB.putMessage(asstMsg).catch(function(){}); } catch(e2){}
           repaintMsg(asstMsg.id);
           if (done) done(e);
         }

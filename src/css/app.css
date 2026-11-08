@@ -220,14 +220,18 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 .md a.md-media video{display:block;max-width:100%;height:auto;max-height:420px;background:#000}
 .md a.md-media .md-cap{display:block;padding:4px 8px;font-size:12px;color:var(--faint);border-top:1px solid var(--hairline-soft)}
 
-/* v2.1：轻量公式（LaTeX 子集 → HTML，无外部库） */
-.md .math{font-family:Georgia,"Times New Roman",serif;font-style:italic;white-space:nowrap}
+/* 公式：LaTeX 子集 → MathML（浏览器原生排版，教材式分式/根号/上下标） */
+.md .math{font-family:Georgia,"Times New Roman",serif;white-space:nowrap}
 .md .math sub,.md .math sup{font-size:.72em;font-style:normal}
+.md .math math{font-family:"Cambria Math","Latin Modern Math",Georgia,serif;font-style:normal;white-space:normal}
+.md .math math mtext{font-style:normal}
 .math-blk{
   margin:10px 0;padding:10px 12px;border-radius:var(--r-lg);background:var(--soft);
   border:1px solid var(--hairline-soft);text-align:center;font-size:14px;line-height:1.7;
-  font-family:Georgia,"Times New Roman",serif;font-style:italic;overflow-x:auto;
+  overflow-x:auto;
 }
+.math-blk math{font-family:"Cambria Math","Latin Modern Math",Georgia,serif;font-size:1.18em;margin:2px auto}
+.math-blk math mtext{font-style:normal}
 .math-blk sub,.math-blk sup{font-size:.72em;font-style:normal}
 .md strong{color:var(--ink);font-weight:600}
 .md code{

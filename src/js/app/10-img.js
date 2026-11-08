@@ -163,9 +163,11 @@
         try { if (handle && handle.abort) { /* don't call again */ } } catch(e){}
         // done called
       }
+      function getNET(){ try { if (typeof NET !== 'undefined' && NET) return NET; } catch(e){} try { if (window._NET) return window._NET; } catch(e){} return null; }
       function doStream(){
-        if (typeof NET !== 'undefined' && NET.rawStream){
-          handle = NET.rawStream({
+        var N = getNET();
+        if (N && N.rawStream){
+          handle = N.rawStream({
             url: url,
             method: 'POST',
             headers: headers,
@@ -210,8 +212,9 @@
         delete b2.stream;
         delete b2.partial_images;
         var h2 = JSON.parse(JSON.stringify(headers));
-        if (typeof NET !== 'undefined' && NET.raw){
-          NET.raw({ url: url, method: 'POST', headers: h2, body: JSON.stringify(b2), timeout: 300000 })
+        var N = getNET();
+        if (N && N.raw){
+          N.raw({ url: url, method: 'POST', headers: h2, body: JSON.stringify(b2), timeout: 300000 })
             .then(function(r){
               if (!r) { try { opt.onError && opt.onError(prevErr || new Error('请求失败')); } catch(e){} return; }
               if (r.status === 400 || r.status === 404){ try { opt.onError && opt.onError(new Error('HTTP ' + r.status)); } catch(e){} return; }

@@ -266,25 +266,126 @@ var MD = (function(){
     cup: '∪', cap: '∩', prime: '′', ldots: '…', cdots: '⋯', equiv: '≡', propto2: '∝', perp: '⊥', angle: '∠',
     vec: '', bar: '', hat: '', tilde: ''
   };
-  function tex(src){
+  /* 教材式公式：LaTeX 子集 → MathML（浏览器原生排版，分式上下叠、根号、上下标、括号自适应）。
+     不再把 \frac 压成 a⁄b。未知命令按原文显示，绝不吞内容。 */
+  var TEX_GREEK = { alpha:'α', beta:'β', gamma:'γ', delta:'δ', epsilon:'ϵ', varepsilon:'ε', zeta:'ζ', eta:'η', theta:'θ', vartheta:'ϑ', iota:'ι', kappa:'κ', lambda:'λ', mu:'μ', nu:'ν', xi:'ξ', omicron:'ο', pi:'π', varpi:'ϖ', rho:'ρ', varrho:'ϱ', sigma:'σ', varsigma:'ς', tau:'τ', upsilon:'υ', phi:'ϕ', varphi:'φ', chi:'χ', psi:'ψ', omega:'ω', Gamma:'Γ', Delta:'Δ', Theta:'Θ', Lambda:'Λ', Xi:'Ξ', Pi:'Π', Sigma:'Σ', Upsilon:'Υ', Phi:'Φ', Psi:'Ψ', Omega:'Ω' };
+  var TEX_SYM = { cdot:'·', times:'×', div:'÷', pm:'±', mp:'∓', le:'≤', leq:'≤', ge:'≥', geq:'≥', ne:'≠', neq:'≠', approx:'≈', equiv:'≡', propto:'∝', infty:'∞', partial:'∂', nabla:'∇', sum:'∑', prod:'∏', int:'∫', iint:'∬', oint:'∮', to:'→', rightarrow:'→', leftarrow:'←', Rightarrow:'⇒', Leftarrow:'⇐', leftrightarrow:'↔', Leftrightarrow:'⇔', in:'∈', notin:'∉', subset:'⊂', subseteq:'⊆', supset:'⊃', cup:'∪', cap:'∩', forall:'∀', exists:'∃', angle:'∠', perp:'⊥', parallel:'∥', sim:'∼', simeq:'≃', ldots:'…', cdots:'⋯', dots:'…', '%':'%', '$':'$', _:'_', '{':'{', '}':'}', '&':'&', '#':'#' };
+  var TEX_FUN = { sin:1, cos:1, tan:1, cot:1, sec:1, csc:1, arcsin:1, arccos:1, arctan:1, sinh:1, cosh:1, tanh:1, log:1, ln:1, lg:1, exp:1, lim:1, max:1, min:1, sup:1, inf:1, det:1, dim:1, ker:1, deg:1, gcd:1, mod:1 };
+  function tex(src, display){
     var s = String(src == null ? '' : src);
-    for (var pass = 0; pass < 3 && /\\frac/.test(s); pass++)                 /* \frac{a}{b} → a⁄b */
-      s = s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '$1⁄$2');
-    s = s.replace(/\\sqrt\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g, function(m, x){ return '√(' + x + ')'; });
-    s = s.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname|mbox)\s*\{([^{}]*)\}/g, '$1'); /* 命令体取内容 */
-    s = s.replace(/\\left(?![a-zA-Z])|\\right(?![a-zA-Z])/g, ''); /* 勿吃掉 \rightarrow 等 */
-    s = s.replace(/\\[ ,;:!]/g, ' ');
-    s = s.replace(/\\([a-zA-Z]+)/g, function(m, n){ return Object.prototype.hasOwnProperty.call(TEX, n) ? TEX[n] : m; });
-    s = subSup(subSup(s, '_', 'sub'), '^', 'sup');                            /* 上下标（{..} 或单字符） */
-    s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}').replace(/[{}]/g, '');   /* 残余花括号 */
-    s = s.replace(/\\\\/g, '<br>');                                           /* 公式内换行 */
-    return s;
-  }
-  function subSup(s, ch, tag){
-    var c = ch === '^' ? '\\^' : ch;
-    s = s.replace(new RegExp(c + '\\s*\\{([^{}]*)\\}', 'g'), '<' + tag + '>$1</' + tag + '>');
-    s = s.replace(new RegExp(c + '\\s*([^\\s\\\\{}])', 'g'), '<' + tag + '>$1</' + tag + '>');
-    return s;
+    s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    s = s.replace(/\\begin\{[^}]*\}/g, '').replace(/\\end\{[^}]*\}/g, '').replace(/&/g, '');
+    var i = 0;
+    function esc(t){ return String(t).replace(/[&<>]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
+    function ws(){ while (i < s.length && /\s/.test(s.charAt(i))) i++; }
+    function rawGroup(){
+      ws(); if (s.charAt(i) !== '{') return '';
+      i++; var depth = 1, out = '';
+      while (i < s.length){
+        var c = s.charAt(i++);
+        if (c === '{'){ depth++; out += c; }
+        else if (c === '}'){ depth--; if (!depth) break; out += c; }
+        else out += c;
+      }
+      return out;
+    }
+    function atomGroup(){
+      ws();
+      if (s.charAt(i) === '{'){ i++; var g = expr(); if (s.charAt(i) === '}') i++; return '<mrow>' + g + '</mrow>'; }
+      return atom();
+    }
+    function cmd(){
+      i++; // backslash
+      if (i >= s.length) return '';
+      var ch = s.charAt(i);
+      if (!/[a-zA-Z]/.test(ch)){
+        i++;
+        if (ch === ',' || ch === ';' || ch === ':' || ch === '!') return '<mspace width="0.17em"/>';
+        if (ch === ' ') return '<mspace width="0.25em"/>';
+        if (ch === '\\') return '<mspace linebreak="newline"/>';
+        if (ch === '%' || ch === '$' || ch === '_' || ch === '{' || ch === '}' || ch === '#') return '<mo>' + esc(ch) + '</mo>';
+        return '<mo>' + esc(ch) + '</mo>';
+      }
+      var name = '';
+      while (i < s.length && /[a-zA-Z]/.test(s.charAt(i))) name += s.charAt(i++);
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac'){
+        var num = atomGroup(), den = atomGroup();
+        return '<mfrac>' + num + den + '</mfrac>';
+      }
+      if (name === 'sqrt'){
+        var idx = '';
+        ws();
+        if (s.charAt(i) === '['){ i++; while (i < s.length && s.charAt(i) !== ']') idx += s.charAt(i++); if (s.charAt(i) === ']') i++; }
+        var body = atomGroup();
+        return idx ? '<mroot>' + body + '<mrow>' + tex(idx, false).replace(/<\/?math[^>]*>/g, '') + '</mrow></mroot>' : '<msqrt>' + body + '</msqrt>';
+      }
+      if (name === 'left' || name === 'right'){
+        ws();
+        var d = s.charAt(i++);
+        if (d === '\\') d = s.charAt(i++);
+        if (d === '.' || d === '') return '';
+        return '<mo>' + esc(d) + '</mo>';
+      }
+      if (name === 'big' || name === 'Big' || name === 'bigg' || name === 'Bigg' || name === 'bigl' || name === 'Bigl' || name === 'bigr' || name === 'Bigr'){
+        ws(); var d2 = s.charAt(i++); return '<mo>' + esc(d2) + '</mo>';
+      }
+      if (name === 'text' || name === 'mathrm' || name === 'mbox' || name === 'operatorname'){
+        var t = rawGroup(); return '<mtext>' + esc(t) + '</mtext>';
+      }
+      if (name === 'mathbf'){ var t2 = rawGroup(); return '<mtext mathvariant="bold">' + esc(t2) + '</mtext>'; }
+      if (name === 'mathit'){ var t3 = rawGroup(); return '<mtext mathvariant="italic">' + esc(t3) + '</mtext>'; }
+      if (name === 'mathbb'){ var t4 = rawGroup(); return '<mtext mathvariant="double-struck">' + esc(t4) + '</mtext>'; }
+      if (name === 'overline' || name === 'bar'){ var b1 = atomGroup(); return '<mover>' + b1 + '<mo>‾</mo></mover>'; }
+      if (name === 'hat'){ var b2 = atomGroup(); return '<mover>' + b2 + '<mo>^</mo></mover>'; }
+      if (name === 'vec'){ var b3 = atomGroup(); return '<mover>' + b3 + '<mo>→</mo></mover>'; }
+      if (name === 'dot'){ var b4 = atomGroup(); return '<mover>' + b4 + '<mo>˙</mo></mover>'; }
+      if (name === 'quad') return '<mspace width="1em"/>';
+      if (name === 'qquad') return '<mspace width="2em"/>';
+      if (name === 'displaystyle' || name === 'limits' || name === 'nolimits') return '';
+      if (name === 'middle'){ ws(); var d3 = s.charAt(i++); return d3 ? '<mo>' + esc(d3) + '</mo>' : ''; }
+      if (TEX_FUN[name]) return '<mi mathvariant="normal">' + esc(name) + '</mi><mo>&#x2061;</mo>';
+      if (TEX_GREEK[name]) return '<mi>' + TEX_GREEK[name] + '</mi>';
+      if (Object.prototype.hasOwnProperty.call(TEX_SYM, name)) return '<mo>' + esc(TEX_SYM[name]) + '</mo>';
+      return '<mtext>\\' + esc(name) + '</mtext>';
+    }
+    function atom(){
+      ws();
+      if (i >= s.length) return '';
+      var c = s.charAt(i);
+      if (c === '{'){ i++; var g = expr(); if (s.charAt(i) === '}') i++; return '<mrow>' + g + '</mrow>'; }
+      if (c === '\\') return cmd();
+      if (/[0-9]/.test(c)){
+        var n = '';
+        while (i < s.length && /[0-9.]/.test(s.charAt(i))) n += s.charAt(i++);
+        return '<mn>' + esc(n) + '</mn>';
+      }
+      if (/[a-zA-Z]/.test(c)){ i++; return '<mi>' + esc(c) + '</mi>'; }
+      i++;
+      var map = { '-':'−', '*':'∗', "'":'′' };
+      return '<mo>' + esc(map[c] || c) + '</mo>';
+    }
+    function node(){
+      var base = atom();
+      var sub = '', sup = '';
+      for (;;){
+        ws();
+        if (s.charAt(i) === '^'){ i++; sup = atomGroup(); }
+        else if (s.charAt(i) === '_'){ i++; sub = atomGroup(); }
+        else break;
+      }
+      var big = /<mo>[∑∏∫∬∮]<\/mo>/.test(base) || /mathvariant="normal">(lim|max|min|sup|inf)</.test(base);
+      if (sub && sup) return big ? '<munderover>' + base + sub + sup + '</munderover>' : '<msubsup>' + base + sub + sup + '</msubsup>';
+      if (sub) return big ? '<munder>' + base + sub + '</munder>' : '<msub>' + base + sub + '</msub>';
+      if (sup) return big ? '<mover>' + base + sup + '</mover>' : '<msup>' + base + sup + '</msup>';
+      return base;
+    }
+    function expr(){
+      var out = '';
+      while (i < s.length && s.charAt(i) !== '}') out += node();
+      return out;
+    }
+    var body = expr();
+    return '<math xmlns="http://www.w3.org/1998/Math/MathML" display="' + (display ? 'block' : 'inline') + '">' + body + '</math>';
   }
   /* v2.3：回答内嵌媒体（直连 https，按扩展名判类型）。src 已被 esc() 转义，属性安全。
      preload=metadata + loading=lazy：不预下整段视频/整张大图；referrerpolicy=no-referrer 少泄露来源。 */
@@ -424,10 +525,10 @@ var MD = (function(){
         return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + t + '</a>';
       });
       /* 公式：块级占位符 → 行内；\(...\)；谨慎的 $...$（含数学特征才认，避免误伤货币） */
-      s = s.replace(/\uE002(\d+)\uE002/g, function(m, i){ return '<span class="math">' + tex(maths[+i]) + '</span>'; });
-      s = s.replace(/\\\(([\s\S]*?)\\\)/g, function(m, x){ return '<span class="math">' + tex(x) + '</span>'; });
+      s = s.replace(/\uE002(\d+)\uE002/g, function(m, i){ return '<span class="math">' + tex(maths[+i], false) + '</span>'; });
+      s = s.replace(/\\\(([\s\S]*?)\\\)/g, function(m, x){ return '<span class="math">' + tex(x, false) + '</span>'; });
       s = s.replace(/\$([^\s$][^$\n]*?)\$(?!\d)/g, function(m, x){
-        return /[\\^_={}]|[a-zA-Z]\s*[_^]|\d\s*[_^]/.test(x) ? '<span class="math">' + tex(x) + '</span>' : m;
+        return /[\\^_={}]|[a-zA-Z]\s*[_^]|\d\s*[_^]/.test(x) ? '<span class="math">' + tex(x, false) + '</span>' : m;
       });
       /* P1：脚注引用 [^id] */
       s = s.replace(/\[\^([^\]\n]+)\]/g, function(m, id){
@@ -513,7 +614,7 @@ var MD = (function(){
       i++; continue;
       }
       var mt = /^\uE002(\d+)\uE002$/.exec(line.trim()); /* 块级公式独占一行 */
-      if (mt){ html += '<div class="math-blk">' + tex(maths[+mt[1]]) + '</div>'; i++; continue; }
+      if (mt){ html += '<div class="math-blk">' + tex(maths[+mt[1]], true) + '</div>'; i++; continue; }
 
       if (/^\s*$/.test(line)){ i++; continue; }
 
