@@ -143,11 +143,43 @@
   function prior(text){
     return /(喜欢|偏好|习惯|决定|约定|承诺|不要|别|以后|每次|称呼|名字)/.test(text) ? 1 : 0.4;
   }
+  function semOn(){ try { return localStorage.getItem('sc.soul.sem') !== '0'; } catch (e) { return true; } }
+  function ngrams(s){
+    var t = String(s || '').toLowerCase().replace(/\s+/g, ''), v = {};
+    for (var i = 0; i < t.length; i++){
+      v[t.charAt(i)] = (v[t.charAt(i)] || 0) + 1;
+      if (i < t.length - 1){ var bg = t.slice(i, i + 2); v[bg] = (v[bg] || 0) + 1.5; }
+    }
+    return v;
+  }
+  function ncos(a, b){
+    var A = ngrams(a), B = ngrams(b), ka = Object.keys(A), kb = Object.keys(B);
+    if (!ka.length || !kb.length) return 0;
+    var dot = 0, na = 0, nb = 0;
+    ka.forEach(function(k){ na += A[k] * A[k]; if (B[k]) dot += A[k] * B[k]; });
+    kb.forEach(function(k){ nb += B[k] * B[k]; });
+    return dot / Math.sqrt(na * nb);
+  }
   function score(q, e){
     var rel = sim(q, e.text);
-    if (rel <= 0.03) return 0;                    /* 与问题无关的记忆不因「新」而入选 */
+    if (semOn()) rel = 0.6 * rel + 0.4 * ncos(q, e.text); /* 本地字符向量：不改词也能命中近义表述 */
+    if (rel <= 0.03) return 0;
     var rec = Math.exp(-daysAgo(e.date) / 30);
     return 0.55 * rel + 0.25 * rec + 0.20 * prior(e.text);
+  }
+  /* S4：每日自动巩固（只跑一次/天；可 /dream auto off 关闭） */
+  function maybeDream(){
+    try {
+      if (localStorage.getItem('sc.soul.autoDream') === '0') return;
+      var last = +(localStorage.getItem('sc.soul.dreamAt') || 0);
+      if (Date.now() - last < 86400000) return;
+      if (!window.NET || !NET.chatOnce) return;
+      if (typeof S === 'undefined' || !S.cfg || !S.cfg.currentModel || !S.cfg.baseURL) return;
+      if (dailyText(3).length < 120) return;
+      localStorage.setItem('sc.soul.dreamAt', String(Date.now()));
+      dream().then(function(r){ try { UI.toast('自动巩固：新增/更新 ' + r.added + ' 条'); } catch (e) {} })
+        .catch(function(){ try { localStorage.removeItem('sc.soul.dreamAt'); } catch (e) {} });
+    } catch (e) {}
   }
   /* S2：敏感信息拒写（宁可少记，不可泄密） */
   function sensitive(t){
@@ -266,7 +298,49 @@
     };
     uTa.focus();
   }
-  /* S6：定时任务（页面开着才跑，明确不假装后台） */
+  /* S2：隐式候选（不直接写长期记忆，先进待确认） */
+  var PKEY = 'sc.soul.pending.v1';
+  function pendingLoad(){
+    try { return JSON.parse(localStorage.getItem(PKEY) || '[]') || []; } catch (e) { return []; }
+  }
+  function pendingSave(list){ try { localStorage.setItem(PKEY, JSON.stringify(list.slice(-30))); } catch (e) {} }
+  function candidate(text){
+    var t = String(text || '').trim().replace(/\s+/g, ' ');
+    if (!t || t.length < 6 || t.length > 160) return null;
+    if (sensitive(t)) return null;
+    if (!/(我喜欢|我习惯|我通常|我一般|我每周|我每天|以后都|以后别|下次别|别再|记住我|我的.{0,8}是|我在用|我住|我叫)/.test(t)) return null;
+    var list = pendingLoad();
+    if (list.some(function(x){ return sim(x.text, t) >= 0.55; })) return null;
+    if (lines(load().memory).some(function(l){ return sim(entryOf(l).text, t) >= 0.55; })) return null;
+    var sc = 0.45 + (/(喜欢|习惯|每周|每天|以后|别)/.test(t) ? 0.3 : 0) + (t.length <= 60 ? 0.2 : 0);
+    var item = { id: 'p' + Date.now().toString(36), text: t, ts: Date.now(), score: Math.min(1, sc) };
+    list.push(item); pendingSave(list);
+    return item;
+  }
+  function pendingList(){ return pendingLoad(); }
+  function pendingAccept(id){
+    var list = pendingLoad(), hit = null;
+    list = list.filter(function(x){ if (x.id === id){ hit = x; return false; } return true; });
+    pendingSave(list);
+    if (!hit) return false;
+    remember(hit.text);
+    return true;
+  }
+  function pendingDrop(id){
+    var list = pendingLoad(), n = list.length;
+    list = list.filter(function(x){ return x.id !== id; });
+    pendingSave(list);
+    return n - list.length;
+  }
+  /* S8：时间线（按天） */
+  function timeline(){
+    var d = loadDaily(), out = [];
+    Object.keys(d).sort().reverse().forEach(function(k){
+      var list = d[k] || [];
+      out.push({ date: k, turns: Math.floor(list.length / 2), chars: list.join('').length });
+    });
+    return out;
+  }
   var CKEY = 'sc.soul.cron.v1';
   function cronLoad(){
     try { return JSON.parse(localStorage.getItem(CKEY) || '[]') || []; } catch (e) { return []; }
@@ -316,6 +390,7 @@
     };
     skip.onclick = function(){ d.remove(); };
     try { UI.toast('定时任务到点：' + t.prompt.slice(0, 30)); } catch (e) {}
+    try { if (window.NET && NET.notify) NET.notify('Soul 定时任务', t.prompt); } catch (e) {}
   }
   function tick(){
     try {
@@ -395,6 +470,34 @@
       });
     } catch (e) {}
     pS.appendChild(sl);
+    /* 待确认（隐式候选） */
+    var pP = pane('pend');
+    pP.appendChild(mk('div', 'soul-lbl', '待确认 · 从聊天里自动挑出的偏好/事实（采纳才写入长期记忆）'));
+    var pl = mk('div', 'soul-skills');
+    var pend = pendingList();
+    if (!pend.length) pl.appendChild(mk('div', 'soul-status', '暂无候选。聊到「我喜欢…」「以后都…」会自动进这里。'));
+    pend.slice().reverse().forEach(function(it){
+      var row = mk('div', 'soul-skill-row');
+      row.appendChild(mk('span', null, it.text));
+      var ok = mk('button', 'soul-btn soul-primary', '采纳');
+      var no = mk('button', 'soul-btn', '丢弃');
+      ok.onclick = function(){ pendingAccept(it.id); row.remove(); status.textContent = '已写入 MEMORY'; };
+      no.onclick = function(){ pendingDrop(it.id); row.remove(); };
+      row.appendChild(ok); row.appendChild(no); pl.appendChild(row);
+    });
+    pP.appendChild(pl);
+    /* 时间线 */
+    var pT = pane('time');
+    pT.appendChild(mk('div', 'soul-lbl', '记忆时间线（按天统计最近对话）'));
+    var tl = mk('div', 'soul-skills');
+    var rows = timeline();
+    if (!rows.length) tl.appendChild(mk('div', 'soul-status', '还没有记录。'));
+    rows.forEach(function(r){
+      var row = mk('div', 'soul-skill-row');
+      row.appendChild(mk('span', null, r.date + ' · ' + r.turns + ' 轮 · ' + r.chars + ' 字'));
+      tl.appendChild(row);
+    });
+    pT.appendChild(tl);
     var foot = mk('div', 'soul-foot');
     var status = mk('span', 'soul-status', '本地保存；宿主内同时写 %USERPROFILE%\\SoloChat\\memory');
     var fi = document.createElement('input'); fi.type = 'file'; fi.accept = '.md,.txt'; fi.style.display = 'none';
@@ -408,7 +511,7 @@
     function closeFn(){ mask.remove(); }
     close.onclick = closeFn;
     mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
-    var first = tabBtn('user', '用户画像'); tabBtn('mem', '长期记忆'); tabBtn('day', '日记'); tabBtn('skill', '技能');
+    var first = tabBtn('user', '用户画像'); tabBtn('mem', '长期记忆'); tabBtn('pend', '待确认'); tabBtn('day', '日记'); tabBtn('time', '时间线'); tabBtn('skill', '技能');
     first.classList.add('on'); pU.style.display = '';
     imp.onclick = function(){ fi.click(); };
     fi.onchange = function(){
@@ -465,5 +568,7 @@
   }
   window.SOUL = { prompt: prompt, remember: remember, forget: forget, search: search, open: openFull, load: load, save: save,
     logTurn: logTurn, daily: dailyText, dream: dream, dreams: dreams, rollback: rollback, hydrate: hydrate, openDreams: openDreams,
-    cronAdd: cronAdd, cronList: cronList, cronDel: cronDel, tick: tick, heartbeat: heartbeat };
+    cronAdd: cronAdd, cronList: cronList, cronDel: cronDel, tick: tick, heartbeat: heartbeat,
+    candidate: candidate, pendingList: pendingList, pendingAccept: pendingAccept, pendingDrop: pendingDrop,
+    timeline: timeline, maybeDream: maybeDream, semOn: semOn };
 })();

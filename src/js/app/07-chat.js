@@ -440,6 +440,13 @@ function sendMessage(){
     if (cmd === '/dream'){ /* S4：巩固记忆 */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       if (!window.SOUL){ UI.toast('记忆组件未加载', true); return; }
+      var _da = text.slice(6).trim();
+      if (_da.indexOf('auto') === 0){
+        var _off = /off|关/.test(_da);
+        try { localStorage.setItem('sc.soul.autoDream', _off ? '0' : '1'); } catch (e) {}
+        UI.toast(_off ? '已关闭每日自动巩固' : '已开启每日自动巩固（每天首次启动最多一次）');
+        return;
+      }
       UI.toast('正在巩固最近 7 天对话…');
       window.SOUL.dream().then(function(r){ UI.toast('巩固完成：新增/更新 ' + r.added + ' 条'); })
         .catch(function(e){ UI.toast('巩固失败：' + (e && e.message || e), true); });
@@ -908,6 +915,7 @@ function sendMessage(){
             var _lu = '';
             for (var _ui = msgs.length - 1; _ui >= 0; _ui--){ if (msgs[_ui].role === 'user'){ _lu = String(msgs[_ui].content || ''); break; } }
             window.SOUL.logTurn(_lu, st.msg.content || '');
+            if (window.SOUL.candidate) window.SOUL.candidate(_lu);
           }
         } catch (e) {}
         endStream(st, 'ok', null, st.msg.tokens ? { total_tokens: st.msg.tokens } : null);

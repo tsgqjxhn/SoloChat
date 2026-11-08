@@ -477,6 +477,11 @@ function fetchStream(opt){
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
+  /* v0.5.5：托盘气泡（Soul 定时任务提醒）；没有宿主时静默跳过 */
+  function notify(title, body){
+    try { if (bridge.ok) bridge.send({ t: 'notify', title: String(title || 'SoloChat'), body: String(body || '') }); } catch (e) {}
+  }
+
   /* v0.5.4：Soul 记忆落盘（宿主 mem op；文件优先，浏览器里退回 localStorage） */
   function memCall(op, name, text){
     return new Promise(function(res, rej){
@@ -1754,6 +1759,7 @@ function fetchStream(opt){
   bridge: bridge,
     fs: fsCall,
     mem: memCall,
+    notify: notify,
   };
 })();
 /*  */
