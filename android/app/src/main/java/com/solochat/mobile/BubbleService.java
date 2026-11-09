@@ -31,6 +31,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -111,11 +112,10 @@ public class BubbleService extends Service {
         if (bubble != null) { bubble.setVisibility(View.VISIBLE); }
         if (gear != null) { gear.setVisibility(View.VISIBLE); }
         if (bubble != null) return;
-        TextView v = new TextView(this);
-        v.setText("S");
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(20);
-        v.setGravity(Gravity.CENTER);
+        ImageView v = new ImageView(this);
+        v.setImageResource(R.drawable.ic_bubble);
+        v.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        v.setPadding(dp(13), dp(13), dp(13), dp(13));
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
         bg.setColor(0xF22F6DF6);
@@ -169,27 +169,6 @@ public class BubbleService extends Service {
         bubble = v;
         wm.addView(bubble, lp);
         android.util.Log.d("SOLO", "bubble added " + lp.x + "," + lp.y + " size=" + size);
-
-        /* 旁边的小齿轮：不用长按也能进设置（长按在部分 ROM 上会被系统手势吃掉） */
-        TextView g = new TextView(this);
-        g.setText("⚙");
-        g.setTextColor(0xFFFFFFFF);
-        g.setTextSize(16);
-        g.setGravity(Gravity.CENTER);
-        GradientDrawable gb = new GradientDrawable();
-        gb.setShape(GradientDrawable.OVAL);
-        gb.setColor(0xCC333333);
-        g.setBackground(gb);
-        int gs = dp(34);
-        WindowManager.LayoutParams glp = new WindowManager.LayoutParams(
-                gs, gs, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
-        glp.gravity = Gravity.TOP | Gravity.START;
-        glp.x = lp.x + size + dp(6);
-        glp.y = lp.y + dp(9);
-        g.setOnClickListener(x -> startActivity(new Intent(this, SettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
-        gear = g;
-        wm.addView(gear, glp);
     }
 
     private void snapEdge(WindowManager.LayoutParams lp) {
@@ -203,7 +182,9 @@ public class BubbleService extends Service {
     private void requestProjection() {
         android.util.Log.d("SOLO", "requestProjection");
         hideBubble();
-        startActivity(new Intent(this, ProjectionRequestActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        Intent i = new Intent(this, ProjectionRequestActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        startActivity(i);
     }
 
     private void capture() {
@@ -272,7 +253,7 @@ public class BubbleService extends Service {
                 }
                 CaptureBus.resultCode = 0; CaptureBus.data = null;
                 if (out[0] == null) { toast("截屏失败"); showBubble(); }
-                else showCrop(out[0]);
+                else showAsk(out[0]); // Android 0.3.1：点球直接截整屏，不再进裁剪
             }, 120);
         }, capHandler);
     }
@@ -339,10 +320,8 @@ public class BubbleService extends Service {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button cancel = new Button(this); cancel.setText("取消");
-        Button set = new Button(this); set.setText("设置");
         Button send = new Button(this); send.setText("发送");
         row.addView(cancel, new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(set, new LinearLayout.LayoutParams(0, -2, 1));
         row.addView(send, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(row);
 
@@ -351,7 +330,6 @@ public class BubbleService extends Service {
         root.addView(card, clp);
 
         cancel.setOnClickListener(v -> { removeOverlay(); showBubble(); });
-        set.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         send.setOnClickListener(v -> {
             String q = input.getText().toString().trim();
             if (q.isEmpty()) q = Prefs.prompt(this);

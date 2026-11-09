@@ -1225,6 +1225,28 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .msg{max-width:100%}
   body.m-phone #toast-root{bottom:auto;top:58px;width:calc(100% - 24px)}
   body.m-phone .toast{max-width:100%;text-align:center}
+  body.modal-open #m-menu{display:none}
+}
+/* ===== 手机设置全屏（Android 0.3.1） ===== */
+@media (max-width:860px){
+  body.m-phone #app{height:100vh}
+  body.m-phone #modal .panel.wide{left:0;top:0;transform:none;width:100vw;height:100vh;max-height:100vh;
+    border:0;border-radius:0;padding:0;display:flex}
+  body.m-phone #modal .panel.wide .set-main{height:100%;min-height:0}
+  body.m-phone .set-cols{flex-direction:column;min-height:0;flex:1}
+  body.m-phone .set-nav{width:100%;display:flex;align-items:center;gap:4px;overflow-x:auto;flex:none;
+    padding:8px;border-right:0;border-bottom:1px solid var(--hairline)}
+  body.m-phone .set-title{display:none}
+  body.m-phone .set-nav input{display:none}
+  body.m-phone .set-nav button{width:auto;flex:none;white-space:nowrap;padding:7px 11px;margin:0;font-size:13px}
+  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px}
+  body.m-phone .set-foot{position:sticky;bottom:0;background:var(--canvas);
+    padding:8px 12px 12px}
+  body.m-phone .f-grid{grid-template-columns:1fr}
+  body.m-phone .f-actions{justify-content:stretch}
+  body.m-phone .f-actions .btn{flex:1;justify-content:center}
+  body.m-phone .acc-body{padding:10px}
+  body.m-phone .f-in,body.m-phone .f-row textarea,body.m-phone .f-row select{font-size:16px;width:100%}
 }
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}
@@ -1476,7 +1498,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.9';
+var APP_VER = 'v0.5.10';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8676,10 +8698,12 @@ var UI = (function(){
     $panel.textContent = '';
     $panel.appendChild(build);
     $modal.classList.add('show');
+    document.body.classList.add('modal-open');
   }
   function closeModal(){
   try { if (S) { S.recKey = null; S.recBtn = null; } } catch (e) {} // v0.3.65：关弹层就退出快捷键录制，否则下一次按键会被静默写成快捷键
   $modal.classList.remove('show'); $panel.textContent = '';
+  document.body.classList.remove('modal-open');
   var r = S._confirmRes; S._confirmRes = null;
   if (r){ try { r(false); } catch (e) {} } // v0.3.2：放弃的确认要先落定，不然调用方永远等下去
   try { RUNNER.webHostRestore(); } catch (e) {} // v1.1.8

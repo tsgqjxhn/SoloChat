@@ -1463,10 +1463,12 @@ var UI = (function(){
     $panel.textContent = '';
     $panel.appendChild(build);
     $modal.classList.add('show');
+    document.body.classList.add('modal-open');
   }
   function closeModal(){
   try { if (S) { S.recKey = null; S.recBtn = null; } } catch (e) {} // v0.3.65：关弹层就退出快捷键录制，否则下一次按键会被静默写成快捷键
   $modal.classList.remove('show'); $panel.textContent = '';
+  document.body.classList.remove('modal-open');
   var r = S._confirmRes; S._confirmRes = null;
   if (r){ try { r(false); } catch (e) {} } // v0.3.2：放弃的确认要先落定，不然调用方永远等下去
   try { RUNNER.webHostRestore(); } catch (e) {} // v1.1.8

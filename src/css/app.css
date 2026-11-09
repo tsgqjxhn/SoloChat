@@ -1182,6 +1182,28 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .msg{max-width:100%}
   body.m-phone #toast-root{bottom:auto;top:58px;width:calc(100% - 24px)}
   body.m-phone .toast{max-width:100%;text-align:center}
+  body.modal-open #m-menu{display:none}
+}
+/* ===== 手机设置全屏（Android 0.3.1） ===== */
+@media (max-width:860px){
+  body.m-phone #app{height:100vh}
+  body.m-phone #modal .panel.wide{left:0;top:0;transform:none;width:100vw;height:100vh;max-height:100vh;
+    border:0;border-radius:0;padding:0;display:flex}
+  body.m-phone #modal .panel.wide .set-main{height:100%;min-height:0}
+  body.m-phone .set-cols{flex-direction:column;min-height:0;flex:1}
+  body.m-phone .set-nav{width:100%;display:flex;align-items:center;gap:4px;overflow-x:auto;flex:none;
+    padding:8px;border-right:0;border-bottom:1px solid var(--hairline)}
+  body.m-phone .set-title{display:none}
+  body.m-phone .set-nav input{display:none}
+  body.m-phone .set-nav button{width:auto;flex:none;white-space:nowrap;padding:7px 11px;margin:0;font-size:13px}
+  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px}
+  body.m-phone .set-foot{position:sticky;bottom:0;background:var(--canvas);
+    padding:8px 12px 12px}
+  body.m-phone .f-grid{grid-template-columns:1fr}
+  body.m-phone .f-actions{justify-content:stretch}
+  body.m-phone .f-actions .btn{flex:1;justify-content:center}
+  body.m-phone .acc-body{padding:10px}
+  body.m-phone .f-in,body.m-phone .f-row textarea,body.m-phone .f-row select{font-size:16px;width:100%}
 }
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}
