@@ -374,6 +374,7 @@ namespace SoloChatHost
             menu.Items.Add("退出", null, (s, e) => { realExit = true; Close(); });
             tray.ContextMenuStrip = menu;
             tray.DoubleClick += (s, e) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
+            tray.BalloonTipClicked += (s, e) => { Show(); WindowState = FormWindowState.Normal; Activate(); }; // v0.5.5：点气泡回主窗
         }
 
         /* ---- 内存压缩：仅状态切换时下发，避免 Resize 高频重复设置 ---- */
@@ -729,6 +730,23 @@ namespace SoloChatHost
                         var idCopy = id;
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
+                    }
+                    else if (t == "mem") /* v0.5.4：Soul 记忆落盘（%USERPROFILE%\SoloChat\memory） */
+                    {
+                        var idCopyM = id;
+                        var reqCopyM = root.Clone();
+                        Task.Run(() => MemOp(reqCopyM, idCopyM));
+                    }
+                    else if (t == "notify") /* v0.5.5：Soul 定时任务 → 托盘气泡 */
+                    {
+                        string nt = root.TryGetProperty("title", out JsonElement ntEl) ? (ntEl.GetString() ?? "SoloChat") : "SoloChat";
+                        string nb = root.TryGetProperty("body", out JsonElement nbEl) ? (nbEl.GetString() ?? "") : "";
+                        BeginInvoke((Action)(() => {
+                            try {
+                                EnsureTray();
+                                if (tray != null) { tray.BalloonTipTitle = nt; tray.BalloonTipText = nb; tray.ShowBalloonTip(4000); }
+                            } catch { }
+                        }));
                     }
                     else if (t == "runtime") /* v1.1.26：运行时插件（Python 等）安装/执行 */
                     {
@@ -2679,6 +2697,42 @@ namespace SoloChatHost
           catch (Exception ex) { PostFs(id, "fs.error", null, ex.Message); }
         }
         
+        /* v0.5.4：Soul 记忆落盘 —— 只认 USER/MEMORY/DREAMS.md，固定目录 %USERPROFILE%\SoloChat\memory */
+        string MemRoot { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SoloChat", "memory"); } }
+        void MemOp(JsonElement req, string id)
+        {
+            try
+            {
+                string op = req.TryGetProperty("op", out JsonElement oe) ? (oe.GetString() ?? "load") : "load";
+                Directory.CreateDirectory(MemRoot);
+                if (op == "load" || op == "list")
+                {
+                    var files = new List<object>();
+                    foreach (var f in Directory.GetFiles(MemRoot, "*.md", SearchOption.TopDirectoryOnly))
+                    {
+                        var fi = new FileInfo(f);
+                        files.Add(new { name = fi.Name, text = File.ReadAllText(f, FsUtf8), mtime = fi.LastWriteTimeUtc.ToString("o"), bytes = fi.Length });
+                    }
+                    PostFs(id, "mem.done", JsonSerializer.Serialize(new { root = MemRoot, files = files }), null);
+                    return;
+                }
+                if (op == "save")
+                {
+                    string name = req.TryGetProperty("name", out JsonElement ne) ? (ne.GetString() ?? "") : "";
+                    if (!Regex.IsMatch(name, @"^(USER|MEMORY|DREAMS)\.md$")) { PostFs(id, "mem.error", null, "文件名只允许 USER/MEMORY/DREAMS.md"); return; }
+                    string text = req.TryGetProperty("text", out JsonElement te) ? (te.GetString() ?? "") : "";
+                    if (FsUtf8.GetByteCount(text) > 512 * 1024) { PostFs(id, "mem.error", null, "内容超过 512KB，拒绝写入"); return; }
+                    string p = Path.Combine(MemRoot, name);
+                    File.WriteAllText(p, text, FsUtf8);
+                    Log("mem save: " + name + " bytes=" + FsUtf8.GetByteCount(text));
+                    PostFs(id, "mem.done", JsonSerializer.Serialize(new { name = name, bytes = FsUtf8.GetByteCount(text) }), null);
+                    return;
+                }
+                PostFs(id, "mem.error", null, "未知 op");
+            }
+            catch (Exception ex) { PostFs(id, "mem.error", null, ex.Message); }
+        }
+
         void FsWrite(JsonElement req, string id)
         {
             string rel = req.GetProperty("path").GetString() ?? "";
