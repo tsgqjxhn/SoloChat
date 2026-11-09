@@ -2038,7 +2038,8 @@ function sendMessage(){
       if (ps.length <= 1){ toast('至少保留一个配置', true); return; }
       var gone = AP();
       S.cfg.presets = ps.filter(function(x){ return x.id !== gone.id; });
-      Vault.clearPreset(gone.id); // Issue 14: 同步清除该预置留在保险库的密钥，防残留
+      Vault.clearPreset(gone.id); // Issue 14：同步清除该预置留在保险库的密钥，防残留
+      try { sanitizePresetKeys(S.cfg); } catch (e) {} // v0.5.8：剩下的配置里若有别人家的 Key，一并清掉
       applyPreset(S.cfg.presets[0].id); openSettings();
       toast('已删除「' + (gone.name || '') + '」');
     }
@@ -2851,7 +2852,7 @@ function sendMessage(){
 
   /* 对外接口 */
   return {
-    AP: AP, applyPreset: applyPreset, presetField: presetField,
+    AP: AP, applyPreset: applyPreset, presetField: presetField, applyProv: applyProv,
     presetModels: presetModels, applyCtx: applyCtx, presetBtn: presetBtn, promptCard: promptCard,
     modelPicker: modelPicker, pickerAct: pickerAct,
     init: function(){
@@ -3194,7 +3195,7 @@ $('#sidebar').addEventListener('click', function(e){
       case 'mock':
         /* v0.4.x：演示走同一 setCfg，并重置协议/供应商/怪癖，避免残留上一预置的协议（P0） */
         setCfg({ baseURL: 'mock', models: ['mock-demo'], currentModel: 'mock-demo',
-                 protocol: 'openai-chat', provId: '', quirks: {} });
+                 protocol: 'openai-chat', provId: '', quirks: {}, __flatOnly: true });
         UI.updateEmpty();
         UI.toast('已进入演示模式，直接发消息试试');
         break;

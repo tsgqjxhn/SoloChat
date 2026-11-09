@@ -28,8 +28,20 @@ loadCfg();
 document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.3：按钮 / Ctrl+B 控制，不再悬浮呼出
 NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
-if (Vault.avail) Vault.hydrate(S.cfg).then(function(){ saveCfg(); }); // 迁移：把旧 localStorage 明文密钥入保险库并脱敏重写
+if (Vault.avail) Vault.hydrate(S.cfg).then(function(){
+  var fx = [];
+  try { fx = sanitizePresetKeys(S.cfg); } catch (e) {}
+  saveCfg();
+  if (fx.length) try { UI.toast('已清理 ' + fx.length + ' 个配置中不属于该供应商的 Key，请重新填写', true); } catch (e2) {}
+});
 UI.init();
+/* v0.5.8：浏览器模式没有保险库，启动即校验；宿主模式下面在 hydrate 后已校验 */
+try {
+  if (!Vault.avail){
+    var fx0 = sanitizePresetKeys(S.cfg);
+    if (fx0.length){ saveCfg(); UI.toast('已清理 ' + fx0.length + ' 个配置中不属于该供应商的 Key，请重新填写', true); }
+  }
+} catch (e) {}
 try { window.NET = NET; } catch (e) {} // Soul：记忆巩固/落盘要用 NET.chatOnce / NET.mem
 try { if (window.SOUL && SOUL.hydrate) SOUL.hydrate(); } catch (e) {} // S7：宿主内把磁盘记忆读回（文件优先）
 try { if (window.SOUL && SOUL.tick){ setTimeout(function(){ SOUL.tick(); }, 4000); setInterval(function(){ SOUL.tick(); }, 60000); } } catch (e) {} // S6：到点提醒（页面开着才跑）

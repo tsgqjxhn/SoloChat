@@ -125,10 +125,13 @@ function mmToggleCfg(id){
   }
   function presetInput(key, type, ph){
     var v = AP()[key];
-    return el('input', { class: 'f-in', type: type || 'text', 'data-preset': key, value: v == null ? '' : v, placeholder: ph || '' });
+    return el('input', { class: 'f-in', type: type || 'text', 'data-preset': key, 'data-owner': AP().id, value: v == null ? '' : v, placeholder: ph || '' });
   }
   function presetField(t){
     var pk = t.getAttribute('data-preset'), p = AP();
+    /* v0.5.8：输入框带着“它属于哪个配置组”的标记；切换后旧 DOM 的迟到事件一律丢弃 */
+    var owner = t.getAttribute('data-owner');
+    if (owner && owner !== p.id){ try { UI.openSettings(); } catch (e) {} return; }
     var v = t.type === 'checkbox' ? t.checked : t.value;
     if (pk === 'modelsText'){ p.models = v.split(/[,，]/).map(function(x){ return x.trim(); }).filter(Boolean); S.cfg.models = p.models; }
     else { p[pk] = v; if (pk === 'baseURL' || pk === 'apiKey' || pk === 'currentModel') mirrorPreset(); }

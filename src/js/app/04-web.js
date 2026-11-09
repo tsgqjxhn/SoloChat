@@ -1534,16 +1534,27 @@ var UI = (function(){
     var p = AP(), cat = NET.provEntry(id);
     if (!cat || id === '') return;
     var prevProvId = p.provId;
+    var oldHost = hostOf(p.baseURL);
     p.provId = id;
+    var keyCleared = false;
     if (id !== 'custom'){
       p.baseURL = cat.base || '';
       p.authType = cat.auth || 'bearer';
       p.protocol = cat.protocol || 'openai-chat';
       p.quirks = JSON.parse(JSON.stringify(cat.quirks || {}));
+      /* v0.5.8：换到不同域名 = 换供应商，旧 Key 不能跟着走；Key 前缀明显不属于新供应商也清掉 */
+      var newHost = hostOf(p.baseURL);
+      var kv0 = keyVendor(p.apiKey), nv0 = urlVendor(p.baseURL);
+      if (p.apiKey && ((kv0 && nv0 && kv0 !== nv0) || (oldHost && newHost && oldHost !== newHost))){
+        p.apiKey = ''; keyCleared = true;
+      }
     }
     mirrorPreset(); saveCfg();
     try { UI.openSettings(); } catch (e) {}
-    try { UI.toast('已套用预设：' + cat.name); } catch (e2) {}
+    try {
+      UI.toast(keyCleared ? ('已切换到 ' + cat.name + '：旧 Key 已清空，请填写该供应商的 Key')
+                          : ('已套用预设：' + cat.name), keyCleared);
+    } catch (e2) {}
     /* B3-3：换了厂商但模型池没清（可能是同一网关多地址），提示核对模型 ID，不自动清空 */
     if (p.models && p.models.length && id !== prevProvId){
       try { UI.toast('已切换供应商，模型池保留；请确认模型 ID 属于该厂商，或手动删除不兼容的模型'); } catch (e3) {}

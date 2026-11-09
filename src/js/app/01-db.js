@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.7';
+var APP_VER = 'v0.5.8';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -58,6 +58,73 @@ var MEDIA_HINT = '展示图片用 Markdown 语法 ![说明](https://图片直链
 var LS_CFG = 'sc.cfg.v1', LS_CFG_OLD = 'op.cfg.v1'; // 旧键在 loadCfg 中自动迁移
 /* v0.4.x：连接字段清单 —— 扁平字段与当前预置互为镜像，setCfg/loadCfg 共用（P0 配置双源漂移） */
 var CONN_KEYS = ['baseURL','apiKey','models','currentModel','provId','protocol','authType','chatPath','modelsPath','quirks'];
+/* v0.5.8：供应商 Key 归属判断（前缀 ↔ 地址域名），用于清理串号的 Key */
+var KEY_VENDORS = [
+  [/^sk-ant-/, 'anthropic'], [/^sk-or-/, 'openrouter'], [/^sk-proj-/, 'openai'],
+  [/^sk-svcacct-/, 'openai'], [/^nvapi-/, 'nvidia'], [/^gsk_/, 'groq'],
+  [/^AIza/, 'google'], [/^xai-/, 'xai'], [/^pplx-/, 'perplexity'],
+  [/^oc_sk_/, 'opencode'], [/^sk-/, 'openai']
+];
+function keyVendor(k){
+  k = String(k || '').trim();
+  for (var i = 0; i < KEY_VENDORS.length; i++) if (KEY_VENDORS[i][0].test(k)) return KEY_VENDORS[i][1];
+  return '';
+}
+function hostOf(u){
+  try { return new URL(String(u || ''), location.href).hostname.toLowerCase(); } catch (e) { return ''; }
+}
+function urlVendor(u){
+  var h = hostOf(u);
+  if (!h) return '';
+  if (h === 'openrouter.ai' || h.endsWith('.openrouter.ai')) return 'openrouter';
+  if (h === 'integrate.api.nvidia.com' || h.endsWith('.nvidia.com')) return 'nvidia';
+  if (h === 'api.anthropic.com' || h.endsWith('.anthropic.com')) return 'anthropic';
+  if (h === 'opencode.ai' || h.endsWith('.opencode.ai')) return 'opencode';
+  if (h === 'api.openai.com' || h.endsWith('.openai.com')) return 'openai';
+  if (h === 'api.groq.com' || h.endsWith('.groq.com')) return 'groq';
+  if (h === 'generativelanguage.googleapis.com' || h.endsWith('.googleapis.com')) return 'google';
+  if (h === 'api.x.ai' || h === 'x.ai' || h.endsWith('.x.ai')) return 'xai';
+  if (h.endsWith('perplexity.ai')) return 'perplexity';
+  return '';
+}
+/* 清掉「这个配置的 Key 明显属于别家」以及「同一个 Key 挂在多个配置上」的情况。
+   只处理能确定归属的（Key 前缀 + 地址域名都认识）；自定义网关保留不动。 */
+function sanitizePresetKeys(cfg){
+  cfg = cfg || S.cfg;
+  var out = [], ps = (cfg && cfg.presets) || [];
+  ps.forEach(function(p){
+    var k = String(p.apiKey || '').trim();
+    if (!k) return;
+    var kv = keyVendor(k), uv = urlVendor(p.baseURL);
+    if (kv && uv && kv !== uv){
+      p.apiKey = '';
+      out.push({ name: p.name || '未命名', why: 'Key 属于 ' + kv + '，但地址是 ' + uv });
+    }
+  });
+  var byKey = {};
+  ps.forEach(function(p){
+    var k = String(p.apiKey || '').trim();
+    if (k) (byKey[k] || (byKey[k] = [])).push(p);
+  });
+  Object.keys(byKey).forEach(function(k){
+    var arr = byKey[k]; if (arr.length < 2) return;
+    /* 同一个 Key 出现在不同厂商的配置里才清理；同厂商多套配置共用一个 Key 是合法的 */
+    var vendors = {};
+    arr.forEach(function(p){ vendors[urlVendor(p.baseURL) || '?'] = 1; });
+    if (Object.keys(vendors).length < 2) return;
+    var kv = keyVendor(k), keep = null, i;
+    for (i = 0; i < arr.length; i++) if (kv && urlVendor(arr[i].baseURL) === kv){ keep = arr[i]; break; }
+    if (!keep) for (i = 0; i < arr.length; i++) if (arr[i].id === cfg.activePreset){ keep = arr[i]; break; }
+    if (!keep) keep = arr[0];
+    arr.forEach(function(p){
+      if (p !== keep){ p.apiKey = ''; out.push({ name: p.name || '未命名', why: '同一个 Key 挂在多个供应商配置上' }); }
+    });
+  });
+  var act = null;
+  for (var j = 0; j < ps.length; j++) if (ps[j].id === cfg.activePreset) act = ps[j];
+  if (act) cfg.apiKey = act.apiKey || '';
+  return out;
+}
 var DB_NAME = 'ai-chat', DB_VER = 3; // v3：新增 memory（情景记忆）/ tasks（工作记忆），v1.17
 var DEF_CFG = {
   baseURL: '', apiKey: '', models: [], currentModel: '',
@@ -461,14 +528,17 @@ var Vault = {
   }
 };
 function setCfg(patch){
+  var flatOnly = !!(patch && patch.__flatOnly); // v0.5.8：演示模式等只改运行时，不回灌配置组
+  if (flatOnly) delete patch.__flatOnly;
   for (var k in patch) S.cfg[k] = patch[k];
   /* v0.4.x：连接字段同步回当前预置，扁平字段永远是预置的镜像（P0）；只推 flat→preset，不反向覆盖 */
-  if (S.cfg && S.cfg.presets && S.cfg.presets.length){
+  if (!flatOnly && S.cfg && S.cfg.presets && S.cfg.presets.length){
     var ps = S.cfg.presets, ap = null;
     for (var ai = 0; ai < ps.length; ai++) if (ps[ai].id === S.cfg.activePreset){ ap = ps[ai]; break; }
     if (!ap) ap = ps[0];
     for (var ci = 0; ci < CONN_KEYS.length; ci++){
       var ck = CONN_KEYS[ci];
+      if (ck === 'apiKey') continue; // v0.5.8：扁平写 Key 绝不回灌配置组，防止跨供应商串号
       if (Object.prototype.hasOwnProperty.call(patch, ck)) ap[ck] = patch[ck];
     }
   }
