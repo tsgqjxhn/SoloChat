@@ -146,6 +146,7 @@ public class Bridge {
                 }
                 JSONObject d = new JSONObject();
                 d.put("t", "mem.done");
+                d.put("id", o.optString("id"));
                 d.put("root", dir.getAbsolutePath());
                 d.put("files", files);
                 push(d);
@@ -155,8 +156,10 @@ public class Bridge {
                 String name = o.optString("name");
                 if (!name.matches("^(USER|MEMORY|DREAMS)\\.md$")) throw new Exception("文件名只允许 USER/MEMORY/DREAMS.md");
                 writeFile(new File(dir, name), o.optString("text"));
+                SyncJobService.scheduleSoon(ctx); // 自动同步：写入后延迟合并，避免每句都传
                 JSONObject d = new JSONObject();
                 d.put("t", "mem.done");
+                d.put("id", o.optString("id"));
                 d.put("name", name);
                 push(d);
                 return;
@@ -166,6 +169,7 @@ public class Bridge {
             try {
                 JSONObject d = new JSONObject();
                 d.put("t", "mem.error");
+                d.put("id", o.optString("id"));
                 d.put("message", String.valueOf(e.getMessage()));
                 push(d);
             } catch (Exception ignored) { }

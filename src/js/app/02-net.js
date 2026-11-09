@@ -208,7 +208,7 @@ function fetchStream(opt){
       else if (d.t === 'pkg.error'){ delete bridge.pend[d.id]; if (p.reject) p.reject(new Error(d.message || '导出失败')); }
       else if (d.t === 'fs.done'){ delete bridge.pend[d.id]; p.onDone(d.data); }
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
-      else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data); } /* v0.5.4：Soul 记忆落盘回包 */
+      else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data != null ? d.data : d); } /* v0.5.4：Soul 记忆落盘回包；Android 桥是扁平回包 */
       else if (d.t === 'mem.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '记忆操作失败')); }
       else if (d.t === 'cmd.done'){
         delete bridge.pend[d.id];

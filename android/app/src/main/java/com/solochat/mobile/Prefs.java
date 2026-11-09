@@ -14,6 +14,9 @@ public class Prefs {
     public static final String DAV_USER = "davUser";
     public static final String DAV_PASS = "davPass";
     public static final String DAV_FILE = "davFile";
+    public static final String DAV_AUTO = "davAuto";
+    public static final String DAV_ENC = "davEnc";
+    public static final String DAV_SYNC_PASS = "davSyncPass";
 
     public static String davUrl(Context c) { return get(c).getString(DAV_URL, ""); }
     public static String davUser(Context c) { return get(c).getString(DAV_USER, ""); }
@@ -22,6 +25,9 @@ public class Prefs {
         String s = get(c).getString(DAV_FILE, "");
         return s.isEmpty() ? "solo-memory.md" : s;
     }
+    public static boolean davAuto(Context c) { return get(c).getBoolean(DAV_AUTO, false); }
+    public static boolean davEncrypt(Context c) { return get(c).getBoolean(DAV_ENC, false); }
+    public static String davSyncPass(Context c) { return get(c).getString(DAV_SYNC_PASS, ""); }
 
     public static SharedPreferences get(Context c) {
         return c.getSharedPreferences(NAME, Context.MODE_PRIVATE);

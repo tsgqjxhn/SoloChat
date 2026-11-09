@@ -41,6 +41,7 @@ import java.nio.ByteBuffer;
 /** 悬浮球 + 截屏 + 裁剪 + 提问。截图只在内存里，绝不写相册。 */
 public class BubbleService extends Service {
     public static final String ACTION_SHOW = "show";
+    public static final String ACTION_HIDE = "hide";
     public static final String ACTION_CAPTURE = "capture";
 
     private WindowManager wm;
@@ -87,6 +88,8 @@ public class BubbleService extends Service {
         if (intent != null && ACTION_CAPTURE.equals(intent.getAction())) {
             hideBubble();
             ui.postDelayed(this::capture, 450);
+        } else if (intent != null && ACTION_HIDE.equals(intent.getAction())) {
+            hideBubble();
         } else {
             showBubble();
         }

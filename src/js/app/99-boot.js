@@ -26,6 +26,48 @@ try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题
 } catch (e) {}
 loadCfg();
 document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.3：按钮 / Ctrl+B 控制，不再悬浮呼出
+/* Android 0.3.0：窄屏默认收起侧栏，左上角 ☰ 呼出；桌面布局不受影响 */
+(function(){
+  try {
+    if (!window.matchMedia || !matchMedia('(max-width:860px)').matches) return;
+    document.body.classList.add('m-phone', 'sb-collapsed');
+    var b = document.createElement('button');
+    b.id = 'm-menu'; b.type = 'button'; b.setAttribute('aria-label', '会话列表'); b.textContent = '☰';
+    b.addEventListener('click', function(e){ e.stopPropagation(); document.body.classList.remove('sb-collapsed'); });
+    document.body.appendChild(b);
+    document.addEventListener('click', function(e){
+      if (document.body.classList.contains('sb-collapsed')) return;
+      if (e.target.closest && (e.target.closest('#sidebar') || e.target === b)) return;
+      document.body.classList.add('sb-collapsed');
+    });
+    var sl = document.getElementById('session-list');
+    if (sl) sl.addEventListener('click', function(){ document.body.classList.add('sb-collapsed'); });
+  } catch (e) {}
+})();
+/* Android 0.3.0：接收系统分享（文字填输入框，图片进附件栏） */
+window.__scShare = function(o){
+  try {
+    window.__lastShare = o;
+    if (typeof o === 'string') o = JSON.parse(o);
+    if (!o) return;
+    if (o.text){
+      var i = document.getElementById('input');
+      if (i){ i.value = String(o.text); try { UI.autosize(); } catch (e) {} i.focus(); }
+    }
+    if (o.dataUrl){
+      try {
+        var m = /^data:([^;,]+);base64,(.*)$/.exec(String(o.dataUrl));
+        if (m){
+          var bin = atob(m[2]);
+          var arr = new Uint8Array(bin.length);
+          for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+          var f = new File([arr], o.name || 'share.jpg', { type: m[1] || 'image/jpeg' });
+          UI.addFiles([f]);
+        }
+      } catch (e2) {}
+    }
+  } catch (e) {}
+};
 NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){
