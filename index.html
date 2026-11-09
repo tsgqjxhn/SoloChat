@@ -1405,7 +1405,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.5';
+var APP_VER = 'v0.5.6';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1698,6 +1698,7 @@ function loadCfg(){
     }
   } catch (e) {}
   var cfg = {};
+  var _migChanged = false; // 本次加载改了迁移标记 → 结束时要落盘，避免每次启动重跑
   if (!c || typeof c !== 'object' || Array.isArray(c)) c = {}; // v0.3.0：脏配置不许炸启动
     if (Array.isArray(c.presets)) c.presets = c.presets.filter(function(p){ return p && typeof p === 'object'; }); // v0.3.9：脏预置不许炸启动
     for (var k in DEF_CFG) cfg[k] = (k in c) ? c[k] : DEF_CFG[k];
@@ -1714,13 +1715,15 @@ function loadCfg(){
   if (!c.proxyMigrated){
     if (!cfg.proxy) cfg.proxy = DEF_CFG.proxy;
     cfg.proxyMigrated = 1;
+    _migChanged = true;
   }
-  /* v0.3.4：把旧默认的本地代理切回直连；用户改成别的地址则保持 */
+  /* v0.3.4：旧默认的本地代理切回直连；用户自定义过代理地址的保持 */
   if (!c.proxyDirectMigrated){
     var pv = String(cfg.proxy || '').trim();
-    /* 空值（跟随系统代理）与旧默认 7897 都视为「没自己配过」，一次性切成直连 */
-    if (!pv || /^https?:\/\/127\.0\.0\.1:7897\/?$/i.test(pv)) cfg.proxy = 'direct';
+    /* 只把「空值（跟随系统代理）」视为没配过；用户明确写的 7897 不再覆盖 */
+    if (!pv) cfg.proxy = 'direct';
     cfg.proxyDirectMigrated = 1;
+    _migChanged = true;
   }
   /* 迁移（一次性）：旧默认 maxTokens 2048 → 0，不再限制输出（避免思考被截断） */
   cfg.migMT = !!c.migMT;
@@ -1764,6 +1767,7 @@ function loadCfg(){
     cfg.picksBuiltinMig = 1;
   }
   S.cfg = cfg;
+  if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
   /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
   try { if (!cfg.defaultModel) cfg.defaultModel = cfg.currentModel || ''; } catch (e) {}
 }
@@ -15268,7 +15272,9 @@ $('#sidebar').addEventListener('click', function(e){
       setCfg({ imgPartial: clamp(parseInt(v, 10) || 0, 0, 3) });
     } else {
       var patch = {}; patch[ck] = v;
+      if (ck === 'proxy') patch.proxyCustom = 1; // 用户手填代理 → 标记为自定义，迁移不再覆盖
       setCfg(patch);
+      saveCfg(); // 修复：通用字段（含代理）改完立即持久化，重启不再回退
       if (ck === 'quickbar'){ QB_READY = true; notifyQuickbar(); }
     }
   }

@@ -3539,7 +3539,9 @@ $('#sidebar').addEventListener('click', function(e){
       setCfg({ imgPartial: clamp(parseInt(v, 10) || 0, 0, 3) });
     } else {
       var patch = {}; patch[ck] = v;
+      if (ck === 'proxy') patch.proxyCustom = 1; // 用户手填代理 → 标记为自定义，迁移不再覆盖
       setCfg(patch);
+      saveCfg(); // 修复：通用字段（含代理）改完立即持久化，重启不再回退
       if (ck === 'quickbar'){ QB_READY = true; notifyQuickbar(); }
     }
   }
