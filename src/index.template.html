@@ -2,6 +2,17 @@
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta name="theme-color" content="#2f6df6">
+<link rel="manifest" href="manifest.webmanifest">
+<script>
+/* Phase 0：HTTP(S) 下注册 PWA；file://（桌面 exe）自动跳过 */
+(function(){
+  try {
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
+  } catch (e) {}
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6df6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->

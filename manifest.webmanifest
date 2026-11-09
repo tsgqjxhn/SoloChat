@@ -1,0 +1,14 @@
+{
+  "name": "SoloChat",
+  "short_name": "SoloChat",
+  "description": "本地 AI 聊天客户端：Chat / Work / Agent / Soul",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2f6df6",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

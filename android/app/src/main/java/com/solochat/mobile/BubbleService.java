@@ -45,6 +45,7 @@ public class BubbleService extends Service {
 
     private WindowManager wm;
     private View bubble;
+    private View gear;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private HandlerThread capThread;
     private Handler capHandler;
@@ -70,9 +71,13 @@ public class BubbleService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, ch) : new Notification.Builder(this);
+        PendingIntent sp = PendingIntent.getActivity(this, 1,
+                new Intent(this, SettingsActivity.class), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         return b.setSmallIcon(R.drawable.ic_stat).setContentTitle("SoloChat 悬浮球")
-                .setContentText("点悬浮球截屏提问；长按进设置")
-                .setContentIntent(pi).setOngoing(true).build();
+                .setContentText("点悬浮球截屏提问；长按球或点「设置」")
+                .setContentIntent(pi).setOngoing(true)
+                .addAction(new Notification.Action.Builder(R.drawable.ic_stat, "设置", sp).build())
+                .build();
     }
 
     @Override
@@ -100,7 +105,9 @@ public class BubbleService extends Service {
     }
 
     private void showBubble() {
-        if (bubble != null) { bubble.setVisibility(View.VISIBLE); return; }
+        if (bubble != null) { bubble.setVisibility(View.VISIBLE); }
+        if (gear != null) { gear.setVisibility(View.VISIBLE); }
+        if (bubble != null) return;
         TextView v = new TextView(this);
         v.setText("S");
         v.setTextColor(Color.WHITE);
@@ -120,21 +127,33 @@ public class BubbleService extends Service {
         lp.gravity = Gravity.TOP | Gravity.START;
         lp.x = dp(12); lp.y = dp(180);
         v.setOnTouchListener(new View.OnTouchListener() {
-            float sx, sy; int ox, oy; boolean moved;
+            float sx, sy; int ox, oy; boolean moved, longFired; long downAt;
+            final Runnable longPress = () -> {
+                if (!moved && !longFired){
+                    longFired = true;
+                    startActivity(new Intent(BubbleService.this, SettingsActivity.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                }
+            };
             @Override public boolean onTouch(View view, MotionEvent e) {
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
-                        sx = e.getRawX(); sy = e.getRawY(); ox = lp.x; oy = lp.y; moved = false;
+                        sx = e.getRawX(); sy = e.getRawY(); ox = lp.x; oy = lp.y;
+                        moved = false; longFired = false; downAt = System.currentTimeMillis();
+                        ui.postDelayed(longPress, 650);
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         int nx = ox + (int) (e.getRawX() - sx), ny = oy + (int) (e.getRawY() - sy);
-                        if (Math.abs(nx - ox) + Math.abs(ny - oy) > dp(8)) moved = true;
+                        if (Math.abs(nx - ox) + Math.abs(ny - oy) > dp(8)){ moved = true; ui.removeCallbacks(longPress); }
                         lp.x = nx; lp.y = ny;
                         try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        android.util.Log.d("SOLO", "bubble up moved=" + moved);
-                        if (!moved) requestProjection(); else snapEdge(lp);
+                        ui.removeCallbacks(longPress);
+                        if (!moved && !longFired) requestProjection(); else snapEdge(lp);
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        ui.removeCallbacks(longPress);
                         return true;
                 }
                 return false;
@@ -147,6 +166,27 @@ public class BubbleService extends Service {
         bubble = v;
         wm.addView(bubble, lp);
         android.util.Log.d("SOLO", "bubble added " + lp.x + "," + lp.y + " size=" + size);
+
+        /* 旁边的小齿轮：不用长按也能进设置（长按在部分 ROM 上会被系统手势吃掉） */
+        TextView g = new TextView(this);
+        g.setText("⚙");
+        g.setTextColor(0xFFFFFFFF);
+        g.setTextSize(16);
+        g.setGravity(Gravity.CENTER);
+        GradientDrawable gb = new GradientDrawable();
+        gb.setShape(GradientDrawable.OVAL);
+        gb.setColor(0xCC333333);
+        g.setBackground(gb);
+        int gs = dp(34);
+        WindowManager.LayoutParams glp = new WindowManager.LayoutParams(
+                gs, gs, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+        glp.gravity = Gravity.TOP | Gravity.START;
+        glp.x = lp.x + size + dp(6);
+        glp.y = lp.y + dp(9);
+        g.setOnClickListener(x -> startActivity(new Intent(this, SettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        gear = g;
+        wm.addView(gear, glp);
     }
 
     private void snapEdge(WindowManager.LayoutParams lp) {
@@ -155,7 +195,7 @@ public class BubbleService extends Service {
         try { wm.updateViewLayout(bubble, lp); } catch (Exception ignored) { }
     }
 
-    private void hideBubble() { if (bubble != null) bubble.setVisibility(View.GONE); }
+    private void hideBubble() { if (bubble != null) bubble.setVisibility(View.GONE); if (gear != null) gear.setVisibility(View.GONE); }
 
     private void requestProjection() {
         android.util.Log.d("SOLO", "requestProjection");
@@ -392,6 +432,7 @@ public class BubbleService extends Service {
     public void onDestroy() {
         removeOverlay();
         if (bubble != null) { try { wm.removeView(bubble); } catch (Exception ignored) { } bubble = null; }
+        if (gear != null) { try { wm.removeView(gear); } catch (Exception ignored) { } gear = null; }
         if (capThread != null) capThread.quitSafely();
         super.onDestroy();
     }

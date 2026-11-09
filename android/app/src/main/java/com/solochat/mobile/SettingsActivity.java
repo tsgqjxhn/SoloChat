@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -12,6 +13,16 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 public class SettingsActivity extends Activity {
     @Override
@@ -44,6 +55,39 @@ public class SettingsActivity extends Activity {
         prompt.setMinLines(2);
         box.addView(prompt);
 
+        box.addView(label("WebDAV 地址（可选；填目录，如 https://dav.example.com/dav/solo/）"));
+        final EditText davUrl = input(Prefs.davUrl(this));
+        davUrl.setHint("https://dav.example.com/dav/solo/");
+        box.addView(davUrl);
+        box.addView(label("WebDAV 用户名 / 密码"));
+        final EditText davUser = input(Prefs.davUser(this));
+        davUser.setHint("用户名");
+        box.addView(davUser);
+        final EditText davPass = input(Prefs.davPass(this));
+        davPass.setHint("密码");
+        box.addView(davPass);
+        box.addView(label("远端文件名"));
+        final EditText davFile = input(Prefs.davFile(this));
+        davFile.setHint("solo-memory.md");
+        box.addView(davFile);
+
+        LinearLayout davRow = new LinearLayout(this);
+        davRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button up = new Button(this); up.setText("上传记忆");
+        Button down = new Button(this); down.setText("下载记忆");
+        davRow.addView(up, new LinearLayout.LayoutParams(0, -2, 1));
+        davRow.addView(down, new LinearLayout.LayoutParams(0, -2, 1));
+        box.addView(davRow);
+        final String[] davVals = new String[4];
+        Runnable grabDav = () -> {
+            davVals[0] = davUrl.getText().toString().trim();
+            davVals[1] = davUser.getText().toString().trim();
+            davVals[2] = davPass.getText().toString();
+            davVals[3] = davFile.getText().toString().trim();
+        };
+        up.setOnClickListener(v -> { grabDav.run(); davDo(true, davVals); });
+        down.setOnClickListener(v -> { grabDav.run(); davDo(false, davVals); });
+
         Button save = new Button(this);
         save.setText("保存");
         save.setOnClickListener(v -> {
@@ -52,6 +96,10 @@ public class SettingsActivity extends Activity {
                     .putString(Prefs.KEY, key.getText().toString().trim())
                     .putString(Prefs.MODEL, model.getText().toString().trim())
                     .putString(Prefs.PROMPT, prompt.getText().toString().trim())
+                    .putString(Prefs.DAV_URL, davUrl.getText().toString().trim())
+                    .putString(Prefs.DAV_USER, davUser.getText().toString().trim())
+                    .putString(Prefs.DAV_PASS, davPass.getText().toString())
+                    .putString(Prefs.DAV_FILE, davFile.getText().toString().trim())
                     .apply();
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
             finish();
@@ -111,6 +159,64 @@ public class SettingsActivity extends Activity {
         java.io.File d = new java.io.File(getFilesDir(), "memory");
         if (!d.exists()) d.mkdirs();
         return d;
+    }
+
+    /** WebDAV 上传/下载（手动同步；PUT/GET 一个合并的 Markdown）。 */
+    private void davDo(final boolean upload, final String[] v) {
+        new Thread(() -> {
+            try {
+                String base = v[0] == null ? "" : v[0].trim();
+                if (base.isEmpty()) throw new Exception("先填 WebDAV 地址");
+                if (!base.endsWith("/")) base += "/";
+                String file = (v[3] == null || v[3].trim().isEmpty()) ? "solo-memory.md" : v[3].trim();
+                URL url = new URL(base + file);
+                HttpURLConnection c = (HttpURLConnection) url.openConnection();
+                c.setConnectTimeout(20000);
+                c.setReadTimeout(30000);
+                String user = v[1] == null ? "" : v[1], pass = v[2] == null ? "" : v[2];
+                if (!user.isEmpty() || !pass.isEmpty()) {
+                    String tok = Base64.encodeToString((user + ":" + pass).getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+                    c.setRequestProperty("Authorization", "Basic " + tok);
+                }
+                File dir = memDir();
+                if (upload) {
+                    String all = "# USER.md\n\n" + body(read(new File(dir, "USER.md"))) + "\n\n"
+                            + "# MEMORY.md\n\n" + body(read(new File(dir, "MEMORY.md"))) + "\n\n"
+                            + "# DREAMS.md\n\n" + body(read(new File(dir, "DREAMS.md"))) + "\n";
+                    byte[] b = all.getBytes(StandardCharsets.UTF_8);
+                    c.setRequestMethod("PUT");
+                    c.setDoOutput(true);
+                    c.setFixedLengthStreamingMode(b.length);
+                    c.setRequestProperty("Content-Type", "text/markdown; charset=utf-8");
+                    try (OutputStream os = c.getOutputStream()) { os.write(b); }
+                    int code = c.getResponseCode();
+                    if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+                    runOnUiThread(() -> Toast.makeText(this, "已上传到 WebDAV", Toast.LENGTH_SHORT).show());
+                } else {
+                    c.setRequestMethod("GET");
+                    int code = c.getResponseCode();
+                    if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+                    InputStream is = c.getInputStream();
+                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+                    is.close();
+                    String t = new String(bo.toByteArray(), StandardCharsets.UTF_8);
+                    int cnt = 0;
+                    for (String nm : new String[]{"USER", "MEMORY", "DREAMS"}) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                                .compile("#\\s*" + nm + "\\.md\\s*([\\s\\S]*?)(?=#\\s*(?:USER|MEMORY|DREAMS)\\.md|$)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                                .matcher(t);
+                        if (m.find()) { write(new File(dir, nm + ".md"), "# " + nm + ".md\n\n" + m.group(1).trim() + "\n"); cnt++; }
+                    }
+                    final int fc = cnt;
+                    runOnUiThread(() -> Toast.makeText(this, "已下载 " + fc + " 个文件，重启 App 生效", Toast.LENGTH_LONG).show());
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "同步失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
     }
 
     private String read(java.io.File f) {

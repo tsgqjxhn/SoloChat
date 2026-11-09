@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.5.6 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.5.7 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,19 +85,19 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,328,512 字节**（v0.5.6，FileVersion 0.5.6.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,162,307 字节 / 19,892 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,162,379 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,329,024 字节**（v0.5.7，FileVersion 0.5.7.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,162,722 字节 / 19,903 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,162,794 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
-## Android 版（v0.1.0，悬浮截图问答）
+## Android 版（v0.2.0，悬浮截图问答 + WebDAV 同步）
 
-`dist/SoloChat-Android-0.1.0.apk`（**386,070 字节**，debug 签名，自用/内测）
+`dist/SoloChat-Android-0.2.0.apk`（**389,562 字节**，debug 签名，自用/内测）
 
 - 原生壳 + 内置 `index.html`：聊天、Soul 记忆可用；`AndroidBridge` 提供流式 `http`、`mem`、`notify`。
 - **悬浮球截屏 → 框选 → 直接问模型**：截图只在内存里，Base64 直传，**不写相册**、不经过中转服务器。
-- 长按悬浮球进设置（Base URL / Key / 模型 / 提示词）；设置页可导出/导入记忆 `.md`。
+- 悬浮球旁有 ⚙ 小按钮，点它进设置（长按球也可以）；设置页可导出/导入记忆、**WebDAV 上传/下载**。
 - 构建与限制见 `android/README.md`。
 
 内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。
