@@ -31,6 +31,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -293,43 +294,100 @@ public class BubbleService extends Service {
 
     private void showAsk(final Bitmap crop) {
         removeOverlay();
+        DisplayMetrics dm = new DisplayMetrics();
+        wm.getDefaultDisplay().getRealMetrics(dm);
+        int sheetH = dm.heightPixels / 2;
+
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0x66000000);
+        GradientDrawable sheetBg = new GradientDrawable();
+        sheetBg.setColor(0xFFFFFFFF);
+        sheetBg.setCornerRadii(new float[]{dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
+        root.setBackground(sheetBg);
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xFFFFFFFF);
-        bg.setCornerRadius(dp(14));
-        card.setBackground(bg);
+        card.setPadding(dp(16), dp(12), dp(16), dp(12));
 
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText("问这张截图（不会存相册）");
+        title.setText("截图已加入队列 · 未发送（不会存相册）");
         title.setTextColor(0xFF111111);
-        title.setTextSize(14);
-        card.addView(title);
+        title.setTextSize(13);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF666666);
+        cancel.setTextSize(13);
+        cancel.setPadding(dp(10), dp(6), dp(4), dp(6));
+        titleRow.addView(cancel);
+        card.addView(titleRow);
+
+        LinearLayout queueRow = new LinearLayout(this);
+        queueRow.setOrientation(LinearLayout.HORIZONTAL);
+        queueRow.setGravity(Gravity.CENTER_VERTICAL);
+        queueRow.setPadding(0, dp(8), 0, 0);
+        ImageView thumb = new ImageView(this);
+        thumb.setImageBitmap(crop);
+        thumb.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        GradientDrawable tb = new GradientDrawable();
+        tb.setColor(0xFF222222);
+        tb.setCornerRadius(dp(8));
+        thumb.setBackground(tb);
+        thumb.setClipToOutline(true);
+        queueRow.addView(thumb, new LinearLayout.LayoutParams(dp(54), dp(96)));
+        TextView qinfo = new TextView(this);
+        qinfo.setText("整屏截图 · 待发送\n点锁固定弹窗，可滑动底层题目");
+        qinfo.setTextSize(12);
+        qinfo.setTextColor(0xFF666666);
+        qinfo.setPadding(dp(10), 0, 0, 0);
+        queueRow.addView(qinfo, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(queueRow);
+
+        LinearLayout inputRow = new LinearLayout(this);
+        inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        inputRow.setGravity(Gravity.CENTER_VERTICAL);
+        inputRow.setPadding(0, dp(8), 0, 0);
 
         final EditText input = new EditText(this);
         input.setText(Prefs.prompt(this));
         input.setTextSize(15);
-        input.setMinLines(2);
+        input.setMinLines(1);
+        input.setMaxLines(2);
         input.setTextColor(0xFF111111);
-        card.addView(input);
+        inputRow.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        Button cancel = new Button(this); cancel.setText("取消");
-        Button send = new Button(this); send.setText("发送");
-        row.addView(cancel, new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(send, new LinearLayout.LayoutParams(0, -2, 1));
-        card.addView(row);
+        final boolean[] locked = {false};
+        final ImageButton lock = new ImageButton(this);
+        lock.setImageResource(R.drawable.ic_lock_open);
+        lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        lock.setPadding(dp(8), dp(8), dp(8), dp(8));
+        lock.setContentDescription("固定弹窗；固定后可滑动底层题目");
+        inputRow.addView(lock, new LinearLayout.LayoutParams(dp(42), dp(42)));
 
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
-        clp.setMargins(dp(18), 0, dp(18), 0);
-        root.addView(card, clp);
+        Button send = new Button(this);
+        send.setText("发送");
+        inputRow.addView(send, new LinearLayout.LayoutParams(-2, -2));
+        card.addView(inputRow);
+
+        ScrollView sc = new ScrollView(this);
+        sc.addView(card);
+        root.addView(sc, new FrameLayout.LayoutParams(-1, -1));
 
         cancel.setOnClickListener(v -> { removeOverlay(); showBubble(); });
+        lock.setOnClickListener(v -> {
+            locked[0] = !locked[0];
+            lock.setImageResource(locked[0] ? R.drawable.ic_lock : R.drawable.ic_lock_open);
+            toast(locked[0] ? "已固定：可滑动底层题目" : "未固定：点题目会返回原应用");
+        });
+        root.setOnTouchListener((v, e) -> {
+            if (e.getAction() == MotionEvent.ACTION_OUTSIDE && !locked[0]) {
+                removeOverlay();
+                showBubble();
+            }
+            return false;
+        });
         send.setOnClickListener(v -> {
             String q = input.getText().toString().trim();
             if (q.isEmpty()) q = Prefs.prompt(this);
@@ -343,8 +401,17 @@ public class BubbleService extends Service {
         });
 
         overlay = root;
-        wm.addView(root, overlayParams(true));
-        android.util.Log.d("SOLO", "ask overlay added");
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, sheetH,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.BOTTOM;
+        lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN | WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE;
+        wm.addView(root, lp);
+        android.util.Log.d("SOLO", "ask sheet added");
     }
 
     private void showAnswer(final String text, final Bitmap crop) {

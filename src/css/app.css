@@ -144,6 +144,7 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 }
 /* 顶栏控件簇：模式/模型/思考/文件夹 */
 #tb-c{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px}
+#btn-ws,.m-set-btn{display:none}
 #sel-model{width:336px}
 #tb-title{
   flex:1;min-width:0;
@@ -1180,6 +1181,15 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone #btn-send{width:38px;height:38px}
   body.m-phone #rn-rail{display:none!important}
   body.m-phone .msg{max-width:100%}
+  #btn-ws{display:none}
+  .m-set-btn{display:none}
+  body.m-phone #btn-ws{display:inline-flex;margin-left:auto}
+  body.m-phone.m-chat #btn-ws{display:none}
+  body.m-phone:not(.m-chat) .m-set-btn{display:inline-flex;order:-1}
+  body.m-phone #empty .e-temp{right:8px;top:4px}
+  body.m-phone #runner{position:fixed;left:0;right:0;top:0;bottom:0;width:100vw!important;max-width:none;z-index:95}
+  body.m-phone #runner .rn-resize{display:none}
+  body.m-phone.rn-open #m-menu{display:none}
   body.m-phone #toast-root{bottom:auto;top:58px;width:calc(100% - 24px)}
   body.m-phone .toast{max-width:100%;text-align:center}
   body.modal-open #m-menu{display:none}
@@ -1204,6 +1214,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .f-actions .btn{flex:1;justify-content:center}
   body.m-phone .acc-body{padding:10px}
   body.m-phone .f-in,body.m-phone .f-row textarea,body.m-phone .f-row select{font-size:16px;width:100%}
+  body.m-phone .pop textarea,body.m-phone #cmp-pop textarea,body.m-phone #sub-pop textarea,body.m-phone .ss-panel textarea{max-height:3.2em}
 }
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}

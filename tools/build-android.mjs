@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const src = path.join(root, 'index.html');
 const dst = path.join(root, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 
-const shim = `<script>
+const shim = `<script id="sc-android-shim">
 (function(){
   window.chrome = window.chrome || {};
   window.chrome.webview = {
@@ -30,7 +30,7 @@ let html = fs.readFileSync(src, 'utf8');
 const anchor = '<meta name="viewport"';
 const at = html.indexOf(anchor);
 if (at < 0) throw new Error('index.html 里找不到 viewport 锚点');
-if (!html.includes('__SC_ANDROID__')) html = html.slice(0, at) + shim + html.slice(at);
+if (!html.includes('id="sc-android-shim"')) html = html.slice(0, at) + shim + html.slice(at);
 fs.mkdirSync(path.dirname(dst), { recursive: true });
 fs.writeFileSync(dst, html);
 console.log('ANDROID ASSETS OK', Buffer.byteLength(html), 'shim_at', html.indexOf('__SC_ANDROID__'));

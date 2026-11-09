@@ -542,6 +542,12 @@ function bindWeb(){
       if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
       if (document.body.classList.contains('rn-open')) close(); else open();
     });
+    var wsbtn = $('#btn-ws');
+    if (wsbtn) wsbtn.addEventListener('click', function(){
+      if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('工作区是 Work / Agent 专用'); return; }
+      setTab('ws');
+      if (document.body.classList.contains('rn-open')) close(); else open();
+    });
     document.addEventListener('keydown', function(e){
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'j' || e.key === 'J')){
         e.preventDefault();

@@ -210,6 +210,8 @@ function fetchStream(opt){
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
       else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data != null ? d.data : d); } /* v0.5.4：Soul 记忆落盘回包；Android 桥是扁平回包 */
       else if (d.t === 'mem.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '记忆操作失败')); }
+      else if (d.t === 'save.done'){ delete bridge.pend[d.id]; p.onDone(d); }
+      else if (d.t === 'save.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '保存失败')); }
       else if (d.t === 'cmd.done'){
         delete bridge.pend[d.id];
         var cd = null; try { cd = JSON.parse(d.data); } catch(e){}
@@ -1759,6 +1761,15 @@ function fetchStream(opt){
   bridge: bridge,
     fs: fsCall,
     mem: memCall,
+    saveFile: function(name, text, mime){
+      return new Promise(function(res, rej){
+        if (!bridge.ok){ rej(new Error('保存文件需要 SoloChat 宿主')); return; }
+        var id = 's' + (++bridge.seq);
+        bridge.pend[id] = { onChunk: function(){}, onDone: res, onError: rej };
+        bridge.send({ t: 'savefile', id: id, name: name, text: text, mime: mime || 'text/plain' });
+        setTimeout(function(){ if (bridge.pend[id]){ delete bridge.pend[id]; rej(new Error('保存超时')); } }, 15000);
+      });
+    },
     notify: notify,
   };
 })();

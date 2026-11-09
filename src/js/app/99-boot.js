@@ -42,6 +42,8 @@ document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.
     });
     var sl = document.getElementById('session-list');
     if (sl) sl.addEventListener('click', function(){ document.body.classList.add('sb-collapsed'); });
+    var ip = document.getElementById('input');
+    if (ip) ip.placeholder = '输入消息…';
   } catch (e) {}
 })();
 /* Android 0.3.0：接收系统分享（文字填输入框，图片进附件栏） */

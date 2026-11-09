@@ -353,7 +353,18 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '渲染引擎' }), el('b', { text: wv ? ('Chromium ' + wv[1]) : '未知' })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '单文件大小' }), el('b', { text: '≈' + Math.round((document.documentElement.outerHTML.length) / 1024) + ' KB' })]));
       p.appendChild(el('div', { class: 'hint', text: '单文件本地 AI 客户端：不联网存储、无第三方运行时依赖；密钥存在宿主侧 DPAPI 保险库，快照导出会自动剔除。' }));
-      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+      p.appendChild(el('div', { class: 'sub', style: 'margin-top:18px', text: '手机 ↔ 电脑 配置同步' }));
+      p.appendChild(el('div', { class: 'hint', text: '导出本机配置到文件，在另一台选「以对方为准」或「取并集」。密钥不会进文件；同名/同地址的配置组会沿用本机 Key。' }));
+      (function(){
+        var bOut = el('button', { class: 'btn btn-sec', type: 'button', text: '导出本机配置' });
+        var bRemote = el('button', { class: 'btn btn-sec', type: 'button', text: '导入：以对方为准' });
+        var bUnion = el('button', { class: 'btn btn-sec', type: 'button', text: '导入：取并集' });
+        bOut.addEventListener('click', function(){ try { UI.cfgSyncOut(); } catch (e) {} });
+        bRemote.addEventListener('click', function(){ try { UI.cfgSyncImport('remote'); } catch (e) {} });
+        bUnion.addEventListener('click', function(){ try { UI.cfgSyncImport('union'); } catch (e) {} });
+        p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;flex-wrap:wrap' }, [bOut, bRemote, bUnion]));
+      })();
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:8px' }, [
         el('button', { class: 'btn btn-sec', 'data-m': 'self-check' }, [icon('check'), '连接自检']),
         el('button', { class: 'btn btn-sec', 'data-m': 'diag', text: '导出诊断包' }),
         el('button', { class: 'btn btn-sec', 'data-m': 'open-data', text: '打开数据目录' })
@@ -1556,8 +1567,15 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
 
   /* 输入区 */
   function autosize(){
+    var cs = getComputedStyle($input);
+    var lh = parseFloat(cs.lineHeight) || 22;
+    var pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var mobile = document.body.classList.contains('m-phone');
+    var pop = $input.closest && $input.closest('#cmp-pop,#sub-pop,.pop,.ss-panel');
+    var maxLines = pop ? 2 : (mobile ? 4 : 8);
+    var max = lh * maxLines + pad;
     $input.style.height = 'auto';
-    $input.style.height = Math.min($input.scrollHeight, 180) + 'px';
+    $input.style.height = Math.min($input.scrollHeight, max) + 'px';
   }
   function setSending(v){
     S.sending = v;

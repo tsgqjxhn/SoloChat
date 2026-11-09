@@ -13,7 +13,7 @@
   } catch (e) {}
 })();
 </script>
-<script>
+<script id="sc-android-shim">
 (function(){
   window.chrome = window.chrome || {};
   window.chrome.webview = {
@@ -187,6 +187,7 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 }
 /* 顶栏控件簇：模式/模型/思考/文件夹 */
 #tb-c{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px}
+#btn-ws,.m-set-btn{display:none}
 #sel-model{width:336px}
 #tb-title{
   flex:1;min-width:0;
@@ -1223,6 +1224,15 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone #btn-send{width:38px;height:38px}
   body.m-phone #rn-rail{display:none!important}
   body.m-phone .msg{max-width:100%}
+  #btn-ws{display:none}
+  .m-set-btn{display:none}
+  body.m-phone #btn-ws{display:inline-flex;margin-left:auto}
+  body.m-phone.m-chat #btn-ws{display:none}
+  body.m-phone:not(.m-chat) .m-set-btn{display:inline-flex;order:-1}
+  body.m-phone #empty .e-temp{right:8px;top:4px}
+  body.m-phone #runner{position:fixed;left:0;right:0;top:0;bottom:0;width:100vw!important;max-width:none;z-index:95}
+  body.m-phone #runner .rn-resize{display:none}
+  body.m-phone.rn-open #m-menu{display:none}
   body.m-phone #toast-root{bottom:auto;top:58px;width:calc(100% - 24px)}
   body.m-phone .toast{max-width:100%;text-align:center}
   body.modal-open #m-menu{display:none}
@@ -1298,6 +1308,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <button class="win-btn" data-win="max" title="最大化 / 还原（双击顶栏空白同效）"><svg class="ic"><use href="#i-max"/></svg></button>
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
+      <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
     </header>
 
     <div id="msg-scroll">
@@ -1315,6 +1326,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
           <!-- v1.1.6：附件缩略图放进输入框所在的中间列，默认显示在输入框上方。 -->
           <div id="chips"></div>
           <div class="czone cz-l">
+            <button id="btn-m-settings" class="icon-btn m-set-btn" data-m="settings" title="设置"><svg class="ic"><use href="#i-gear"/></svg></button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
             <button id="btn-img" class="icon-btn" title="生成图片（输入描述后生成，支持流式预览）"><svg class="ic"><use href="#i-img"/></svg></button>
             <button id="btn-web" class="icon-btn" title="联网搜索（需在设置中配置搜索 API）"><svg class="ic"><use href="#i-globe"/></svg></button>
@@ -3934,6 +3946,8 @@ function fetchStream(opt){
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
       else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data != null ? d.data : d); } /* v0.5.4：Soul 记忆落盘回包；Android 桥是扁平回包 */
       else if (d.t === 'mem.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '记忆操作失败')); }
+      else if (d.t === 'save.done'){ delete bridge.pend[d.id]; p.onDone(d); }
+      else if (d.t === 'save.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '保存失败')); }
       else if (d.t === 'cmd.done'){
         delete bridge.pend[d.id];
         var cd = null; try { cd = JSON.parse(d.data); } catch(e){}
@@ -5483,6 +5497,15 @@ function fetchStream(opt){
   bridge: bridge,
     fs: fsCall,
     mem: memCall,
+    saveFile: function(name, text, mime){
+      return new Promise(function(res, rej){
+        if (!bridge.ok){ rej(new Error('保存文件需要 SoloChat 宿主')); return; }
+        var id = 's' + (++bridge.seq);
+        bridge.pend[id] = { onChunk: function(){}, onDone: res, onError: rej };
+        bridge.send({ t: 'savefile', id: id, name: name, text: text, mime: mime || 'text/plain' });
+        setTimeout(function(){ if (bridge.pend[id]){ delete bridge.pend[id]; rej(new Error('保存超时')); } }, 15000);
+      });
+    },
     notify: notify,
   };
 })();
@@ -7775,6 +7798,12 @@ function bindWeb(){
     var pbtn = $('#btn-panel');
     if (pbtn) pbtn.addEventListener('click', function(){
       if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('右侧面板是 Work / Agent 专用'); return; }
+      if (document.body.classList.contains('rn-open')) close(); else open();
+    });
+    var wsbtn = $('#btn-ws');
+    if (wsbtn) wsbtn.addEventListener('click', function(){
+      if ((S.cfg.mode || 'chat') === 'chat'){ UI.toast('工作区是 Work / Agent 专用'); return; }
+      setTab('ws');
       if (document.body.classList.contains('rn-open')) close(); else open();
     });
     document.addEventListener('keydown', function(e){
@@ -10696,7 +10725,18 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '渲染引擎' }), el('b', { text: wv ? ('Chromium ' + wv[1]) : '未知' })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '单文件大小' }), el('b', { text: '≈' + Math.round((document.documentElement.outerHTML.length) / 1024) + ' KB' })]));
       p.appendChild(el('div', { class: 'hint', text: '单文件本地 AI 客户端：不联网存储、无第三方运行时依赖；密钥存在宿主侧 DPAPI 保险库，快照导出会自动剔除。' }));
-      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+      p.appendChild(el('div', { class: 'sub', style: 'margin-top:18px', text: '手机 ↔ 电脑 配置同步' }));
+      p.appendChild(el('div', { class: 'hint', text: '导出本机配置到文件，在另一台选「以对方为准」或「取并集」。密钥不会进文件；同名/同地址的配置组会沿用本机 Key。' }));
+      (function(){
+        var bOut = el('button', { class: 'btn btn-sec', type: 'button', text: '导出本机配置' });
+        var bRemote = el('button', { class: 'btn btn-sec', type: 'button', text: '导入：以对方为准' });
+        var bUnion = el('button', { class: 'btn btn-sec', type: 'button', text: '导入：取并集' });
+        bOut.addEventListener('click', function(){ try { UI.cfgSyncOut(); } catch (e) {} });
+        bRemote.addEventListener('click', function(){ try { UI.cfgSyncImport('remote'); } catch (e) {} });
+        bUnion.addEventListener('click', function(){ try { UI.cfgSyncImport('union'); } catch (e) {} });
+        p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;flex-wrap:wrap' }, [bOut, bRemote, bUnion]));
+      })();
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:8px' }, [
         el('button', { class: 'btn btn-sec', 'data-m': 'self-check' }, [icon('check'), '连接自检']),
         el('button', { class: 'btn btn-sec', 'data-m': 'diag', text: '导出诊断包' }),
         el('button', { class: 'btn btn-sec', 'data-m': 'open-data', text: '打开数据目录' })
@@ -11899,8 +11939,15 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
 
   /* 输入区 */
   function autosize(){
+    var cs = getComputedStyle($input);
+    var lh = parseFloat(cs.lineHeight) || 22;
+    var pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var mobile = document.body.classList.contains('m-phone');
+    var pop = $input.closest && $input.closest('#cmp-pop,#sub-pop,.pop,.ss-panel');
+    var maxLines = pop ? 2 : (mobile ? 4 : 8);
+    var max = lh * maxLines + pad;
     $input.style.height = 'auto';
-    $input.style.height = Math.min($input.scrollHeight, 180) + 'px';
+    $input.style.height = Math.min($input.scrollHeight, max) + 'px';
   }
   function setSending(v){
     S.sending = v;
@@ -14211,6 +14258,12 @@ function sendMessage(){
 
   /* ---------- 通用小工具 ---------- */
   function download(name, text, mime){
+    if (window.__SC_ANDROID__ && NET && NET.saveFile){
+      NET.saveFile(name, text, mime || 'text/plain').then(function(r){
+        toast('已保存到 ' + ((r && r.path) || name));
+      }, function(e){ toast('保存失败：' + (e && e.message || e), true); });
+      return;
+    }
     var blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = el('a', { href: url, download: name, style: 'display:none' });
@@ -14735,6 +14788,113 @@ function sendMessage(){
     });
   }
 
+  /* ---------- 手机 ↔ 电脑 配置同步（关于页） ---------- */
+  function cfgSyncScrub(v){
+    if (!v || typeof v !== 'object') return v;
+    for (var k in v){
+      if (/(apiKey|token|secret|password)/i.test(k)) delete v[k];
+      else if (v[k] && typeof v[k] === 'object') cfgSyncScrub(v[k]);
+    }
+    return v;
+  }
+  function cfgSyncSnapshot(){
+    var c = {};
+    try { c = JSON.parse(JSON.stringify(S.cfg)); } catch (e) { c = {}; }
+    if (Array.isArray(c.presets)) c.presets.forEach(function(p){ if (p) delete p.apiKey; });
+    cfgSyncScrub(c);
+    delete c.presets; // 单独放，保持结构清晰
+    var ps = [];
+    try { ps = JSON.parse(JSON.stringify(S.cfg.presets || [])); } catch (e) { ps = []; }
+    ps.forEach(function(p){ if (p) delete p.apiKey; });
+    c.presets = ps;
+    return { app: 'SoloChat', kind: 'config-sync', v: 1, ts: Date.now(), cfg: c };
+  }
+  function cfgSyncOut(){
+    download('solochat-config-' + new Date().toISOString().slice(0, 10) + '.json',
+      JSON.stringify(cfgSyncSnapshot(), null, 2), 'application/json');
+    toast('已导出本机配置（不含密钥）');
+  }
+  function cfgSyncFind(list, rp){
+    for (var i = 0; i < list.length; i++){
+      var lp = list[i];
+      if (!lp) continue;
+      if (lp.id && rp.id && lp.id === rp.id) return lp;
+      if (lp.name && rp.name && lp.name === rp.name && (lp.baseURL || '') === (rp.baseURL || '')) return lp;
+      if (lp.baseURL && rp.baseURL && lp.baseURL === rp.baseURL) return lp;
+    }
+    return null;
+  }
+  function cfgSyncMergePresets(mode){
+    var local = S.cfg.presets || [], remote = (cfgSyncRemote && cfgSyncRemote.presets) || [];
+    if (!remote.length) return local;
+    if (mode === 'remote'){
+      return remote.map(function(rp){
+        var lp = cfgSyncFind(local, rp);
+        var np = JSON.parse(JSON.stringify(rp));
+        np.apiKey = lp ? (lp.apiKey || '') : '';
+        return np;
+      });
+    }
+    var out = local.map(function(p){ return JSON.parse(JSON.stringify(p)); });
+    remote.forEach(function(rp){
+      var lp = cfgSyncFind(out, rp);
+      if (lp){
+        for (var k in rp){
+          if (k === 'apiKey') continue;
+          if (lp[k] == null || lp[k] === '' || (Array.isArray(lp[k]) && !lp[k].length)) lp[k] = rp[k];
+        }
+      } else {
+        var np = JSON.parse(JSON.stringify(rp));
+        np.apiKey = '';
+        out.push(np);
+      }
+    });
+    return out;
+  }
+  var cfgSyncRemote = null;
+  function cfgSyncImport(mode){
+    pickText(mode === 'remote' ? '选择对方的配置（以对方为准）' : '选择对方的配置（取并集）', '.json,application/json', function(txt){
+      var o;
+      try { o = JSON.parse(txt); } catch (e) { return toast('不是合法的 JSON', true); }
+      if (!o || !o.cfg) return toast('配置文件格式不正确', true);
+      cfgSyncRemote = JSON.parse(JSON.stringify(o.cfg));
+      var skip = /(apiKey|token|secret|password|^presets$|^activePreset$|^maxTokens$)/i;
+      for (var k in cfgSyncRemote){
+        if (skip.test(k)) continue;
+        if (mode === 'remote') S.cfg[k] = cfgSyncRemote[k];
+        else if (S.cfg[k] == null || S.cfg[k] === '' || (Array.isArray(S.cfg[k]) && !S.cfg[k].length)) S.cfg[k] = cfgSyncRemote[k];
+      }
+      if (mode === 'union'){
+        var s1 = (S.cfg.models || []).slice();
+        (cfgSyncRemote.models || []).forEach(function(m){ if (s1.indexOf(m) < 0) s1.push(m); });
+        S.cfg.models = s1;
+        ['groups', 'prompts'].forEach(function(key){
+          var cur = S.cfg[key] || [], rem = cfgSyncRemote[key] || [];
+          rem.forEach(function(it){
+            var id = it && (it.id || it.name);
+            var hit = cur.some(function(x){ return x && (x.id || x.name) === id; });
+            if (!hit) cur.push(it);
+          });
+          S.cfg[key] = cur;
+        });
+        if (cfgSyncRemote.modelMeta && typeof cfgSyncRemote.modelMeta === 'object'){
+          S.cfg.modelMeta = S.cfg.modelMeta || {};
+          for (var mk in cfgSyncRemote.modelMeta) if (!S.cfg.modelMeta[mk]) S.cfg.modelMeta[mk] = cfgSyncRemote.modelMeta[mk];
+        }
+      }
+      S.cfg.presets = cfgSyncMergePresets(mode);
+      var want = S.cfg.activePreset;
+      var act = null;
+      for (var i = 0; i < S.cfg.presets.length; i++) if (S.cfg.presets[i].id === want) act = S.cfg.presets[i];
+      if (!act) act = S.cfg.presets[0] || null;
+      if (act){ S.cfg.activePreset = act.id; S.cfg.apiKey = act.apiKey || ''; }
+      saveCfg(); applyTheme(); applyAccent(); applyFontScale();
+      renderSessions(); renderMsgs(); renderCtxRing(); renderComposerCtl();
+      try { UI.openSettings(); } catch (e) {}
+      toast(mode === 'remote' ? '已按对方配置覆盖（密钥需重填或沿用同名配置）' : '已合并配置（保留本机独有项）');
+    });
+  }
+
   /* ---------- #10 诊断包 ---------- */
   function doExportDiag(){
     var L = [];
@@ -14929,7 +15089,7 @@ function sendMessage(){
     /* v3.0：命令面板 / 查找 / 分支 / 维护面板 */
     PAL: PAL, FIND: FIND, forkFrom: forkFrom, recentRow: recentRow,
     runSelfCheck: runSelfCheck, storagePanel: storagePanel, purgeOrphans: purgeOrphans,
-    exportSnapshot: exportSnapshot, importSnapshot: importSnapshot, doExportDiag: doExportDiag,
+    exportSnapshot: exportSnapshot, importSnapshot: importSnapshot, cfgSyncOut: cfgSyncOut, cfgSyncImport: cfgSyncImport, doExportDiag: doExportDiag,
     download: download, compressSession: compressSession,
     applyAccent: applyAccent, applyFontScale: applyFontScale, setGroup: setGroup
   };
@@ -20069,6 +20229,8 @@ document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.
     });
     var sl = document.getElementById('session-list');
     if (sl) sl.addEventListener('click', function(){ document.body.classList.add('sb-collapsed'); });
+    var ip = document.getElementById('input');
+    if (ip) ip.placeholder = '输入消息…';
   } catch (e) {}
 })();
 /* Android 0.3.0：接收系统分享（文字填输入框，图片进附件栏） */

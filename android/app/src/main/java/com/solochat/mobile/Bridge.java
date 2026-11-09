@@ -4,11 +4,14 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
@@ -21,6 +24,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -52,6 +56,7 @@ public class Bridge {
             else if ("http.abort".equals(t)) abort(o.optString("id"));
             else if ("mem".equals(t)) doMem(o);
             else if ("notify".equals(t)) doNotify(o);
+            else if ("savefile".equals(t)) doSaveFile(o);
         } catch (Exception ignored) { }
     }
 
@@ -126,9 +131,50 @@ public class Bridge {
         });
     }
 
-    private void doMem(JSONObject o) {
-        String op = o.optString("op", "load");
-        File dir = new File(ctx.getFilesDir(), "memory");
+    /** 网页下载兜底：把文本写入系统 Download/SoloChat（API 29+ 走 MediaStore，无需存储权限）。 */
+    private void doSaveFile(final JSONObject o) {
+        final String id = o.optString("id");
+        final String name = o.optString("name", "solochat.txt");
+        final String text = o.optString("text", "");
+        final String mime = o.optString("mime", "text/plain");
+        pool.execute(() -> {
+            try {
+                String path;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues cv = new ContentValues();
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SoloChat");
+                    android.net.Uri u = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (u == null) throw new Exception("无法创建下载文件");
+                    try (OutputStream os = ctx.getContentResolver().openOutputStream(u)) {
+                        if (os == null) throw new Exception("无法写入下载文件");
+                        os.write(text.getBytes(StandardCharsets.UTF_8));
+                    }
+                    path = "下载/SoloChat/" + name;
+                } else {
+                    File dir = new File(ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "SoloChat");
+                    if (!dir.exists()) dir.mkdirs();
+                    File f = new File(dir, name);
+                    try (FileOutputStream fo = new FileOutputStream(f)) {
+                        fo.write(text.getBytes(StandardCharsets.UTF_8));
+                    }
+                    path = f.getAbsolutePath();
+                }
+                JSONObject d = new JSONObject();
+                d.put("t", "save.done"); d.put("id", id); d.put("path", path);
+                push(d);
+            } catch (Exception e) {
+                try {
+                    JSONObject d = new JSONObject();
+                    d.put("t", "save.error"); d.put("id", id); d.put("message", String.valueOf(e.getMessage()));
+                    push(d);
+                } catch (Exception ignored) { }
+            }
+        });
+    }
+
+    private void doMem(JSONObject o) {        String op = o.optString("op", "load");        File dir = new File(ctx.getFilesDir(), "memory");
         if (!dir.exists()) dir.mkdirs();
         try {
             if ("load".equals(op) || "list".equals(op)) {

@@ -11,6 +11,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Base64;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -27,6 +29,7 @@ public class MainActivity extends Activity {
     private String shareText;
     private Uri shareUri;
     private boolean shareDelivering;
+    private ValueCallback<Uri[]> fileCb;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -43,6 +46,17 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setTextZoom(100);
         web.addJavascriptInterface(new Bridge(this, web), "AndroidBridge");
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (fileCb != null) fileCb.onReceiveValue(null);
+                fileCb = cb;
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                try { startActivityForResult(i, 7002); } catch (Exception e) { fileCb = null; return false; }
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView v, String url) {
                 android.util.Log.d("SOLO", "onPageFinished " + url);
@@ -144,6 +158,16 @@ public class MainActivity extends Activity {
             bm.recycle();
             return "data:image/jpeg;base64," + Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP);
         } catch (Exception e) { android.util.Log.d("SOLO", "share image decode fail: " + e); return null; }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int code, Intent data) {
+        super.onActivityResult(req, code, data);
+        if (req == 7002) {
+            Uri u = (code == RESULT_OK && data != null) ? data.getData() : null;
+            if (fileCb != null) fileCb.onReceiveValue(u == null ? null : new Uri[]{u});
+            fileCb = null;
+        }
     }
 
     @Override

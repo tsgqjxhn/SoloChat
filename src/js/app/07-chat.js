@@ -2299,6 +2299,12 @@ function sendMessage(){
 
   /* ---------- 通用小工具 ---------- */
   function download(name, text, mime){
+    if (window.__SC_ANDROID__ && NET && NET.saveFile){
+      NET.saveFile(name, text, mime || 'text/plain').then(function(r){
+        toast('已保存到 ' + ((r && r.path) || name));
+      }, function(e){ toast('保存失败：' + (e && e.message || e), true); });
+      return;
+    }
     var blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = el('a', { href: url, download: name, style: 'display:none' });
@@ -2823,6 +2829,113 @@ function sendMessage(){
     });
   }
 
+  /* ---------- 手机 ↔ 电脑 配置同步（关于页） ---------- */
+  function cfgSyncScrub(v){
+    if (!v || typeof v !== 'object') return v;
+    for (var k in v){
+      if (/(apiKey|token|secret|password)/i.test(k)) delete v[k];
+      else if (v[k] && typeof v[k] === 'object') cfgSyncScrub(v[k]);
+    }
+    return v;
+  }
+  function cfgSyncSnapshot(){
+    var c = {};
+    try { c = JSON.parse(JSON.stringify(S.cfg)); } catch (e) { c = {}; }
+    if (Array.isArray(c.presets)) c.presets.forEach(function(p){ if (p) delete p.apiKey; });
+    cfgSyncScrub(c);
+    delete c.presets; // 单独放，保持结构清晰
+    var ps = [];
+    try { ps = JSON.parse(JSON.stringify(S.cfg.presets || [])); } catch (e) { ps = []; }
+    ps.forEach(function(p){ if (p) delete p.apiKey; });
+    c.presets = ps;
+    return { app: 'SoloChat', kind: 'config-sync', v: 1, ts: Date.now(), cfg: c };
+  }
+  function cfgSyncOut(){
+    download('solochat-config-' + new Date().toISOString().slice(0, 10) + '.json',
+      JSON.stringify(cfgSyncSnapshot(), null, 2), 'application/json');
+    toast('已导出本机配置（不含密钥）');
+  }
+  function cfgSyncFind(list, rp){
+    for (var i = 0; i < list.length; i++){
+      var lp = list[i];
+      if (!lp) continue;
+      if (lp.id && rp.id && lp.id === rp.id) return lp;
+      if (lp.name && rp.name && lp.name === rp.name && (lp.baseURL || '') === (rp.baseURL || '')) return lp;
+      if (lp.baseURL && rp.baseURL && lp.baseURL === rp.baseURL) return lp;
+    }
+    return null;
+  }
+  function cfgSyncMergePresets(mode){
+    var local = S.cfg.presets || [], remote = (cfgSyncRemote && cfgSyncRemote.presets) || [];
+    if (!remote.length) return local;
+    if (mode === 'remote'){
+      return remote.map(function(rp){
+        var lp = cfgSyncFind(local, rp);
+        var np = JSON.parse(JSON.stringify(rp));
+        np.apiKey = lp ? (lp.apiKey || '') : '';
+        return np;
+      });
+    }
+    var out = local.map(function(p){ return JSON.parse(JSON.stringify(p)); });
+    remote.forEach(function(rp){
+      var lp = cfgSyncFind(out, rp);
+      if (lp){
+        for (var k in rp){
+          if (k === 'apiKey') continue;
+          if (lp[k] == null || lp[k] === '' || (Array.isArray(lp[k]) && !lp[k].length)) lp[k] = rp[k];
+        }
+      } else {
+        var np = JSON.parse(JSON.stringify(rp));
+        np.apiKey = '';
+        out.push(np);
+      }
+    });
+    return out;
+  }
+  var cfgSyncRemote = null;
+  function cfgSyncImport(mode){
+    pickText(mode === 'remote' ? '选择对方的配置（以对方为准）' : '选择对方的配置（取并集）', '.json,application/json', function(txt){
+      var o;
+      try { o = JSON.parse(txt); } catch (e) { return toast('不是合法的 JSON', true); }
+      if (!o || !o.cfg) return toast('配置文件格式不正确', true);
+      cfgSyncRemote = JSON.parse(JSON.stringify(o.cfg));
+      var skip = /(apiKey|token|secret|password|^presets$|^activePreset$|^maxTokens$)/i;
+      for (var k in cfgSyncRemote){
+        if (skip.test(k)) continue;
+        if (mode === 'remote') S.cfg[k] = cfgSyncRemote[k];
+        else if (S.cfg[k] == null || S.cfg[k] === '' || (Array.isArray(S.cfg[k]) && !S.cfg[k].length)) S.cfg[k] = cfgSyncRemote[k];
+      }
+      if (mode === 'union'){
+        var s1 = (S.cfg.models || []).slice();
+        (cfgSyncRemote.models || []).forEach(function(m){ if (s1.indexOf(m) < 0) s1.push(m); });
+        S.cfg.models = s1;
+        ['groups', 'prompts'].forEach(function(key){
+          var cur = S.cfg[key] || [], rem = cfgSyncRemote[key] || [];
+          rem.forEach(function(it){
+            var id = it && (it.id || it.name);
+            var hit = cur.some(function(x){ return x && (x.id || x.name) === id; });
+            if (!hit) cur.push(it);
+          });
+          S.cfg[key] = cur;
+        });
+        if (cfgSyncRemote.modelMeta && typeof cfgSyncRemote.modelMeta === 'object'){
+          S.cfg.modelMeta = S.cfg.modelMeta || {};
+          for (var mk in cfgSyncRemote.modelMeta) if (!S.cfg.modelMeta[mk]) S.cfg.modelMeta[mk] = cfgSyncRemote.modelMeta[mk];
+        }
+      }
+      S.cfg.presets = cfgSyncMergePresets(mode);
+      var want = S.cfg.activePreset;
+      var act = null;
+      for (var i = 0; i < S.cfg.presets.length; i++) if (S.cfg.presets[i].id === want) act = S.cfg.presets[i];
+      if (!act) act = S.cfg.presets[0] || null;
+      if (act){ S.cfg.activePreset = act.id; S.cfg.apiKey = act.apiKey || ''; }
+      saveCfg(); applyTheme(); applyAccent(); applyFontScale();
+      renderSessions(); renderMsgs(); renderCtxRing(); renderComposerCtl();
+      try { UI.openSettings(); } catch (e) {}
+      toast(mode === 'remote' ? '已按对方配置覆盖（密钥需重填或沿用同名配置）' : '已合并配置（保留本机独有项）');
+    });
+  }
+
   /* ---------- #10 诊断包 ---------- */
   function doExportDiag(){
     var L = [];
@@ -3017,7 +3130,7 @@ function sendMessage(){
     /* v3.0：命令面板 / 查找 / 分支 / 维护面板 */
     PAL: PAL, FIND: FIND, forkFrom: forkFrom, recentRow: recentRow,
     runSelfCheck: runSelfCheck, storagePanel: storagePanel, purgeOrphans: purgeOrphans,
-    exportSnapshot: exportSnapshot, importSnapshot: importSnapshot, doExportDiag: doExportDiag,
+    exportSnapshot: exportSnapshot, importSnapshot: importSnapshot, cfgSyncOut: cfgSyncOut, cfgSyncImport: cfgSyncImport, doExportDiag: doExportDiag,
     download: download, compressSession: compressSession,
     applyAccent: applyAccent, applyFontScale: applyFontScale, setGroup: setGroup
   };
