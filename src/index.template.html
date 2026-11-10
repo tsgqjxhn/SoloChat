@@ -64,6 +64,7 @@
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
       <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
+      <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
     </header>
 
     <div id="msg-scroll">
@@ -96,9 +97,6 @@
           <div class="cwrap">
             <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
-          </div>
-          <div class="czone cz-r2">
-            <button id="btn-sesscfg" class="icon-btn" title="会话参数（发送前也可调：模型/提示词/温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
           </div>
         </div>
         <div id="cmp-pop" hidden></div>

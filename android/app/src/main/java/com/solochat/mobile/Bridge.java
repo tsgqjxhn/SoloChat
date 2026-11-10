@@ -57,6 +57,7 @@ public class Bridge {
             else if ("mem".equals(t)) doMem(o);
             else if ("notify".equals(t)) doNotify(o);
             else if ("savefile".equals(t)) doSaveFile(o);
+            else if ("cfg".equals(t)) doCfg(o);
         } catch (Exception ignored) { }
     }
 
@@ -129,6 +130,22 @@ public class Bridge {
                 inflight.remove(id);
             }
         });
+    }
+
+    /** 网页把主应用当前连接配置推给原生，截图问答复用同一套 Base/Key/模型。 */
+    private void doCfg(JSONObject o) {
+        try {
+            String base = o.optString("base", "").trim();
+            String key = o.optString("key", "").trim();
+            String model = o.optString("model", "").trim();
+            if (key.isEmpty()) return;
+            Prefs.get(ctx).edit()
+                    .putString(Prefs.BASE, base)
+                    .putString(Prefs.KEY, key)
+                    .putString(Prefs.MODEL, model)
+                    .apply();
+            android.util.Log.d("SOLO", "cfg synced base=" + base + " model=" + model);
+        } catch (Exception ignored) { }
     }
 
     /** 网页下载兜底：把文本写入系统 Download/SoloChat（API 29+ 走 MediaStore，无需存储权限）。 */

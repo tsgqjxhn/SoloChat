@@ -1210,6 +1210,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   #btn-ws{display:none}
   .m-set-btn{display:none}
   body.m-phone #btn-ws{display:inline-flex;margin-left:auto}
+  body.m-phone #btn-sesscfg{margin-left:4px}
+  body.m-phone.m-chat #btn-sesscfg{margin-left:auto}
   body.m-phone.m-chat #btn-ws{display:none}
   body.m-phone:not(.m-chat) .m-set-btn{display:inline-flex;order:-1}
   body.m-phone #empty .e-temp{right:8px;top:4px}
@@ -1223,16 +1225,19 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 /* ===== 手机设置全屏（Android 0.3.1） ===== */
 @media (max-width:860px){
   body.m-phone #app{height:100vh}
+  body.m-phone #modal .panel{max-height:90vh;overflow-y:auto;overscroll-behavior:contain}
   body.m-phone #modal .panel.wide{left:0;top:0;transform:none;width:100vw;height:100vh;max-height:100vh;
     border:0;border-radius:0;padding:0;display:flex}
   body.m-phone #modal .panel.wide .set-main{height:100%;min-height:0}
+  body.m-phone #modal .panel.wide>div{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
   body.m-phone .set-cols{flex-direction:column;min-height:0;flex:1}
   body.m-phone .set-nav{width:100%;display:flex;align-items:center;gap:4px;overflow-x:auto;flex:none;
     padding:8px;border-right:0;border-bottom:1px solid var(--hairline)}
   body.m-phone .set-title{display:none}
   body.m-phone .set-nav input{display:none}
   body.m-phone .set-nav button{width:auto;flex:none;white-space:nowrap;padding:7px 11px;margin:0;font-size:13px}
-  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px}
+  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px;min-height:0;overflow-y:auto;touch-action:pan-y}
+  body.m-phone .set-main,body.m-phone .set-cols{overflow:hidden}
   body.m-phone .set-foot{position:sticky;bottom:0;background:var(--canvas);
     padding:8px 12px 12px}
   body.m-phone .f-grid{grid-template-columns:1fr}
@@ -1293,6 +1298,7 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
       <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
+      <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
     </header>
 
     <div id="msg-scroll">
@@ -1325,9 +1331,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
           <div class="cwrap">
             <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
-          </div>
-          <div class="czone cz-r2">
-            <button id="btn-sesscfg" class="icon-btn" title="会话参数（发送前也可调：模型/提示词/温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
           </div>
         </div>
         <div id="cmp-pop" hidden></div>
@@ -1494,7 +1497,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.11';
+var APP_VER = 'v0.5.12';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1938,6 +1941,11 @@ var saveCfg = debounce(function(){
       localStorage.setItem(LS_CFG, JSON.stringify(copy));
     } else {
       localStorage.setItem(LS_CFG, JSON.stringify(S.cfg)); // 浏览器模式（无宿主桥）：明文回退，已在启动时警告
+    }
+  } catch (e) {}
+  try {
+    if (window.__SC_ANDROID__ && window.AndroidBridge && S.cfg.apiKey){
+      AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '' }));
     }
   } catch (e) {}
 }, 300);
@@ -15293,6 +15301,18 @@ $('#sidebar').addEventListener('click', function(e){
       UI.renderChips();
     }
   });
+  /* 顶栏的会话参数按钮不在 #composer 内，单独绑定（v0.5.12 从输入框右下角挪到工作区右侧） */
+  var _sessBtnTop = $('#btn-sesscfg');
+  if (_sessBtnTop) _sessBtnTop.addEventListener('click', function(){
+    var cs = curSession();
+    UI.sessCfgDlg(cs || null);
+  });
+  var _setBtnMobile = $('#btn-m-settings');
+  if (_setBtnMobile) _setBtnMobile.addEventListener('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    UI.openSettings();
+  });
   var _draftSid = null;
     var saveDraft = debounce(function(){ var dsid = _draftSid || S.sid; if (dsid) S.drafts[dsid] = $('#input').value; }, 400); // v0.3.0：锁住触发时的会话
   $('#composer').addEventListener('input', function(e){
@@ -20258,6 +20278,12 @@ try {
   }
 } catch (e) {}
 try { window.NET = NET; } catch (e) {} // Soul：记忆巩固/落盘要用 NET.chatOnce / NET.mem
+/* Android：把主应用的连接配置同步给原生截图问答，避免两套 Key */
+try {
+  if (window.__SC_ANDROID__ && window.AndroidBridge && S.cfg.apiKey){
+    AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '' }));
+  }
+} catch (e) {}
 try { if (window.SOUL && SOUL.hydrate) SOUL.hydrate(); } catch (e) {} // S7：宿主内把磁盘记忆读回（文件优先）
 try { if (window.SOUL && SOUL.tick){ setTimeout(function(){ SOUL.tick(); }, 4000); setInterval(function(){ SOUL.tick(); }, 60000); } } catch (e) {} // S6：到点提醒（页面开着才跑）
 try { if (window.SOUL && SOUL.maybeDream) setTimeout(function(){ SOUL.maybeDream(); }, 12000); } catch (e) {} // S4：每日自动巩固

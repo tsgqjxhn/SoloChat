@@ -3350,6 +3350,18 @@ $('#sidebar').addEventListener('click', function(e){
       UI.renderChips();
     }
   });
+  /* 顶栏的会话参数按钮不在 #composer 内，单独绑定（v0.5.12 从输入框右下角挪到工作区右侧） */
+  var _sessBtnTop = $('#btn-sesscfg');
+  if (_sessBtnTop) _sessBtnTop.addEventListener('click', function(){
+    var cs = curSession();
+    UI.sessCfgDlg(cs || null);
+  });
+  var _setBtnMobile = $('#btn-m-settings');
+  if (_setBtnMobile) _setBtnMobile.addEventListener('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    UI.openSettings();
+  });
   var _draftSid = null;
     var saveDraft = debounce(function(){ var dsid = _draftSid || S.sid; if (dsid) S.drafts[dsid] = $('#input').value; }, 400); // v0.3.0：锁住触发时的会话
   $('#composer').addEventListener('input', function(e){

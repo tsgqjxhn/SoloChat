@@ -1184,6 +1184,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   #btn-ws{display:none}
   .m-set-btn{display:none}
   body.m-phone #btn-ws{display:inline-flex;margin-left:auto}
+  body.m-phone #btn-sesscfg{margin-left:4px}
+  body.m-phone.m-chat #btn-sesscfg{margin-left:auto}
   body.m-phone.m-chat #btn-ws{display:none}
   body.m-phone:not(.m-chat) .m-set-btn{display:inline-flex;order:-1}
   body.m-phone #empty .e-temp{right:8px;top:4px}
@@ -1197,16 +1199,19 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 /* ===== 手机设置全屏（Android 0.3.1） ===== */
 @media (max-width:860px){
   body.m-phone #app{height:100vh}
+  body.m-phone #modal .panel{max-height:90vh;overflow-y:auto;overscroll-behavior:contain}
   body.m-phone #modal .panel.wide{left:0;top:0;transform:none;width:100vw;height:100vh;max-height:100vh;
     border:0;border-radius:0;padding:0;display:flex}
   body.m-phone #modal .panel.wide .set-main{height:100%;min-height:0}
+  body.m-phone #modal .panel.wide>div{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
   body.m-phone .set-cols{flex-direction:column;min-height:0;flex:1}
   body.m-phone .set-nav{width:100%;display:flex;align-items:center;gap:4px;overflow-x:auto;flex:none;
     padding:8px;border-right:0;border-bottom:1px solid var(--hairline)}
   body.m-phone .set-title{display:none}
   body.m-phone .set-nav input{display:none}
   body.m-phone .set-nav button{width:auto;flex:none;white-space:nowrap;padding:7px 11px;margin:0;font-size:13px}
-  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px}
+  body.m-phone .set-body{flex:1;max-height:none;padding:14px 14px 20px;min-height:0;overflow-y:auto;touch-action:pan-y}
+  body.m-phone .set-main,body.m-phone .set-cols{overflow:hidden}
   body.m-phone .set-foot{position:sticky;bottom:0;background:var(--canvas);
     padding:8px 12px 12px}
   body.m-phone .f-grid{grid-template-columns:1fr}

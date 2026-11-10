@@ -299,27 +299,42 @@ public class BubbleService extends Service {
         int sheetH = dm.heightPixels / 2;
 
         FrameLayout root = new FrameLayout(this);
-        GradientDrawable sheetBg = new GradientDrawable();
-        sheetBg.setColor(0xFFFFFFFF);
-        sheetBg.setCornerRadii(new float[]{dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
-        root.setBackground(sheetBg);
+        root.setBackgroundColor(0x00000000);
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(12), dp(16), dp(12));
+        card.setPadding(dp(20), dp(8), dp(20), dp(16));
+        GradientDrawable sheetBg = new GradientDrawable();
+        sheetBg.setColor(0xFFFFFFFF);
+        sheetBg.setCornerRadii(new float[]{dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
+        card.setBackground(sheetBg);
+        card.setElevation(dp(10));
+
+        // 顶部拖拽条
+        View handle = new View(this);
+        GradientDrawable hb = new GradientDrawable();
+        hb.setColor(0xFFDDDDDD);
+        hb.setCornerRadius(dp(2));
+        handle.setBackground(hb);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(40), dp(4));
+        hlp.gravity = Gravity.CENTER_HORIZONTAL;
+        hlp.topMargin = dp(2);
+        hlp.bottomMargin = dp(10);
+        card.addView(handle, hlp);
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText("截图已加入队列 · 未发送（不会存相册）");
+        title.setText("截图已加入队列");
         title.setTextColor(0xFF111111);
-        title.setTextSize(13);
+        title.setTextSize(16);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView cancel = new TextView(this);
         cancel.setText("取消");
-        cancel.setTextColor(0xFF666666);
-        cancel.setTextSize(13);
+        cancel.setTextColor(0xFF2F6DF6);
+        cancel.setTextSize(14);
         cancel.setPadding(dp(10), dp(6), dp(4), dp(6));
         titleRow.addView(cancel);
         card.addView(titleRow);
@@ -338,25 +353,38 @@ public class BubbleService extends Service {
         thumb.setClipToOutline(true);
         queueRow.addView(thumb, new LinearLayout.LayoutParams(dp(54), dp(96)));
         TextView qinfo = new TextView(this);
-        qinfo.setText("整屏截图 · 待发送\n点锁固定弹窗，可滑动底层题目");
+        qinfo.setText("整屏截图 · 待发送\n不会自动发送 · 不存相册\n锁定后可滑动底层题目");
         qinfo.setTextSize(12);
         qinfo.setTextColor(0xFF666666);
-        qinfo.setPadding(dp(10), 0, 0, 0);
+        qinfo.setLineSpacing(dp(2), 1f);
+        qinfo.setPadding(dp(12), 0, 0, 0);
         queueRow.addView(qinfo, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(queueRow);
 
-        LinearLayout inputRow = new LinearLayout(this);
-        inputRow.setOrientation(LinearLayout.HORIZONTAL);
-        inputRow.setGravity(Gravity.CENTER_VERTICAL);
-        inputRow.setPadding(0, dp(8), 0, 0);
+        View gap = new View(this);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(1, dp(14));
+        card.addView(gap, glp);
+
+        LinearLayout inputBox = new LinearLayout(this);
+        inputBox.setOrientation(LinearLayout.HORIZONTAL);
+        inputBox.setGravity(Gravity.CENTER_VERTICAL);
+        inputBox.setPadding(dp(6), dp(2), dp(2), dp(2));
+        GradientDrawable ib = new GradientDrawable();
+        ib.setColor(0xFFF4F5F7);
+        ib.setCornerRadius(dp(14));
+        inputBox.setBackground(ib);
 
         final EditText input = new EditText(this);
-        input.setText(Prefs.prompt(this));
+        input.setText("");
+        input.setHint("补充说明（选填）");
+        input.setHintTextColor(0xFF9AA0A6);
         input.setTextSize(15);
         input.setMinLines(1);
         input.setMaxLines(2);
         input.setTextColor(0xFF111111);
-        inputRow.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
+        input.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        input.setPadding(dp(10), dp(8), dp(6), dp(8));
+        inputBox.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
 
         final boolean[] locked = {false};
         final ImageButton lock = new ImageButton(this);
@@ -364,16 +392,23 @@ public class BubbleService extends Service {
         lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
         lock.setPadding(dp(8), dp(8), dp(8), dp(8));
         lock.setContentDescription("固定弹窗；固定后可滑动底层题目");
-        inputRow.addView(lock, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        inputBox.addView(lock, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        card.addView(inputBox, new LinearLayout.LayoutParams(-1, -2));
 
         Button send = new Button(this);
         send.setText("发送");
-        inputRow.addView(send, new LinearLayout.LayoutParams(-2, -2));
-        card.addView(inputRow);
+        send.setTextSize(15);
+        send.setTextColor(android.graphics.Color.WHITE);
+        send.setAllCaps(false);
+        GradientDrawable sb = new GradientDrawable();
+        sb.setColor(0xFF2F6DF6);
+        sb.setCornerRadius(dp(14));
+        send.setBackground(sb);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(48));
+        slp.topMargin = dp(10);
+        card.addView(send, slp);
 
-        ScrollView sc = new ScrollView(this);
-        sc.addView(card);
-        root.addView(sc, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
 
         cancel.setOnClickListener(v -> { removeOverlay(); showBubble(); });
         lock.setOnClickListener(v -> {
@@ -389,6 +424,12 @@ public class BubbleService extends Service {
             return false;
         });
         send.setOnClickListener(v -> {
+            android.util.Log.d("SOLO", "sheet send clicked keyLen=" + Prefs.key(this).length());
+            if (Prefs.key(this).isEmpty()) {
+                toast("还没配置 API Key，先填连接配置");
+                startActivity(new Intent(this, SettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return;
+            }
             String q = input.getText().toString().trim();
             if (q.isEmpty()) q = Prefs.prompt(this);
             send.setEnabled(false);
@@ -421,37 +462,77 @@ public class BubbleService extends Service {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setPadding(dp(20), dp(8), dp(20), dp(16));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xFFFFFFFF);
-        bg.setCornerRadius(dp(14));
+        bg.setCornerRadius(dp(20));
         card.setBackground(bg);
 
+        View handle = new View(this);
+        GradientDrawable hb = new GradientDrawable();
+        hb.setColor(0xFFDDDDDD);
+        hb.setCornerRadius(dp(2));
+        handle.setBackground(hb);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(40), dp(4));
+        hlp.gravity = Gravity.CENTER_HORIZONTAL;
+        hlp.topMargin = dp(2);
+        hlp.bottomMargin = dp(10);
+        card.addView(handle, hlp);
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
         title.setText("回答");
         title.setTextColor(0xFF111111);
-        title.setTextSize(14);
-        card.addView(title);
+        title.setTextSize(16);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView closeX = new TextView(this);
+        closeX.setText("关闭");
+        closeX.setTextColor(0xFF2F6DF6);
+        closeX.setTextSize(14);
+        closeX.setPadding(dp(8), dp(4), 0, dp(4));
+        titleRow.addView(closeX);
+        card.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
 
         ScrollView sc = new ScrollView(this);
         TextView body = new TextView(this);
         body.setText(text);
         body.setTextSize(15);
-        body.setTextColor(0xFF111111);
+        body.setTextColor(0xFF222222);
+        body.setLineSpacing(dp(4), 1f);
         body.setTextIsSelectable(true);
+        body.setMaxHeight(dp(360));
         sc.addView(body);
-        card.addView(sc, new LinearLayout.LayoutParams(-1, dp(300)));
+        LinearLayout.LayoutParams scp = new LinearLayout.LayoutParams(-1, -2);
+        scp.topMargin = dp(8);
+        card.addView(sc, scp);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        Button copy = new Button(this); copy.setText("复制");
-        Button close = new Button(this); close.setText("关闭");
-        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(close, new LinearLayout.LayoutParams(0, -2, 1));
-        card.addView(row);
+        Button copy = new Button(this); copy.setText("复制"); copy.setAllCaps(false);
+        copy.setTextColor(0xFF2F6DF6); copy.setTextSize(14);
+        GradientDrawable cb = new GradientDrawable();
+        cb.setColor(0xFFF4F5F7); cb.setCornerRadius(dp(12));
+        copy.setBackground(cb);
+        Button close = new Button(this); close.setText("关闭"); close.setAllCaps(false);
+        close.setTextColor(android.graphics.Color.WHITE); close.setTextSize(14);
+        GradientDrawable db = new GradientDrawable();
+        db.setColor(0xFF2F6DF6); db.setCornerRadius(dp(12));
+        close.setBackground(db);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        blp.rightMargin = dp(5);
+        row.addView(copy, blp);
+        LinearLayout.LayoutParams blp2 = new LinearLayout.LayoutParams(0, dp(46), 1);
+        blp2.leftMargin = dp(5);
+        row.addView(close, blp2);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+        rlp.topMargin = dp(12);
+        card.addView(row, rlp);
 
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
-        clp.setMargins(dp(18), 0, dp(18), 0);
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        clp.setMargins(dp(12), 0, dp(12), dp(18));
         root.addView(card, clp);
 
         copy.setOnClickListener(v -> {
@@ -459,6 +540,7 @@ public class BubbleService extends Service {
             cm.setPrimaryClip(android.content.ClipData.newPlainText("SoloChat", text));
             toast("已复制");
         });
+        closeX.setOnClickListener(v -> { removeOverlay(); showBubble(); });
         close.setOnClickListener(v -> { removeOverlay(); showBubble(); });
 
         overlay = root;
