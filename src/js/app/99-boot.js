@@ -29,12 +29,14 @@ document.body.classList.toggle('sb-collapsed', S.cfg.sbHidden !== false); // v1.
 /* Android 0.3.0：窄屏默认收起侧栏，左上角 ☰ 呼出；桌面布局不受影响 */
 (function(){
   try {
-    if (!window.matchMedia || !matchMedia('(max-width:860px)').matches) return;
+    if (!window.matchMedia || !matchMedia('(max-width:860px), (max-height:520px) and (pointer:coarse)').matches) return;
     document.body.classList.add('m-phone', 'sb-collapsed');
     var b = document.createElement('button');
     b.id = 'm-menu'; b.type = 'button'; b.setAttribute('aria-label', '会话列表'); b.textContent = '☰';
-    b.addEventListener('click', function(e){ e.stopPropagation(); document.body.classList.remove('sb-collapsed'); });
+    b.addEventListener('click', function(e){ e.stopPropagation(); document.body.classList.toggle('sb-collapsed'); });
     document.body.appendChild(b);
+    var sbq = document.getElementById('sb-q');
+    if (sbq) sbq.placeholder = '搜索会话'; /* 手机无 Ctrl+K，去掉桌面快捷键提示 */
     document.addEventListener('click', function(e){
       if (document.body.classList.contains('sb-collapsed')) return;
       if (e.target.closest && (e.target.closest('#sidebar') || e.target === b)) return;

@@ -1695,6 +1695,7 @@ function sendMessage(){
       var ps = S.cfg.presets || [];
       selM.textContent = '';
       if (!ps.length) selM.appendChild(el('option', { value: '', text: '选择模型' }));
+      if (ps.length && !_effM) selM.appendChild(el('option', { value: '', text: '选择模型', selected: '' }));
       for (var j = 0; j < ps.length; j++){
         var pg = ps[j], og = el('optgroup', { label: pg.name || '配置' });
         var ms = (pg.models && pg.models.length) ? pg.models : (pg.currentModel ? [pg.currentModel] : []);
@@ -2995,6 +2996,11 @@ function sendMessage(){
       if (sp){ sp.hidden = !n; sp.textContent = String(n); }
       bs[b].classList.toggle('on', !!n);
     }
+    var all = 0;
+    for (var kk in ps) if (Object.prototype.hasOwnProperty.call(ps, kk)) all += (ps[kk] || []).length;
+    var ab = document.getElementById('pk-all-badge'), abtn = document.getElementById('btn-pk-all');
+    if (ab){ ab.hidden = !all; ab.textContent = String(all); }
+    if (abtn) abtn.classList.toggle('on', !!all);
   }
   function toggle(kind, id){
     var ps = picks(); var arr = (ps[kind] || []).slice(); var at = arr.indexOf(id);
@@ -3355,6 +3361,18 @@ $('#sidebar').addEventListener('click', function(e){
   if (_sessBtnTop) _sessBtnTop.addEventListener('click', function(){
     var cs = curSession();
     UI.sessCfgDlg(cs || null);
+  });
+  /* 手机端单一「本轮扩展」按钮：插入 / 唤起统一扩展面板 */
+  var _pkAll = $('#btn-pk-all');
+  if (_pkAll) _pkAll.addEventListener('click', function(e){
+    e.preventDefault(); e.stopPropagation();
+    var pops = document.querySelectorAll('.pk-pop');
+    for (var pi = 0; pi < pops.length; pi++) pops[pi].remove();
+    var _inp = document.getElementById('input');
+    if (!_inp) return;
+    _inp.value = '/';
+    _inp.dispatchEvent(new Event('input', { bubbles: true }));
+    _inp.focus();
   });
   var _setBtnMobile = $('#btn-m-settings');
   if (_setBtnMobile) _setBtnMobile.addEventListener('click', function(e){

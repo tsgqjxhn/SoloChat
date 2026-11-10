@@ -215,7 +215,12 @@ function bindWeb(){
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
     var sid = (typeof S !== 'undefined' && S.sid) || null;
-    if (!sid){ list.textContent = ''; if (cnt) cnt.textContent = ''; return; }
+    if (!sid){
+      list.textContent = '';
+      if (cnt) cnt.textContent = '';
+      list.appendChild(el('div', { class: 'hint', text: '还没有工作区产物。先在 Work/Agent 里生成文件，或打开一个有产物的会话。' }));
+      return;
+    }
     DB.workfsBySid(sid).then(function(fs){
     var _tot = 0; for (var _fi = 0; _fi < fs.length; _fi++) _tot += (fs[_fi].size || String(fs[_fi].content || '').length);
     /* v1.1.19：顶栏空间留给刷新/最大化/关闭，只显示文件数；体积放进 tooltip。 */

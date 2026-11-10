@@ -13,7 +13,7 @@
   } catch (e) {}
 })();
 </script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6df6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
@@ -64,7 +64,7 @@
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
       <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
-      <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-gear"/></svg></button>
+      <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-tune"/></svg></button>
     </header>
 
     <div id="msg-scroll">
@@ -92,6 +92,7 @@
         <button class="icon-btn pk-btn" data-pk="tool" title="工具：本轮指定使用哪些"><svg class="ic"><use href="#i-x-tool"/></svg><span class="pk-badge" hidden></span></button>
         <button class="icon-btn pk-btn" data-pk="prompt" title="提示词：本轮指定使用哪些"><svg class="ic"><use href="#i-x-prompt"/></svg><span class="pk-badge" hidden></span></button>
         <button class="icon-btn pk-btn" data-pk="mcp" title="MCP：本轮指定使用哪些"><svg class="ic"><use href="#i-x-mcp"/></svg><span class="pk-badge" hidden></span></button>
+        <button id="btn-pk-all" class="icon-btn m-pk-all" title="本轮扩展：智能体 / 插件 / 技能 / 工具 / 提示词 / MCP"><svg class="ic"><use href="#i-x-plugin"/></svg><span class="pk-badge" id="pk-all-badge" hidden></span></button>
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
