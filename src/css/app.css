@@ -773,6 +773,10 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
 .pw-eye:hover{background:var(--hover);color:var(--fg)}
 .pw-eye .ic{width:17px;height:17px}
+/* v0.5.17：手机 ↔ 电脑 配对码 */
+.pair-box{margin:6px 0 4px}
+.pair-code{font:700 28px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:6px;color:var(--ink);padding:6px 0}
+.pair-addr{font:13px/1.6 ui-monospace,Menlo,Consolas,monospace;color:var(--body);word-break:break-all}
 .f-row textarea{resize:vertical;min-height:64px;font-family:var(--font-sans)}
 .f-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 /* 模型获取多选清单（v1.6）：勾选后填入模型池 */

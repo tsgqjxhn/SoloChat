@@ -181,6 +181,10 @@ function fetchStream(opt){
         if (!d.ok) UI.toast('全局热键注册失败：' + d.combo + '（可能被其它程序占用）', true);
         return;
       }
+      if (d.t === 'pair.event'){
+        try { window.dispatchEvent(new CustomEvent('sc-pair', { detail: d })); } catch (e) {}
+        return;
+      }
       var p = d.id && bridge.pend[d.id];
       if (!p) return;
       if (d.t === 'http.chunk') p.onChunk(d.data);
@@ -210,6 +214,8 @@ function fetchStream(opt){
       else if (d.t === 'fs.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '文件操作失败')); }
       else if (d.t === 'mem.done'){ delete bridge.pend[d.id]; p.onDone(d.data != null ? d.data : d); } /* v0.5.4：Soul 记忆落盘回包；Android 桥是扁平回包 */
       else if (d.t === 'mem.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '记忆操作失败')); }
+      else if (d.t === 'pair.done'){ delete bridge.pend[d.id]; var pd = null; try { pd = JSON.parse(d.data); } catch(e){ pd = d.data; } p.resolve(pd || {}); }
+      else if (d.t === 'pair.error'){ delete bridge.pend[d.id]; p.reject(new Error(d.message || '配对操作失败')); }
       else if (d.t === 'save.done'){ delete bridge.pend[d.id]; p.onDone(d); }
       else if (d.t === 'save.error'){ delete bridge.pend[d.id]; p.onError(new Error(d.message || '保存失败')); }
       else if (d.t === 'cmd.done'){
@@ -492,6 +498,19 @@ function fetchStream(opt){
       bridge.pend[id] = { onChunk: function(){}, onDone: res, onError: rej };
       bridge.send({ t: 'mem', id: id, op: op || 'load', name: name || '', text: text == null ? '' : text });
       setTimeout(function(){ if (bridge.pend[id]){ delete bridge.pend[id]; rej(new Error('记忆操作超时')); } }, 15000);
+    });
+  }
+
+  /* v0.5.17：手机 ↔ 电脑 配对服务（桌面宿主） */
+  function pairCall(op, data){
+    return new Promise(function(res, rej){
+      if (!bridge.ok){ rej(new Error('配对需要桌面宿主')); return; }
+      var id = 'pp' + (++bridge.seq);
+      bridge.pend[id] = { resolve: res, reject: rej };
+      var msg = { t: 'pair', id: id, op: op || 'status' };
+      if (data) for (var k in data) if (Object.prototype.hasOwnProperty.call(data, k)) msg[k] = data[k];
+      bridge.send(msg);
+      setTimeout(function(){ if (bridge.pend[id]){ delete bridge.pend[id]; rej(new Error('配对操作超时')); } }, 15000);
     });
   }
 
@@ -1761,6 +1780,7 @@ function fetchStream(opt){
   bridge: bridge,
     fs: fsCall,
     mem: memCall,
+    pair: pairCall,
     saveFile: function(name, text, mime){
       return new Promise(function(res, rej){
         if (!bridge.ok){ rej(new Error('保存文件需要 SoloChat 宿主')); return; }

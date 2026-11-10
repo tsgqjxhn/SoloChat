@@ -116,6 +116,7 @@ namespace SoloChatHost
         readonly string appDir;
         WebView2 wv;
         WebView2 webPanel;   // v0.9.8：右侧栏内嵌浏览器（独立控件，不受 X-Frame-Options 限制）
+        PairServer pairSrv;  // v0.5.17：手机 ↔ 电脑 配对/传输
         string webPendingUrl = ""; // v1.1.8：初始化期间的最近一次 URL，避免开第二个网页被第一个覆盖
         bool webPanelWanted;       // v1.1.8：页面是否仍要求显示（hide 后迟到的初始化不能再把它弹出来）
         Rectangle webPanelRect;    // v1.29：记住最后一次布局，read/act 需要重新显示时恢复位置
@@ -730,6 +731,12 @@ namespace SoloChatHost
                         var idCopy = id;
                         var reqCopy = root.Clone();
                         Task.Run(() => RunFsAsync(fsOp, reqCopy, idCopy));
+                    }
+                    else if (t == "pair") /* v0.5.17：手机 ↔ 电脑 配对/传输 */
+                    {
+                        var idCopyP = id;
+                        var reqCopyP = root.Clone();
+                        Task.Run(() => RunPairAsync(reqCopyP, idCopyP));
                     }
                     else if (t == "mem") /* v0.5.4：Soul 记忆落盘（%USERPROFILE%\SoloChat\memory） */
                     {
@@ -2699,6 +2706,49 @@ namespace SoloChatHost
         
         /* v0.5.4：Soul 记忆落盘 —— 只认 USER/MEMORY/DREAMS.md，固定目录 %USERPROFILE%\SoloChat\memory */
         string MemRoot { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SoloChat", "memory"); } }
+        void RunPairAsync(JsonElement req, string id)
+        {
+            try
+            {
+                string op = req.TryGetProperty("op", out JsonElement opEl) ? (opEl.GetString() ?? "status") : "status";
+                string cfg = req.TryGetProperty("config", out JsonElement cfgEl) ? (cfgEl.GetString() ?? "") : "";
+                string mode = req.TryGetProperty("mode", out JsonElement modeEl) ? (modeEl.GetString() ?? "union") : "union";
+                if (op == "start")
+                {
+                    if (pairSrv == null) pairSrv = new PairServer();
+                    pairSrv.Start(8788, msg => { try { PostRaw(msg); } catch { } });
+                    if (!string.IsNullOrEmpty(cfg)) pairSrv.SetConfig(cfg, mode);
+                    var data = JsonSerializer.Serialize(new { ok = true, code = pairSrv.Code, port = pairSrv.Port, ips = pairSrv.LanIps() });
+                    PostFs(id, "pair.done", data, null);
+                    return;
+                }
+                if (op == "stop")
+                {
+                    if (pairSrv != null) pairSrv.Stop();
+                    PostFs(id, "pair.done", "{\"ok\":true,\"running\":false}", null);
+                    return;
+                }
+                if (op == "setcfg")
+                {
+                    if (pairSrv == null || !pairSrv.Running) throw new Exception("配对服务未开启");
+                    pairSrv.SetConfig(cfg, mode);
+                    PostFs(id, "pair.done", "{\"ok\":true}", null);
+                    return;
+                }
+                if (pairSrv == null || !pairSrv.Running)
+                {
+                    PostFs(id, "pair.done", "{\"ok\":true,\"running\":false}", null);
+                    return;
+                }
+                var st = JsonSerializer.Serialize(new { ok = true, running = true, code = pairSrv.Code, port = pairSrv.Port, ips = pairSrv.LanIps() });
+                PostFs(id, "pair.done", st, null);
+            }
+            catch (Exception ex)
+            {
+                PostFs(id, "pair.error", null, ex.Message);
+            }
+        }
+
         void MemOp(JsonElement req, string id)
         {
             try

@@ -2937,6 +2937,45 @@ function sendMessage(){
     });
   }
 
+  /* v0.5.17：配对收到对象后直接应用，不经过文件选择器 */
+  function cfgSyncApply(o, mode){
+    if (!o || !o.cfg) throw new Error('配置格式不正确');
+    mode = (mode === 'remote') ? 'remote' : 'union';
+    cfgSyncRemote = JSON.parse(JSON.stringify(o.cfg));
+    var skip = /(apiKey|token|secret|password|^presets$|^activePreset$|^maxTokens$)/i;
+    for (var k in cfgSyncRemote){
+      if (skip.test(k)) continue;
+      if (mode === 'remote') S.cfg[k] = cfgSyncRemote[k];
+      else if (S.cfg[k] == null || S.cfg[k] === '' || (Array.isArray(S.cfg[k]) && !S.cfg[k].length)) S.cfg[k] = cfgSyncRemote[k];
+    }
+    if (mode === 'union'){
+      var s1 = (S.cfg.models || []).slice();
+      (cfgSyncRemote.models || []).forEach(function(m){ if (s1.indexOf(m) < 0) s1.push(m); });
+      S.cfg.models = s1;
+      ['groups', 'prompts'].forEach(function(key){
+        var cur = S.cfg[key] || [], rem = cfgSyncRemote[key] || [];
+        rem.forEach(function(it){
+          var id = it && (it.id || it.name);
+          var hit = cur.some(function(x){ return x && (x.id || x.name) === id; });
+          if (!hit) cur.push(it);
+        });
+        S.cfg[key] = cur;
+      });
+      if (cfgSyncRemote.modelMeta && typeof cfgSyncRemote.modelMeta === 'object'){
+        S.cfg.modelMeta = S.cfg.modelMeta || {};
+        for (var mk in cfgSyncRemote.modelMeta) if (!S.cfg.modelMeta[mk]) S.cfg.modelMeta[mk] = cfgSyncRemote.modelMeta[mk];
+      }
+    }
+    S.cfg.presets = cfgSyncMergePresets(mode);
+    var want = S.cfg.activePreset, act = null;
+    for (var i = 0; i < S.cfg.presets.length; i++) if (S.cfg.presets[i].id === want) act = S.cfg.presets[i];
+    if (!act) act = S.cfg.presets[0] || null;
+    if (act){ S.cfg.activePreset = act.id; S.cfg.apiKey = act.apiKey || ''; }
+    saveCfg(); applyTheme(); applyAccent(); applyFontScale();
+    renderSessions(); renderMsgs(); renderCtxRing(); renderComposerCtl();
+    return true;
+  }
+
   /* ---------- #10 诊断包 ---------- */
   function doExportDiag(){
     var L = [];
@@ -2968,6 +3007,7 @@ function sendMessage(){
   return {
     AP: AP, applyPreset: applyPreset, presetField: presetField, applyProv: applyProv,
     presetModels: presetModels, applyCtx: applyCtx, presetBtn: presetBtn, promptCard: promptCard,
+    cfgSyncSnapshot: cfgSyncSnapshot, cfgSyncApply: cfgSyncApply,
     modelPicker: modelPicker, pickerAct: pickerAct,
     init: function(){
       $list = $('#session-list'); $scroll = $('#msg-scroll'); $empty = $('#empty');
