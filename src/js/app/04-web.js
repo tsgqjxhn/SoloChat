@@ -1550,6 +1550,11 @@ var UI = (function(){
       p.authType = cat.auth || 'bearer';
       p.protocol = cat.protocol || 'openai-chat';
       p.quirks = JSON.parse(JSON.stringify(cat.quirks || {}));
+      /* v0.5.13：切供应商必须清掉上一家的路径覆盖，否则会把 /v1/chat/completions 叠到
+         NVIDIA 的 /v1 后面，拼成 /v1/v1/chat/completions（404 page not found）。 */
+      p.chatPath = cat.chatPath || '';
+      p.modelsPath = cat.modelsPath || '';
+      p.extraHeaders = null;
       /* v0.5.8：换到不同域名 = 换供应商，旧 Key 不能跟着走；Key 前缀明显不属于新供应商也清掉 */
       var newHost = hostOf(p.baseURL);
       var kv0 = keyVendor(p.apiKey), nv0 = urlVendor(p.baseURL);

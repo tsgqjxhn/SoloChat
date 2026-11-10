@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.13';
+var APP_VER = 'v0.5.14';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1085,9 +1085,10 @@ var NET = (function(){
   }
 
   function normBase(u){
-    /* 容错：去掉尾部斜杠；用户误粘完整端点时剥掉 /chat/completions；
+    /* 容错：去掉尾部斜杠；用户误粘完整端点时剥掉 /chat/completions（含 query）或 /models；
        已含版本段（/v1~/v9，如火山方舟 /api/v3）则原样使用，否则补 /v1 */
-    u = (u || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
+    u = (u || '').trim().replace(/\/+$/, '');
+    u = u.replace(/\/chat\/completions(?:\?.*)?$/i, '').replace(/\/models(?:\?.*)?$/i, '');
     if (!u) return u;
     /* v0.4.x：Azure deployments / *.openai.azure.com 不补 /v1（P1-6） */
     if (isAzure()) return u;
@@ -1494,6 +1495,8 @@ var NET = (function(){
     }
     var p = kind === 'models' ? (S.cfg.modelsPath || '/models')
           : (S.cfg.chatPath || (PROTOCOLS[proto] ? PROTOCOLS[proto].path : '/chat/completions'));
+    /* v0.5.13：base 已带 /v1 时，路径里再带 /v1 会拼成 /v1/v1/...；去掉重复版本段 */
+    if (/\/(v\d+(?:beta|alpha)?)$/i.test(base)) p = p.replace(/^\/v\d+(?:beta|alpha)?(?=\/)/i, '');
     if (q.queryVersion && p.indexOf('api-version=') < 0)
       p += (p.indexOf('?') >= 0 ? '&' : '?') + 'api-version=' + encodeURIComponent(q.queryVersion);
     return base + p;

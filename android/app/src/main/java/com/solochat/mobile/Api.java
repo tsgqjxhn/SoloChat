@@ -43,7 +43,7 @@ public class Api {
                         .put("max_tokens", 1200)
                         .put("temperature", 0.2);
 
-                HttpURLConnection c = (HttpURLConnection) new URL(Prefs.base(ctx) + "/chat/completions").openConnection();
+                HttpURLConnection c = (HttpURLConnection) new URL(chatUrl(ctx)).openConnection();
                 c.setRequestMethod("POST");
                 c.setConnectTimeout(20000);
                 c.setReadTimeout(120000);
@@ -75,6 +75,14 @@ public class Api {
                 cb.fail(String.valueOf(e.getMessage()));
             }
         }).start();
+    }
+
+    /** 归一化 Base URL：去尾斜杠/误粘的 /chat/completions；没有版本段就补 /v1，避免 /v1/v1/... 或漏 /v1。 */
+    private static String chatUrl(Context ctx) {
+        String base = String.valueOf(Prefs.base(ctx) == null ? "" : Prefs.base(ctx)).trim();
+        base = base.replaceAll("/+$", "").replaceAll("(?i)/chat/completions(?:\\?.*)?$", "");
+        if (!base.matches("(?i).*/v\\d+(?:beta|alpha)?$")) base += "/v1";
+        return base + "/chat/completions";
     }
 
     private static Bitmap scale(Bitmap b, int max) {

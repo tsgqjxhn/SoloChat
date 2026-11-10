@@ -4,10 +4,11 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.3.4**（versionCode 7，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.3.5**（versionCode 8，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **NVIDIA 地址修复**：Base URL 归一化时只保留一个 `/v1`；切换供应商清空上一家的 `chatPath/modelsPath`，避免 `/v1/v1/chat/completions` 404；原生截图问答同样归一化 URL。
 - **API Key 小眼睛**：设置页所有密码型 Key/Secret 输入框右侧都有眼睛按钮，点击可在明文/密文之间切换；只改输入框类型，不额外存储。
 - **手机布局**：窄屏自动收起侧栏（左上角 ☰ 呼出）；Work/Agent 工具条最左有设置齿轮，顶栏最右有工作区入口（全屏抽屉）；会话参数齿轮在顶栏工作区右侧，底部不再为它留一整行；主页面右上角「临时会话」；设置页全屏（顶部横向分类、单列内容）；输入框默认一行，主页面最多四行，下拉面板最多两行。
 - **悬浮球**：蓝色圆底 + 桌面版白色气泡，点球直接截当前整屏，拖动贴边；App 在前台时自动隐藏，回到桌面/其他 App 再出现。
@@ -47,7 +48,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.3.4.apk`（431,618 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.4.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.3.5.apk`（432,010 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.5.apk`）
 
 ## 使用
 
