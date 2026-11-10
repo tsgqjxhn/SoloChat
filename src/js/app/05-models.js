@@ -893,6 +893,25 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     });
 
     /* —— 页⑤ 提示词 —— */
+    /* v0.5.13：所有 password 输入加「小眼睛」，可临时明文查看 API Key（不写入任何额外存储） */
+    Array.prototype.forEach.call(body.querySelectorAll('input[type=password]'), function(inp){
+      if (inp.parentNode && inp.parentNode.classList && inp.parentNode.classList.contains('pw-wrap')) return;
+      var wrap = el('div', { class: 'pw-wrap' });
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+      var eye = el('button', { class: 'pw-eye', type: 'button', title: '显示 API Key', 'aria-label': '显示 API Key' }, [icon('eye')]);
+      wrap.appendChild(eye);
+      eye.addEventListener('click', function(e){
+        e.preventDefault();
+        var show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        eye.textContent = '';
+        eye.appendChild(icon(show ? 'eye-off' : 'eye'));
+        eye.title = show ? '隐藏 API Key' : '显示 API Key';
+        eye.setAttribute('aria-label', eye.title);
+        try { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } catch (err) {}
+      });
+    });
     /* v1.18：提示词并入扩展页（智能体/插件/技能/工具/提示词/MCP） */
   function buildPromptPage(p){
     var userBox = el('div'), sysBox = el('div');

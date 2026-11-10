@@ -767,6 +767,12 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:14px;
 }
 .f-in:focus,.f-row textarea:focus,.f-row select:focus{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+/* v0.5.13：API Key 小眼睛 */
+.pw-wrap{position:relative;display:flex;align-items:center;width:100%}
+.pw-wrap .f-in{padding-right:38px}
+.pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
+.pw-eye:hover{background:var(--hover);color:var(--fg)}
+.pw-eye .ic{width:17px;height:17px}
 .f-row textarea{resize:vertical;min-height:64px;font-family:var(--font-sans)}
 .f-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 /* 模型获取多选清单（v1.6）：勾选后填入模型池 */
