@@ -93,7 +93,7 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 ## Android 版（v0.4.0，弹窗模型 / 超时 / 空回答修复）
 
-`dist/SoloChat-Android-0.4.0.apk`（**442,950 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 18）
+`dist/SoloChat-Android-0.4.0.apk`（**442,966 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 18）
 
 - **截图弹窗模型独立配置**：设置 → 连接与模型 → 模型页新增「截图弹窗模型」，可单独选视觉模型，留空跟随当前聊天模型；原生 `Prefs.POPUP_MODEL` 与主应用自动同步。
 - **截图超时修复**：`ImageReader` 改为常驻监听，空闲时持续丢帧，避免队列积满；截图等待延至 5 秒，第二次及后续截图不再频繁超时。

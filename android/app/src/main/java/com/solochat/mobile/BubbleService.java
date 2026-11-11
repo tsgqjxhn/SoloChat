@@ -356,8 +356,7 @@ public class BubbleService extends Service {
         capturing = true;
         drainReader();
         hideBubble();
-        // 常驻 reader 监听会在下一帧到达时接手；先清空 pending 防止旧帧，再开始等待。
-        drainReader();
+        // 只清一次旧帧：放在 hide 之后再 drain 会把隐藏悬浮球产生的唯一新帧吃掉，造成超时。
         capturePending = true;
         ui.removeCallbacks(captureTimeout);
         ui.postDelayed(captureTimeout, 5000);

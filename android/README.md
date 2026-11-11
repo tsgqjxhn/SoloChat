@@ -63,7 +63,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.0.apk`（442,950 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.0.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.0.apk`（442,966 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.0.apk`）
 
 ## 使用
 
