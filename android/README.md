@@ -4,10 +4,12 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.0**（versionCode 14，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.1**（versionCode 15，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **配对凭据持久化**：电脑把配对 token 存到 `%USERPROFILE%\SoloChat\pair-token.txt`，桌面重启/重新开启配对仍沿用；手机 `sc.pair.v1` 也随 APK 更新保留，更新后不需要重新配对或同步。
+- **ResizeObserver 报错修复**：两个 ResizeObserver 回调改到下一帧合并执行，抽屉底边高度去重，消除 `looplimitexceed / ResizeObserver loop limit exceeded`。
 - **投屏授权复用**：首次点悬浮球授权后保留 `MediaProjection`/常驻 `VirtualDisplay`，后续点球直接取帧，不再每次弹「开始录制或投射」；关闭悬浮球或系统收回投屏才失效。
 - **悬浮球开关**：手机「通用设置 → 外观与行为 → 悬浮球截屏提问」可关闭；关闭后悬浮球与常驻通知一起消失。
 - **截图弹窗**：顶部不再有拖拽条和「截图已加入队列」；锁在左上，缩略图 44×60dp，输入框右侧内嵌发送；输入最多 5 行，弹窗最多半屏，回答在 45% 屏高内增长/滚动。
@@ -55,7 +57,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.0.apk`（437,830 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.0.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.1.apk`（438,018 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.1.apk`）
 
 ## 使用
 

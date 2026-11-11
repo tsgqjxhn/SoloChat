@@ -30,6 +30,37 @@ namespace SoloChatHost
         static readonly string[] Names = { "USER.md", "MEMORY.md", "DREAMS.md" };
         static readonly UTF8Encoding Utf8 = new UTF8Encoding(false);
 
+        string TokenPath
+        {
+            get
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SoloChat");
+                Directory.CreateDirectory(dir);
+                return Path.Combine(dir, "pair-token.txt");
+            }
+        }
+
+        /// <summary>token 落盘复用：桌面/手机重启后已配对的手机仍可直接取配置，不必每次重新配对。</summary>
+        string LoadToken()
+        {
+            try
+            {
+                string p = TokenPath;
+                if (File.Exists(p))
+                {
+                    string s = File.ReadAllText(p, Utf8).Trim();
+                    if (s.Length >= 16) return s;
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        void SaveToken(string value)
+        {
+            try { File.WriteAllText(TokenPath, value, Utf8); } catch { }
+        }
+
         public bool Running { get { return listener != null; } }
 
         public void Start(int preferPort, Action<string> onNotify)
@@ -37,7 +68,12 @@ namespace SoloChatHost
             Stop();
             notify = onNotify;
             Code = (new Random(Guid.NewGuid().GetHashCode()).Next(100000, 999999)).ToString();
-            token = Guid.NewGuid().ToString("N");
+            token = LoadToken();
+            if (string.IsNullOrEmpty(token))
+            {
+                token = Guid.NewGuid().ToString("N");
+                SaveToken(token);
+            }
             configJson = "";
             configMode = "union";
             for (int p = preferPort; p < preferPort + 20; p++)

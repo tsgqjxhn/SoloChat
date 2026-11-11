@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.0 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.1 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,21 +85,22 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,388,928 字节**（v0.4.0，FileVersion 0.4.0.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,206,344 字节 / 20,622 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,206,416 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,389,952 字节**（v0.4.1，FileVersion 0.4.1.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,206,885 字节 / 20,637 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,206,957 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
-## Android 版（v0.4.0，悬浮截图/配对/设置收口）
+## Android 版（v0.4.1，悬浮截图/配对/设置收口）
 
-`dist/SoloChat-Android-0.4.0.apk`（**437,830 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 14）
+`dist/SoloChat-Android-0.4.1.apk`（**438,018 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 15）
 
-- **投屏授权只问一次**：首次点悬浮球授权后保留 `MediaProjection` 与常驻 `VirtualDisplay`，之后点球直接取帧；关闭悬浮球或系统收回投屏才失效。去掉了 `ProjectionRequestActivity` 的 `noHistory`，避免系统授权框把透明 Activity 销毁。
+- **配对凭据持久化**：电脑把配对 token 存到 `%USERPROFILE%\SoloChat\pair-token.txt`，重启电脑宿主/重新开启配对后仍沿用同一 token；手机端 `sc.pair.v1` 也随 APK 更新保留，因此更新后不需要重新配对或重新同步。只有卸载 App、清除应用数据或删除 token 文件才需要重配。
+- **ResizeObserver 报错修复**：网页的两个 `ResizeObserver` 回调改为下一帧合并执行，并给抽屉底边高度加去重，消除 `looplimitexceed / ResizeObserver loop limit exceeded`。
+- **投屏授权只问一次**：首次点悬浮球授权后保留 `MediaProjection` 与常驻 `VirtualDisplay`，后续点球直接取帧；关闭悬浮球或系统收回投屏才失效。去掉了 `ProjectionRequestActivity` 的 `noHistory`，避免系统授权框把透明 Activity 销毁。
 - **悬浮球开关**：手机「通用设置 → 外观与行为」增加「悬浮球截屏提问」，关闭后悬浮球和常驻通知一起消失。
 - **截图弹窗**：去掉顶部拖拽条和「截图已加入队列」文字；锁图标移到顶部左侧；缩略图缩到 44×60dp；输入框右侧内嵌「发送」；输入框最多 5 行，弹窗高度最多半屏，回答内容在 45% 屏高内滚动/增长。
 - **配对默认地址**：手机记住上次电脑地址，未填端口自动补 `8788`；配对后仍直接传配置（含 API Key）和 `USER/MEMORY/DREAMS.md`。
-- **手机 UI 收口**、NVIDIA 地址修复、API Key 小眼睛、截图队列/锁语义保持不变。
 - **锁 / 取消**：未锁时点弹窗外关闭并返回原应用；锁定后弹窗固定，可滑动/操作底层题目。
 - **发送**：主应用的 Base/Key/模型自动同步给原生截图问答，解决“配置在聊天里、截图弹窗没 Key 发不出去”；缺 Key 时直接提示并打开连接设置。
 - **滚动**：手机端设置页/会话参数等模态统一 `max-height:90vh + overflow-y:auto`，设置页补全 `min-height:0` 链路，长页面可以滑到底。

@@ -21,6 +21,17 @@ function webRect(){
   return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
 }
 var _webLast = { url: '', x: -1, y: -1, w: -1, h: -1, t: 0 }; // v1.1.8：ResizeObserver/重复 open 去抖
+/* v0.4.1：ResizeObserver 回调改到下一帧，避免回调里改布局触发
+   “ResizeObserver loop limit exceeded”。 */
+function roDefer(fn){
+  var queued = false;
+  return function(){
+    if (queued) return;
+    queued = true;
+    var run = function(){ queued = false; try { fn(); } catch (e) {} };
+    if (window.requestAnimationFrame) requestAnimationFrame(run); else setTimeout(run, 16);
+  };
+}
 function webHost(url){
   /* v1.1.8：重新启用宿主内嵌 WebView2（真浏览器，不受 X-Frame-Options 限制）。
      安全性由 webRect() 保证：原生控件只覆盖 iframe 区域，地址栏和关闭按钮始终可点。 */
@@ -105,7 +116,7 @@ function bindWeb(){
   try {
     var pw = document.getElementById('pane-web');
     if (pw && window.ResizeObserver){
-      var sync = function(){
+      var sync = roDefer(function(){
         try {
           var r = $('#runner');
           if (r && r.getAttribute('data-tab') === 'web' && document.body.classList.contains('rn-open')){
@@ -113,7 +124,7 @@ function bindWeb(){
             if (u2) webHost(u2);
           }
         } catch (e) {}
-      };
+      });
       new ResizeObserver(sync).observe(pw);
       window.addEventListener('resize', sync);
     }
@@ -519,11 +530,15 @@ function bindWeb(){
     });
     /* v0.2.5：抽屉底边 = 输入框上沿，面板悬浮但不压住输入框 */
     var compEl = $('#composer');
-    function syncRnBottom(){
+    var _lastRnBottom = -1;
+    var syncRnBottom = roDefer(function(){
       if (!compEl) return;
       var h = compEl.getBoundingClientRect().height || 0;
-      document.documentElement.style.setProperty('--rn-b', Math.max(8, Math.round(h) + 8) + 'px');
-    }
+      h = Math.max(8, Math.round(h) + 8);
+      if (h === _lastRnBottom) return;
+      _lastRnBottom = h;
+      document.documentElement.style.setProperty('--rn-b', h + 'px');
+    });
     if (compEl && window.ResizeObserver){
       new ResizeObserver(syncRnBottom).observe(compEl);
     }
