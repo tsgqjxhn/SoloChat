@@ -618,11 +618,12 @@ public class BubbleService extends Service {
 
         ScrollView sc = new ScrollView(this);
         TextView body = new TextView(this);
-        body.setText(text);
+        body.setText(Md.render(text));
         body.setTextSize(15);
         body.setTextColor(0xFF222222);
         body.setLineSpacing(dp(4), 1f);
         body.setTextIsSelectable(true);
+        body.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
         DisplayMetrics dm = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(dm);
         final int sheetH = dm.heightPixels / 2;

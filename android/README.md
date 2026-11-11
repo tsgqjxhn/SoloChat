@@ -4,10 +4,11 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.2**（versionCode 16，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.3**（versionCode 17，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **回答 Markdown 渲染**：原生 `Md` 渲染标题、粗体、斜体、行内代码、代码块、列表、引用、链接、删除线；图片只显示 alt 文本，不联网加载。
 - **截图问答记录 / 继续对话**：Q/A 只存文本到原生历史和主应用「截图问答」会话，截图只在内存、不写相册；关闭不删记录，再次截图才新建会话。回答弹窗底部为「继续对话 / 锁 / 关闭」，继续保留同一会话历史；顶部不再显示「回答/关闭」，弹窗最高半屏，回答正文 35% 屏高内增长/滚动；透明背景不暗化题目；两个锁都可切分屏并滑动底层题目。
 - **配对凭据持久化**：电脑把配对 token 存到 `%USERPROFILE%\SoloChat\pair-token.txt`，桌面重启/重新开启配对仍沿用；手机 `sc.pair.v1` 也随 APK 更新保留，更新后不需要重新配对或同步。
 - **ResizeObserver 报错修复**：两个 ResizeObserver 回调改到下一帧合并执行，抽屉底边高度去重，消除 `looplimitexceed / ResizeObserver loop limit exceeded`。
@@ -58,7 +59,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.2.apk`（440,314 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.2.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.3.apk`（442,270 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.3.apk`）
 
 ## 使用
 
