@@ -354,7 +354,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '单文件大小' }), el('b', { text: '≈' + Math.round((document.documentElement.outerHTML.length) / 1024) + ' KB' })]));
       p.appendChild(el('div', { class: 'hint', text: '单文件本地 AI 客户端：不联网存储、无第三方运行时依赖；密钥存在宿主侧 DPAPI 保险库，快照导出会自动剔除。' }));
       p.appendChild(el('div', { class: 'sub', style: 'margin-top:18px', text: '手机 ↔ 电脑 配对同步' }));
-      p.appendChild(el('div', { class: 'hint', text: '电脑点「开启配对」，手机输入电脑地址和 6 位配对码即可；配对后直接发送配置和记忆文件，不需要导出导入。' }));
+      p.appendChild(el('div', { class: 'hint', text: '电脑点「开启配对」，手机输入电脑地址和 6 位配对码即可；配对后直接发送配置（含 API Key）和记忆文件，不需要导出导入。仅在同一 Wi‑Fi 局域网使用，公共 Wi‑Fi 不要开启。' }));
       (function(){
         var box = el('div', { class: 'pair-box' });
         p.appendChild(box);
@@ -408,8 +408,8 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           if (saved){
             box.appendChild(el('div', { class: 'hint', text: '已配对：' + saved.base }));
             var row1 = el('div', { class: 'f-actions', style: 'justify-content:flex-start;flex-wrap:wrap' });
-            var sendCfg = el('button', { class: 'btn btn-primary', type: 'button', text: '发送配置到电脑' });
-            var getCfg = el('button', { class: 'btn btn-sec', type: 'button', text: '取电脑配置' });
+            var sendCfg = el('button', { class: 'btn btn-primary', type: 'button', text: '发送配置到电脑（含 Key）' });
+            var getCfg = el('button', { class: 'btn btn-sec', type: 'button', text: '取电脑配置（含 Key）' });
             var sendMem = el('button', { class: 'btn btn-sec', type: 'button', text: '上传记忆' });
             var getMem = el('button', { class: 'btn btn-sec', type: 'button', text: '下载记忆' });
             var again = el('button', { class: 'btn btn-sec', type: 'button', text: '重新配对' });
@@ -418,14 +418,14 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
             var st = el('div', { class: 'hint', text: '' }); box.appendChild(st);
             sendCfg.addEventListener('click', function(){
               sendCfg.disabled = true; st.textContent = '发送配置…';
-              pfetch('/api/config?mode=union', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(UI.cfgSyncSnapshot()) })
+              pfetch('/api/config?mode=union', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(UI.cfgSyncSnapshot(true)) })
                 .then(function(){ st.textContent = '配置已发送到电脑（合并）'; UI.toast('配置已发送到电脑'); })
                 .catch(function(e){ st.textContent = '发送失败：' + errText(e); })
                 .then(function(){ sendCfg.disabled = false; });
             });
             getCfg.addEventListener('click', function(){
               getCfg.disabled = true; st.textContent = '读取电脑配置…';
-              pfetch('/api/config').then(function(d){ UI.cfgSyncApply(d, 'remote'); st.textContent = '已应用电脑配置'; UI.toast('已取回电脑配置'); })
+              pfetch('/api/config').then(function(d){ UI.cfgSyncApply(d, 'remote', true); st.textContent = '已应用电脑配置（含 Key）'; UI.toast('已取回电脑配置'); })
                 .catch(function(e){ st.textContent = '读取失败：' + errText(e); })
                 .then(function(){ getCfg.disabled = false; });
             });
@@ -472,7 +472,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           box.appendChild(st);
           b.addEventListener('click', function(){
             b.disabled = true; b.textContent = '开启中…';
-            NET.pair('start', { config: JSON.stringify(UI.cfgSyncSnapshot()), mode: 'union' }).then(function(d){
+            NET.pair('start', { config: JSON.stringify(UI.cfgSyncSnapshot(true)), mode: 'union' }).then(function(d){
               b.textContent = '重新生成配对码'; b.disabled = false;
               box.querySelectorAll('.pair-live').forEach(function(x){ x.remove(); });
               var live = el('div', { class: 'pair-live' });
@@ -481,11 +481,11 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
               live.appendChild(el('div', { class: 'hint', text: '配对码' }));
               live.appendChild(el('div', { class: 'pair-code', text: d.code }));
               var stop = el('button', { class: 'btn btn-sec', type: 'button', text: '停止配对' });
-              var push = el('button', { class: 'btn btn-sec', type: 'button', text: '发送当前配置到手机' });
+              var push = el('button', { class: 'btn btn-sec', type: 'button', text: '发送当前配置到手机（含 Key）' });
               stop.addEventListener('click', function(){ NET.pair('stop').then(function(){ live.remove(); b.textContent = '开启配对'; }); });
               push.addEventListener('click', function(){
                 push.disabled = true;
-                NET.pair('setcfg', { config: JSON.stringify(UI.cfgSyncSnapshot()), mode: 'union' }).then(function(){ UI.toast('配置已放到配对服务，手机点「取电脑配置」'); })
+                NET.pair('setcfg', { config: JSON.stringify(UI.cfgSyncSnapshot(true)), mode: 'union' }).then(function(){ UI.toast('配置（含 Key）已放到配对服务，手机点「取电脑配置」'); })
                   .catch(function(e){ UI.toast('发送失败：' + errText(e), true); }).then(function(){ push.disabled = false; });
               });
               live.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:8px' }, [push, stop]));
@@ -502,7 +502,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           window.addEventListener('sc-pair', function(e){
             var d = (e && e.detail) || {};
             if (d.kind === 'config' && d.data){
-              try { UI.cfgSyncApply(d.data, d.mode || 'union'); UI.toast('已收到手机配置'); } catch (err) { UI.toast('手机配置应用失败：' + errText(err), true); }
+              try { UI.cfgSyncApply(d.data, d.mode || 'union', true); UI.toast('已收到手机配置（含 Key）'); } catch (err) { UI.toast('手机配置应用失败：' + errText(err), true); }
             } else if (d.kind === 'file' && d.name){
               UI.toast('已收到手机记忆文件：' + d.name);
             }

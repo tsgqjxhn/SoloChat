@@ -4,11 +4,11 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.3.8**（versionCode 11，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.3.9**（versionCode 12，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
-- **配对同步**：电脑端「关于 → 开启配对」启动局域网配对服务，显示电脑地址和 6 位配对码；手机端「关于 → 配对同步」填地址和码即配对。配对后可直接发送配置到电脑、取电脑配置、上传/下载 `USER/MEMORY/DREAMS.md`；不再需要导出/导入 JSON。配对只用临时 token，Key 不进入传输文件。
+- **配对同步**：电脑端「关于 → 开启配对」启动局域网配对服务，显示电脑地址和 6 位配对码；手机端「关于 → 配对同步」填地址和码即配对。配对后可直接发送配置（含 API Key）到电脑、取电脑配置、上传/下载 `USER/MEMORY/DREAMS.md`；不再需要导出/导入 JSON。配对只用临时 token，仅同一 Wi‑Fi 局域网使用。
 - **手机 UI 收口**：Work/Agent 工具条只留设置/附件/图片/联网/扩展/更多，六类「本轮选择」合并到一个扩展按钮，打开统一的 `/` 搜索面板；面板隐藏长描述并限制高度。
 - **NVIDIA 地址修复**：Base URL 归一化时只保留一个 `/v1`；切换供应商清空上一家的 `chatPath/modelsPath`，避免 `/v1/v1/chat/completions` 404；原生截图问答同样归一化 URL。
 - **API Key 小眼睛**：设置页所有密码型 Key/Secret 输入框右侧都有眼睛按钮，点击可在明文/密文之间切换；只改输入框类型，不额外存储。
@@ -52,7 +52,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.3.8.apk`（435,758 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.8.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.3.9.apk`（435,934 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.9.apk`）
 
 ## 使用
 

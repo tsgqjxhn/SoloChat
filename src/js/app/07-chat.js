@@ -2831,23 +2831,24 @@ function sendMessage(){
   }
 
   /* ---------- 手机 ↔ 电脑 配置同步（关于页） ---------- */
-  function cfgSyncScrub(v){
+  function cfgSyncScrub(v, keepKeys){
     if (!v || typeof v !== 'object') return v;
     for (var k in v){
-      if (/(apiKey|token|secret|password)/i.test(k)) delete v[k];
-      else if (v[k] && typeof v[k] === 'object') cfgSyncScrub(v[k]);
+      if (/(token|secret|password)/i.test(k)) delete v[k];
+      else if (!keepKeys && /apiKey/i.test(k)) delete v[k];
+      else if (v[k] && typeof v[k] === 'object') cfgSyncScrub(v[k], keepKeys);
     }
     return v;
   }
-  function cfgSyncSnapshot(){
+  function cfgSyncSnapshot(withKeys){
     var c = {};
     try { c = JSON.parse(JSON.stringify(S.cfg)); } catch (e) { c = {}; }
-    if (Array.isArray(c.presets)) c.presets.forEach(function(p){ if (p) delete p.apiKey; });
-    cfgSyncScrub(c);
+    if (Array.isArray(c.presets)) c.presets.forEach(function(p){ if (p && !withKeys) delete p.apiKey; });
+    cfgSyncScrub(c, !!withKeys);
     delete c.presets; // 单独放，保持结构清晰
     var ps = [];
     try { ps = JSON.parse(JSON.stringify(S.cfg.presets || [])); } catch (e) { ps = []; }
-    ps.forEach(function(p){ if (p) delete p.apiKey; });
+    ps.forEach(function(p){ if (p && !withKeys) delete p.apiKey; });
     c.presets = ps;
     return { app: 'SoloChat', kind: 'config-sync', v: 1, ts: Date.now(), cfg: c };
   }
@@ -2866,14 +2867,14 @@ function sendMessage(){
     }
     return null;
   }
-  function cfgSyncMergePresets(mode){
+  function cfgSyncMergePresets(mode, withKeys){
     var local = S.cfg.presets || [], remote = (cfgSyncRemote && cfgSyncRemote.presets) || [];
     if (!remote.length) return local;
     if (mode === 'remote'){
       return remote.map(function(rp){
         var lp = cfgSyncFind(local, rp);
         var np = JSON.parse(JSON.stringify(rp));
-        np.apiKey = lp ? (lp.apiKey || '') : '';
+        np.apiKey = withKeys ? (rp.apiKey || (lp ? (lp.apiKey || '') : '')) : (lp ? (lp.apiKey || '') : '');
         return np;
       });
     }
@@ -2882,12 +2883,15 @@ function sendMessage(){
       var lp = cfgSyncFind(out, rp);
       if (lp){
         for (var k in rp){
-          if (k === 'apiKey') continue;
+          if (k === 'apiKey'){
+            if (withKeys && rp.apiKey) lp.apiKey = rp.apiKey;
+            continue;
+          }
           if (lp[k] == null || lp[k] === '' || (Array.isArray(lp[k]) && !lp[k].length)) lp[k] = rp[k];
         }
       } else {
         var np = JSON.parse(JSON.stringify(rp));
-        np.apiKey = '';
+        np.apiKey = withKeys ? (rp.apiKey || '') : '';
         out.push(np);
       }
     });
@@ -2938,11 +2942,11 @@ function sendMessage(){
   }
 
   /* v0.5.17：配对收到对象后直接应用，不经过文件选择器 */
-  function cfgSyncApply(o, mode){
+  function cfgSyncApply(o, mode, withKeys){
     if (!o || !o.cfg) throw new Error('配置格式不正确');
     mode = (mode === 'remote') ? 'remote' : 'union';
     cfgSyncRemote = JSON.parse(JSON.stringify(o.cfg));
-    var skip = /(apiKey|token|secret|password|^presets$|^activePreset$|^maxTokens$)/i;
+    var skip = withKeys ? /(token|secret|password|^presets$|^activePreset$|^maxTokens$)/i : /(apiKey|token|secret|password|^presets$|^activePreset$|^maxTokens$)/i;
     for (var k in cfgSyncRemote){
       if (skip.test(k)) continue;
       if (mode === 'remote') S.cfg[k] = cfgSyncRemote[k];
@@ -2966,7 +2970,7 @@ function sendMessage(){
         for (var mk in cfgSyncRemote.modelMeta) if (!S.cfg.modelMeta[mk]) S.cfg.modelMeta[mk] = cfgSyncRemote.modelMeta[mk];
       }
     }
-    S.cfg.presets = cfgSyncMergePresets(mode);
+    S.cfg.presets = cfgSyncMergePresets(mode, !!withKeys);
     var want = S.cfg.activePreset, act = null;
     for (var i = 0; i < S.cfg.presets.length; i++) if (S.cfg.presets[i].id === want) act = S.cfg.presets[i];
     if (!act) act = S.cfg.presets[0] || null;

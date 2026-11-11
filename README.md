@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.5.17 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.5.18 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,17 +85,18 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,386,368 字节**（v0.5.17，FileVersion 0.5.17.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,203,655 字节 / 20,580 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,203,727 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,386,880 字节**（v0.5.18，FileVersion 0.5.18.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,204,249 字节 / 20,584 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,204,321 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
-## Android 版（v0.3.8，配对同步 + 悬浮截图）
+## Android 版（v0.3.9，配对同步含 Key + 悬浮截图）
 
-`dist/SoloChat-Android-0.3.8.apk`（**435,758 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 11）
+`dist/SoloChat-Android-0.3.9.apk`（**435,934 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 12）
 
-- **手机 ↔ 电脑 配对同步**：电脑设置 → 关于 → 开启配对，显示地址和 6 位配对码；手机设置 → 关于 → 配对同步，填地址和码即配对。配对后直接发送配置、取电脑配置、上传/下载 `USER/MEMORY/DREAMS.md`，不再走导出/导入 JSON。密码/Key 不进入配对数据，同名配置沿用本机 Key。
+- **手机 ↔ 电脑 配对同步**：电脑设置 → 关于 → 开启配对，显示地址和 6 位配对码；手机设置 → 关于 → 配对同步，填地址和码即配对。配对后直接发送配置（**含 API Key**）、取电脑配置、上传/下载 `USER/MEMORY/DREAMS.md`，不再走导出/导入 JSON。仅限同一 Wi‑Fi 局域网。
+- **密钥处理**：配对用的配置快照会带 `presets[].apiKey`、`cfg.apiKey`；`token/secret/password` 类字段仍剔除。电脑收到手机配置按并集应用，同名配置用对方 Key 覆盖本机 Key；手机取电脑配置同理。
 - **手机 UI 收口**：Work/Agent 六类本轮选择合并为单一扩展按钮；设置隐藏无用的快捷键页；扩展二级标签横向滑动；工作区空态提示；底部安全区与完成栏。
 - **NVIDIA 地址修复 / API Key 小眼睛 / 截屏队列弹窗 / 锁 / 自动同步** 保持可用。
 - **弹窗**：截图后底部队列弹窗重做为紧凑 Bottom Sheet（拖拽条 + 标题 + 缩略图 + 单行输入 + 锁 + 蓝色全宽发送）；回答弹窗同样改为紧凑底部卡片，不再固定 300dp 高留白。
