@@ -29,7 +29,7 @@ public class Api {
         new Thread(() -> {
             try {
                 String key = Prefs.key(ctx);
-                android.util.Log.d("SOLO", "ask base=" + Prefs.base(ctx) + " model=" + Prefs.model(ctx) + " keyLen=" + key.length());
+                android.util.Log.d("SOLO", "ask base=" + Prefs.base(ctx) + " model=" + Prefs.popupModel(ctx) + " keyLen=" + key.length());
                 if (key.isEmpty()) throw new Exception("还没填 API Key（长按悬浮球 → 设置）");
                 Bitmap scaled = scale(bmp, 1600);
                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
@@ -54,7 +54,7 @@ public class Api {
                 }
                 msgs.put(new JSONObject().put("role", "user").put("content", content));
                 JSONObject body = new JSONObject()
-                        .put("model", Prefs.model(ctx))
+                        .put("model", Prefs.popupModel(ctx))
                         .put("messages", msgs)
                         .put("max_tokens", 1200)
                         .put("temperature", 0.2);
@@ -83,8 +83,31 @@ public class Api {
                 }
                 if (code < 200 || code >= 300) throw new Exception("HTTP " + code + " " + sb.toString().substring(0, Math.min(200, sb.length())));
                 JSONObject j = new JSONObject(sb.toString());
-                String text = j.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content");
-                if (text == null || text.trim().isEmpty()) throw new Exception("模型返回空内容");
+                JSONObject choice = j.getJSONArray("choices").getJSONObject(0);
+                JSONObject msg = choice.optJSONObject("message");
+                String text = msg == null ? "" : msg.optString("content", "");
+                if (text == null || "null".equalsIgnoreCase(text.trim())) text = "";
+                if (text.trim().isEmpty() && msg != null) {
+                    Object raw = msg.opt("content");
+                    if (raw instanceof JSONArray) {
+                        StringBuilder parts = new StringBuilder();
+                        JSONArray arr = (JSONArray) raw;
+                        for (int i = 0; i < arr.length(); i++) {
+                            Object it = arr.opt(i);
+                            if (it instanceof JSONObject) {
+                                String p = ((JSONObject) it).optString("text", "");
+                                if (!p.isEmpty()) parts.append(p);
+                            } else if (it != null) {
+                                parts.append(it);
+                            }
+                        }
+                        text = parts.toString();
+                    }
+                }
+                if (text == null || text.trim().isEmpty()) text = msg == null ? "" : msg.optString("reasoning_content", "");
+                if (text == null || text.trim().isEmpty()) text = choice.optString("text", "");
+                if (text == null || "null".equalsIgnoreCase(text.trim()) || text.trim().isEmpty())
+                    throw new Exception("模型返回空内容（检查该模型是否支持图片输入，或换一个弹窗模型）");
                 cb.ok(text.trim());
             } catch (Exception e) {
                 android.util.Log.e("SOLO", "ask fail: " + e);

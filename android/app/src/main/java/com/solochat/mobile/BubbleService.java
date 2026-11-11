@@ -61,6 +61,14 @@ public class BubbleService extends Service {
     private VirtualDisplay projectionDisplay;
     private ImageReader projectionReader;
     private boolean capturing;
+    private volatile boolean capturePending;
+    private final Runnable captureTimeout = () -> {
+        if (!capturePending) return;
+        capturePending = false;
+        capturing = false;
+        toast("截屏超时，请再试一次");
+        showBubble();
+    };
     /** 当前截图问答会话；关闭即丢弃引用、下次截图新建；记录已落盘/写主应用。 */
     private PopupSession session;
 
@@ -289,6 +297,35 @@ public class BubbleService extends Service {
                 }
                 projectionReader = reader;
                 projectionDisplay = vd;
+                /* 常驻监听：空闲时丢帧，避免 ImageReader 队列积满导致后续没有新帧（截屏超时的根因）。 */
+                reader.setOnImageAvailableListener(r -> {
+                    Image img = null;
+                    try { img = r.acquireLatestImage(); } catch (Exception ignored) { }
+                    if (img == null) return;
+                    if (!capturePending) { img.close(); return; }
+                    capturePending = false;
+                    Bitmap shot = null;
+                    try {
+                        Image.Plane p = img.getPlanes()[0];
+                        ByteBuffer buf = p.getBuffer();
+                        int rowStride = p.getRowStride(), pixelStride = p.getPixelStride();
+                        int pad = rowStride - pixelStride * img.getWidth();
+                        Bitmap raw = Bitmap.createBitmap(img.getWidth() + pad / pixelStride, img.getHeight(), Bitmap.Config.ARGB_8888);
+                        raw.copyPixelsFromBuffer(buf);
+                        shot = Bitmap.createBitmap(raw, 0, 0, img.getWidth(), img.getHeight());
+                    } catch (Exception e) {
+                        android.util.Log.e("SOLO", "grab frame: " + e);
+                    } finally {
+                        img.close();
+                    }
+                    capturing = false;
+                    ui.removeCallbacks(captureTimeout);
+                    final Bitmap out = shot;
+                    ui.post(() -> {
+                        if (out == null) { toast("截屏失败，请再试一次"); showBubble(); }
+                        else startAsk(out);
+                    });
+                }, capHandler);
                 android.util.Log.d("SOLO", "projection display ready");
             } catch (Exception e) {
                 android.util.Log.e("SOLO", "createVirtualDisplay: " + e);
@@ -319,47 +356,11 @@ public class BubbleService extends Service {
         capturing = true;
         drainReader();
         hideBubble();
-        capHandler.postDelayed(this::grabFrame, 500);
-    }
-
-    private void grabFrame() {
-        if (!capturing) return;
-        ImageReader r = projectionReader;
-        if (r == null) { capturing = false; ui.post(() -> { toast("截屏已停止"); showBubble(); }); return; }
-        Image img = null;
-        for (int i = 0; i < 25 && img == null; i++) {
-            try { img = r.acquireLatestImage(); } catch (Exception ignored) { }
-            if (img == null) {
-                try { Thread.sleep(80); } catch (InterruptedException ignored) { }
-            }
-        }
-        if (img == null) {
-            capturing = false;
-            ui.post(() -> { toast("截屏超时，请再试一次"); showBubble(); });
-            return;
-        }
-
-        Bitmap shot = null;
-        try {
-            Image.Plane p = img.getPlanes()[0];
-            ByteBuffer buf = p.getBuffer();
-            int rowStride = p.getRowStride(), pixelStride = p.getPixelStride();
-            int pad = rowStride - pixelStride * img.getWidth();
-            Bitmap raw = Bitmap.createBitmap(img.getWidth() + pad / pixelStride, img.getHeight(), Bitmap.Config.ARGB_8888);
-            raw.copyPixelsFromBuffer(buf);
-            shot = Bitmap.createBitmap(raw, 0, 0, img.getWidth(), img.getHeight());
-        } catch (Exception e) {
-            android.util.Log.e("SOLO", "grab frame: " + e);
-        } finally {
-            img.close();
-        }
-
-        capturing = false;
-        final Bitmap out = shot;
-        ui.post(() -> {
-            if (out == null) { toast("截屏失败"); showBubble(); }
-            else startAsk(out);
-        });
+        // 常驻 reader 监听会在下一帧到达时接手；先清空 pending 防止旧帧，再开始等待。
+        drainReader();
+        capturePending = true;
+        ui.removeCallbacks(captureTimeout);
+        ui.postDelayed(captureTimeout, 5000);
     }
 
     private void showCrop(final Bitmap shot) {
@@ -618,7 +619,7 @@ public class BubbleService extends Service {
 
         ScrollView sc = new ScrollView(this);
         TextView body = new TextView(this);
-        body.setText(Md.render(text));
+        body.setText(Md.render(text == null ? "（模型没有返回内容）" : text));
         body.setTextSize(15);
         body.setTextColor(0xFF222222);
         body.setLineSpacing(dp(4), 1f);
@@ -656,8 +657,12 @@ public class BubbleService extends Service {
         final boolean[] locked = {false};
         final ImageButton lock = new ImageButton(this);
         lock.setImageResource(R.drawable.ic_lock_open);
-        lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-        lock.setPadding(dp(4), dp(4), dp(4), dp(4));
+        GradientDrawable lb = new GradientDrawable();
+        lb.setColor(0xFFF4F5F7);
+        lb.setCornerRadius(dp(12));
+        lock.setBackground(lb);
+        lock.setColorFilter(0xFF2F6DF6);
+        lock.setPadding(dp(10), dp(10), dp(10), dp(10));
         lock.setContentDescription("分屏；开启后可滑动底层题目");
 
         Button close = new Button(this);

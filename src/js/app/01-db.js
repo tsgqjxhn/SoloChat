@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.3';
+var APP_VER = 'v0.4.0';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -134,6 +134,7 @@ var DEF_CFG = {
   stream: true, useBridge: true,
   quickbar: true,               // 任务栏快速输入条（仅宿主环境生效）
   bubble: true,                 // v0.4.0：手机悬浮球截屏提问（关闭后悬浮球和常驻通知一起消失）
+  popupModel: '',               // v0.4.0：截图弹窗单独模型；空=跟随当前模型
   webSearch: false,             // 本次会话的联网搜索开关（输入区地球图标）
   mode: 'chat',                 // 三态模式（v2.0）：'chat' 常规对话 / 'work' 沙箱短任务 / 'agent' 真实文件工具
   fsAutoWrite: true,            // 默认文件夹（工作区）内写入免确认；工作区外逐次确认（v1.4）
@@ -490,7 +491,7 @@ var saveCfg = debounce(function(){
   } catch (e) {}
   try {
     if (window.__SC_ANDROID__ && window.AndroidBridge && S.cfg.apiKey){
-      AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '' }));
+      AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '', popupModel: S.cfg.popupModel || '' }));
     }
   } catch (e) {}
 }, 300);

@@ -4032,6 +4032,10 @@ UI.openSettings(); // 重建以刷新显示
   window.addEventListener('error', function(e){
     var where = e && e.filename ? String(e.filename).split('/').pop() + ':' + e.lineno : '';
     var msg = (e && e.message) || '未知错误';
+    if (/ResizeObserver loop|loop limit exceeded/i.test(msg)){
+      try { console.warn('[resize-observer]', msg, where); } catch (x) {}
+      return; // 浏览器布局抖动提示，不是业务错误，不弹 toast
+    }
     try { console.error('[uncaught]', msg, where, (e && e.error && e.error.stack) || ''); } catch (x) {}
     UI.toast('出错：' + String(msg).slice(0, 60) + (where ? '（' + where + '）' : ''), true);
   });

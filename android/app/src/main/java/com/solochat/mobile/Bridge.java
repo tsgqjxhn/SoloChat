@@ -139,11 +139,13 @@ public class Bridge {
             String base = o.optString("base", "").trim();
             String key = o.optString("key", "").trim();
             String model = o.optString("model", "").trim();
+            String popupModel = o.optString("popupModel", "").trim();
             if (key.isEmpty()) return;
             Prefs.get(ctx).edit()
                     .putString(Prefs.BASE, base)
                     .putString(Prefs.KEY, key)
                     .putString(Prefs.MODEL, model)
+                    .putString(Prefs.POPUP_MODEL, popupModel)
                     .apply();
             android.util.Log.d("SOLO", "cfg synced base=" + base + " model=" + model);
         } catch (Exception ignored) { }

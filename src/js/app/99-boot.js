@@ -92,7 +92,7 @@ try { window.NET = NET; } catch (e) {} // Soul：记忆巩固/落盘要用 NET.c
 /* Android：把主应用的连接配置同步给原生截图问答，避免两套 Key */
 try {
   if (window.__SC_ANDROID__ && window.AndroidBridge && S.cfg.apiKey){
-    AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '' }));
+    AndroidBridge.post(JSON.stringify({ t: 'cfg', base: S.cfg.baseURL || '', key: S.cfg.apiKey, model: S.cfg.currentModel || S.cfg.defaultModel || '', popupModel: S.cfg.popupModel || '' }));
   }
 } catch (e) {}
 try { if (window.SOUL && SOUL.hydrate) SOUL.hydrate(); } catch (e) {} // S7：宿主内把磁盘记忆读回（文件优先）

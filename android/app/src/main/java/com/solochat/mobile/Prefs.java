@@ -9,6 +9,7 @@ public class Prefs {
     public static final String BASE = "base";
     public static final String KEY = "key";
     public static final String MODEL = "model";
+    public static final String POPUP_MODEL = "popupModel";
     public static final String PROMPT = "prompt";
     public static final String DAV_URL = "davUrl";
     public static final String DAV_USER = "davUser";
@@ -48,6 +49,12 @@ public class Prefs {
     public static String model(Context c) {
         String s = get(c).getString(MODEL, "");
         return s.isEmpty() ? "gpt-4o-mini" : s;
+    }
+
+    /** 截图弹窗单独模型；空 = 跟随当前聊天模型。 */
+    public static String popupModel(Context c) {
+        String s = get(c).getString(POPUP_MODEL, "").trim();
+        return s.isEmpty() ? model(c) : s;
     }
 
     public static String prompt(Context c) {

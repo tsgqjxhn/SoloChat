@@ -487,6 +487,19 @@ function buildSettings(){
           ]),
           pool, pick
         ]), '「获取列表」拉取接口模型并自动补全能力（上下文窗口 / 最大输出 / 输入类型 / 思考字段；来源为 models.dev 开源目录 + 接口 /models 字段，取不到的按模型名规则推断）。每行右侧 ⚙ 可手工校正、🗑 从池中删除；点模型名设为当前模型。'));
+        /* v0.4.0：截图弹窗单独模型（留空跟随当前模型） */
+        var popupSel = el('select', { class: 'f-in' });
+        popupSel.appendChild(el('option', { value: '', text: '跟随当前模型', selected: !c.popupModel ? '' : null }));
+        var pmList = (models || []).slice();
+        [c.currentModel, c.defaultModel].forEach(function(m){
+          if (m && pmList.indexOf(m) < 0) pmList.push(m);
+        });
+        if (c.popupModel && pmList.indexOf(c.popupModel) < 0) pmList.push(c.popupModel);
+        pmList.forEach(function(m){
+          popupSel.appendChild(el('option', { value: m, text: modelLabel(m), selected: c.popupModel === m ? '' : null }));
+        });
+        popupSel.addEventListener('change', function(){ setCfg({ popupModel: popupSel.value }); });
+        b.appendChild(field('截图弹窗模型', popupSel, '只影响悬浮球截图问答；留空跟随当前聊天模型。建议选支持图片输入的视觉模型。'));
         renderPool(pool); // 弹层尚未挂载到文档，直接传节点渲染
         /* 打开设置即用本地目录缓存补全池内所有模型（不联网），避免列表里一堆「能力未获取」 */
         fillMetaFromCatalog(AP().models || [], false).then(function(n){
