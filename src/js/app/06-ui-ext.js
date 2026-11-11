@@ -1565,6 +1565,32 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     attachStreamView();
     return s;
   }
+  /* v0.4.2：原生悬浮截图问答写入主应用会话记录（文本；截图仍只在内存，不写相册）。
+     这个函数必须放在 createSession 同一作用域（06），99-boot 里访问不到这里的闭包。 */
+  try {
+    window.__scPopupRecord = function(o){
+      try {
+        if (!o || !o.text || !String(o.text).trim()) return;
+        var map = {};
+        try { map = JSON.parse(localStorage.getItem('sc.popup.map.v1') || '{}') || {}; } catch (e) { map = {}; }
+        var sid = map[o.session] || '';
+        var s = null;
+        if (sid && S.sessions) for (var i = 0; i < S.sessions.length; i++) if (S.sessions[i].id === sid) { s = S.sessions[i]; break; }
+        if (!s){
+          s = createSession('截图问答');
+          map[o.session] = s.id;
+          try { localStorage.setItem('sc.popup.map.v1', JSON.stringify(map)); } catch (e) {}
+        }
+        var m = { id: uuid(), sid: s.id, role: o.role === 'assistant' ? 'assistant' : 'user',
+          content: String(o.text), status: 'ok', ts: o.ts || Date.now(), attachments: [] };
+        s.updatedAt = Date.now(); s.msgCount = (s.msgCount || 0) + 1;
+        DB.putMessage(m); DB.putSession(s);
+        if (S.sid === s.id){ S.msgs.push(m); renderMsgs(); }
+        else { renderSessions(); }
+      } catch (e) {}
+    };
+  } catch (e) {}
+
   /* 草稿不落库；首条建会话。session groups v0.4.2：可预选分组，并重置草稿配置 */
   function syncPickBadges(){
     try {

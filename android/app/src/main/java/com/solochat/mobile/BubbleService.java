@@ -39,6 +39,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.nio.ByteBuffer;
+import java.util.UUID;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** 悬浮球 + 截屏 + 裁剪 + 提问。截图只在内存里，绝不写相册。 */
 public class BubbleService extends Service {
@@ -58,6 +61,8 @@ public class BubbleService extends Service {
     private VirtualDisplay projectionDisplay;
     private ImageReader projectionReader;
     private boolean capturing;
+    /** 当前截图问答会话；关闭即丢弃引用、下次截图新建；记录已落盘/写主应用。 */
+    private PopupSession session;
 
     @Override
     public void onCreate() {
@@ -353,7 +358,7 @@ public class BubbleService extends Service {
         final Bitmap out = shot;
         ui.post(() -> {
             if (out == null) { toast("截屏失败"); showBubble(); }
-            else showAsk(out);
+            else startAsk(out);
         });
     }
 
@@ -383,15 +388,33 @@ public class BubbleService extends Service {
             try { crop = Bitmap.createBitmap(shot, r.left, r.top, r.width(), r.height()); }
             catch (Exception e) { crop = shot; }
             removeOverlay();
-            showAsk(crop);
+            startAsk(crop);
         });
         overlay = root;
         wm.addView(root, overlayParams(true));
         android.util.Log.d("SOLO", "crop overlay added");
     }
 
-    private void showAsk(final Bitmap crop) {
+    private static class PopupSession {
+        final String id = UUID.randomUUID().toString();
+        Bitmap shot;
+        final JSONArray history = new JSONArray();
+    }
+
+    private void startAsk(Bitmap crop) {
+        session = new PopupSession();
+        session.shot = crop;
+        showAsk(crop, false);
+    }
+
+    private void showAsk(final Bitmap crop, final boolean continuation) {
         removeOverlay();
+        if (!continuation || session == null || session.shot == null) {
+            session = new PopupSession();
+            session.shot = crop;
+        }
+        final PopupSession ss = session;
+        final Bitmap shot = ss.shot;
         DisplayMetrics dm = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(dm);
         int sheetH = dm.heightPixels / 2;
@@ -436,7 +459,7 @@ public class BubbleService extends Service {
         mainRow.setPadding(0, dp(4), 0, 0);
 
         ImageView thumb = new ImageView(this);
-        thumb.setImageBitmap(crop);
+        thumb.setImageBitmap(shot);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable tb = new GradientDrawable();
         tb.setColor(0xFF222222);
@@ -490,14 +513,15 @@ public class BubbleService extends Service {
 
         root.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
 
-        cancel.setOnClickListener(v -> { removeOverlay(); showBubble(); });
+        cancel.setOnClickListener(v -> { session = null; removeOverlay(); showBubble(); });
         lock.setOnClickListener(v -> {
             locked[0] = !locked[0];
             lock.setImageResource(locked[0] ? R.drawable.ic_lock : R.drawable.ic_lock_open);
-            toast(locked[0] ? "已固定：可滑动底层题目" : "未固定：点题目会返回原应用");
+            toast(locked[0] ? "已分屏：可滑动底层题目" : "未分屏：点弹窗外会关闭");
         });
         root.setOnTouchListener((v, e) -> {
             if (e.getAction() == MotionEvent.ACTION_OUTSIDE && !locked[0]) {
+                session = null;
                 removeOverlay();
                 showBubble();
             }
@@ -515,8 +539,18 @@ public class BubbleService extends Service {
             send.setEnabled(false);
             send.setText("…");
             final String prompt = q;
-            Api.ask(this, crop, prompt, new Api.Cb() {
-                @Override public void ok(String text) { ui.post(() -> showAnswer(text, crop)); }
+            final JSONArray history = new JSONArray();
+            for (int i = 0; i < ss.history.length(); i++) {
+                JSONObject h = ss.history.optJSONObject(i);
+                if (h != null) history.put(h);
+            }
+            Api.askTurn(this, shot, prompt, history, new Api.Cb() {
+                @Override public void ok(String text) {
+                    ui.post(() -> {
+                        recordPopupTurn(ss, prompt, text);
+                        showAnswer(text, ss);
+                    });
+                }
                 @Override public void fail(String msg) { ui.post(() -> { toast("失败：" + msg); send.setEnabled(true); send.setText("发送"); }); }
             });
         });
@@ -535,35 +569,52 @@ public class BubbleService extends Service {
         android.util.Log.d("SOLO", "ask sheet added");
     }
 
-    private void showAnswer(final String text, final Bitmap crop) {
+    /** 把这一轮问答写进原生历史（只存文本，截图不落盘），并同步到主应用会话记录。 */
+    private void recordPopupTurn(PopupSession s, String prompt, String answer) {
+        if (s == null) return;
+        try {
+            s.history.put(new JSONObject().put("role", "user").put("content", prompt));
+            s.history.put(new JSONObject().put("role", "assistant").put("content", answer));
+            persistPopupSession(s);
+            MainActivity.recordPopup(s.id, "user", prompt);
+            MainActivity.recordPopup(s.id, "assistant", answer);
+        } catch (Exception e) {
+            android.util.Log.e("SOLO", "record popup: " + e);
+        }
+    }
+
+    private void persistPopupSession(PopupSession s) {
+        try {
+            android.content.SharedPreferences sp = getSharedPreferences("solo_popup", MODE_PRIVATE);
+            JSONArray old = new JSONArray();
+            try { old = new JSONArray(sp.getString("sessions", "[]")); } catch (Exception ignored) { }
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < old.length(); i++) {
+                JSONObject o = old.optJSONObject(i);
+                if (o != null && !s.id.equals(o.optString("id"))) out.put(o);
+            }
+            out.put(new JSONObject().put("id", s.id).put("updated", System.currentTimeMillis()).put("messages", s.history));
+            while (out.length() > 40) out.remove(0);
+            sp.edit().putString("sessions", out.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    private void showAnswer(final String text, final PopupSession ss) {
         removeOverlay();
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0x66000000);
+        root.setBackgroundColor(0x00000000);
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(20), dp(8), dp(20), dp(16));
+        card.setPadding(dp(20), dp(14), dp(20), dp(16));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xFFFFFFFF);
         bg.setCornerRadius(dp(20));
         card.setBackground(bg);
 
-        LinearLayout titleRow = new LinearLayout(this);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("回答");
-        title.setTextColor(0xFF111111);
-        title.setTextSize(16);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView closeX = new TextView(this);
-        closeX.setText("关闭");
-        closeX.setTextColor(0xFF2F6DF6);
-        closeX.setTextSize(14);
-        closeX.setPadding(dp(8), dp(4), 0, dp(4));
-        titleRow.addView(closeX);
-        card.addView(titleRow, new LinearLayout.LayoutParams(-1, -2));
+        /* 顶部留白：不再显示「回答 / 关闭」 */
+        View topSpace = new View(this);
+        card.addView(topSpace, new LinearLayout.LayoutParams(1, dp(4)));
 
         ScrollView sc = new ScrollView(this);
         TextView body = new TextView(this);
@@ -574,7 +625,8 @@ public class BubbleService extends Service {
         body.setTextIsSelectable(true);
         DisplayMetrics dm = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(dm);
-        final int maxBodyH = (int) (dm.heightPixels * 0.45f); // 最多约半屏 45%，超出在卡片内滚动
+        final int sheetH = dm.heightPixels / 2;
+        final int maxBodyH = (int) (dm.heightPixels * 0.35f); // 半屏内给正文的上限
         sc.addView(body);
         sc.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             if (v.getHeight() > maxBodyH && v.getLayoutParams().height != maxBodyH) {
@@ -588,40 +640,78 @@ public class BubbleService extends Service {
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        Button copy = new Button(this); copy.setText("复制"); copy.setAllCaps(false);
-        copy.setTextColor(0xFF2F6DF6); copy.setTextSize(14);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button cont = new Button(this);
+        cont.setText("继续对话");
+        cont.setAllCaps(false);
+        cont.setTextColor(0xFF2F6DF6);
+        cont.setTextSize(13);
         GradientDrawable cb = new GradientDrawable();
-        cb.setColor(0xFFF4F5F7); cb.setCornerRadius(dp(12));
-        copy.setBackground(cb);
-        Button close = new Button(this); close.setText("关闭"); close.setAllCaps(false);
-        close.setTextColor(android.graphics.Color.WHITE); close.setTextSize(14);
+        cb.setColor(0xFFF4F5F7);
+        cb.setCornerRadius(dp(12));
+        cont.setBackground(cb);
+
+        final boolean[] locked = {false};
+        final ImageButton lock = new ImageButton(this);
+        lock.setImageResource(R.drawable.ic_lock_open);
+        lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        lock.setPadding(dp(4), dp(4), dp(4), dp(4));
+        lock.setContentDescription("分屏；开启后可滑动底层题目");
+
+        Button close = new Button(this);
+        close.setText("关闭");
+        close.setAllCaps(false);
+        close.setTextColor(android.graphics.Color.WHITE);
+        close.setTextSize(14);
         GradientDrawable db = new GradientDrawable();
-        db.setColor(0xFF2F6DF6); db.setCornerRadius(dp(12));
+        db.setColor(0xFF2F6DF6);
+        db.setCornerRadius(dp(12));
         close.setBackground(db);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        blp.rightMargin = dp(5);
-        row.addView(copy, blp);
-        LinearLayout.LayoutParams blp2 = new LinearLayout.LayoutParams(0, dp(46), 1);
-        blp2.leftMargin = dp(5);
-        row.addView(close, blp2);
+
+        LinearLayout.LayoutParams clp1 = new LinearLayout.LayoutParams(0, dp(46), 1);
+        clp1.rightMargin = dp(4);
+        row.addView(cont, clp1);
+        LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(dp(46), dp(46));
+        clp2.leftMargin = dp(4); clp2.rightMargin = dp(4);
+        row.addView(lock, clp2);
+        LinearLayout.LayoutParams clp3 = new LinearLayout.LayoutParams(0, dp(46), 1);
+        clp3.leftMargin = dp(4);
+        row.addView(close, clp3);
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
-        rlp.topMargin = dp(12);
+        rlp.topMargin = dp(10);
         card.addView(row, rlp);
 
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-        clp.setMargins(dp(12), 0, dp(12), dp(18));
-        root.addView(card, clp);
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        flp.setMargins(dp(12), 0, dp(12), dp(18));
+        root.addView(card, flp);
 
-        copy.setOnClickListener(v -> {
-            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("SoloChat", text));
-            toast("已复制");
+        cont.setOnClickListener(v -> { showAsk(ss == null ? null : ss.shot, true); });
+        lock.setOnClickListener(v -> {
+            locked[0] = !locked[0];
+            lock.setImageResource(locked[0] ? R.drawable.ic_lock : R.drawable.ic_lock_open);
+            toast(locked[0] ? "已分屏：可滑动底层题目" : "未分屏：点弹窗外会关闭");
         });
-        closeX.setOnClickListener(v -> { removeOverlay(); showBubble(); });
-        close.setOnClickListener(v -> { removeOverlay(); showBubble(); });
+        root.setOnTouchListener((v, e) -> {
+            if (e.getAction() == MotionEvent.ACTION_OUTSIDE && !locked[0]) {
+                session = null;
+                removeOverlay();
+                showBubble();
+            }
+            return false;
+        });
+        close.setOnClickListener(v -> { session = null; removeOverlay(); showBubble(); });
 
         overlay = root;
-        wm.addView(root, overlayParams(true));
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, sheetH,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.BOTTOM;
+        wm.addView(root, lp);
     }
 
     private void removeOverlay() {

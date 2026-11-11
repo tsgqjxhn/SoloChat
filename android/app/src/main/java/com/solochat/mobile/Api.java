@@ -21,6 +21,11 @@ public class Api {
     public interface Cb { void ok(String text); void fail(String msg); }
 
     public static void ask(Context ctx, Bitmap bmp, String prompt, Cb cb) {
+        askTurn(ctx, bmp, prompt, null, cb);
+    }
+
+    /** 带历史的截图追问：history 为 [{role,content}]，当前 prompt 重新附截图。 */
+    public static void askTurn(Context ctx, Bitmap bmp, String prompt, JSONArray history, Cb cb) {
         new Thread(() -> {
             try {
                 String key = Prefs.key(ctx);
@@ -36,7 +41,18 @@ public class Api {
                 JSONArray content = new JSONArray()
                         .put(new JSONObject().put("type", "text").put("text", prompt))
                         .put(new JSONObject().put("type", "image_url").put("image_url", img));
-                JSONArray msgs = new JSONArray().put(new JSONObject().put("role", "user").put("content", content));
+                JSONArray msgs = new JSONArray();
+                if (history != null) {
+                    for (int i = 0; i < history.length(); i++) {
+                        JSONObject h = history.optJSONObject(i);
+                        if (h == null) continue;
+                        String role = h.optString("role", "user");
+                        String text = h.optString("content", "");
+                        if (text.isEmpty()) continue;
+                        msgs.put(new JSONObject().put("role", role).put("content", text));
+                    }
+                }
+                msgs.put(new JSONObject().put("role", "user").put("content", content));
                 JSONObject body = new JSONObject()
                         .put("model", Prefs.model(ctx))
                         .put("messages", msgs)

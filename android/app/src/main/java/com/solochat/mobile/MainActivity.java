@@ -22,8 +22,11 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.util.ArrayDeque;
 
 public class MainActivity extends Activity {
+    private static MainActivity current;
+    private static final ArrayDeque<String> popupQueue = new ArrayDeque<>();
     private WebView web;
     private boolean pageReady;
     private String shareText;
@@ -34,6 +37,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        current = this;
         web = new WebView(this);
         WebView.setWebContentsDebuggingEnabled(true); // 调试期：可用 adb forward 看 DOM/console
         WebSettings s = web.getSettings();
@@ -60,7 +64,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView v, String url) {
                 android.util.Log.d("SOLO", "onPageFinished " + url);
-                web.postDelayed(() -> { pageReady = true; deliverShare(); }, 800);
+                web.postDelayed(() -> { pageReady = true; deliverShare(); flushPopupQueue(); }, 800);
             }
         });
         setContentView(web);
@@ -211,6 +215,45 @@ public class MainActivity extends Activity {
     private void startBubble() {
         Intent i = new Intent(this, BubbleService.class).setAction(BubbleService.ACTION_SHOW);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (current == this) current = null;
+        super.onDestroy();
+    }
+
+    /** 悬浮截图问答写入主应用的对话记录；WebView 未就绪时先排队。 */
+    public static void recordPopup(String sessionId, String role, String text) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("session", sessionId == null ? "" : sessionId);
+            o.put("role", role == null ? "user" : role);
+            o.put("text", text == null ? "" : text);
+            o.put("ts", System.currentTimeMillis());
+            String call = "window.__scPopupRecord&&window.__scPopupRecord(" + o.toString() + ")";
+            MainActivity a = current;
+            if (a == null || a.web == null || !a.pageReady) {
+                synchronized (popupQueue) {
+                    if (popupQueue.size() >= 80) popupQueue.removeFirst();
+                    popupQueue.addLast(call);
+                }
+                return;
+            }
+            a.runOnUiThread(() -> {
+                try { a.web.evaluateJavascript(call, null); } catch (Exception ignored) { }
+            });
+        } catch (Exception ignored) { }
+    }
+
+    private void flushPopupQueue() {
+        if (!pageReady || web == null) return;
+        for (;;) {
+            String call;
+            synchronized (popupQueue) { call = popupQueue.pollFirst(); }
+            if (call == null) break;
+            try { web.evaluateJavascript(call, null); } catch (Exception ignored) { }
+        }
     }
 
     @Override
