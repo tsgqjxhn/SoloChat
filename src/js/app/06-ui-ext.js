@@ -352,7 +352,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '运行环境' }), el('b', { text: NET.bridge.ok ? '桌面宿主（WebView2）' : '浏览器' })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '渲染引擎' }), el('b', { text: wv ? ('Chromium ' + wv[1]) : '未知' })]));
       p.appendChild(el('div', { class: 'kv' }, [el('span', { text: '单文件大小' }), el('b', { text: '≈' + Math.round((document.documentElement.outerHTML.length) / 1024) + ' KB' })]));
-      p.appendChild(el('div', { class: 'hint', text: '单文件本地 AI 客户端：不联网存储、无第三方运行时依赖；密钥存在宿主侧 DPAPI 保险库，快照导出会自动剔除。' }));
+      p.appendChild(el('div', { class: 'hint', text: '单文件本地 AI 客户端：不联网存储、无第三方运行时依赖；密钥在宿主侧 DPAPI 保险库，配对同步会带 API Key，导出 JSON 仍自动剔除。' }));
       p.appendChild(el('div', { class: 'sub', style: 'margin-top:18px', text: '手机 ↔ 电脑 配对同步' }));
       p.appendChild(el('div', { class: 'hint', text: '电脑点「开启配对」，手机输入电脑地址和 6 位配对码即可；配对后直接发送配置（含 API Key）和记忆文件，不需要导出导入。仅在同一 Wi‑Fi 局域网使用，公共 Wi‑Fi 不要开启。' }));
       (function(){

@@ -4,7 +4,7 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.3.9**（versionCode 12，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.3.10**（versionCode 13，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
@@ -52,7 +52,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.3.9.apk`（435,934 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.9.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.3.10.apk`（435,942 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.10.apk`）
 
 ## 使用
 
