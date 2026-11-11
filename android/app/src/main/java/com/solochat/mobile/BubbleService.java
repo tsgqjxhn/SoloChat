@@ -53,6 +53,11 @@ public class BubbleService extends Service {
     private HandlerThread capThread;
     private Handler capHandler;
     private View overlay;
+    /** 复用的投屏 token/显示：只授权一次，之后点悬浮球直接从常驻 VirtualDisplay 取帧。 */
+    private MediaProjection projection;
+    private VirtualDisplay projectionDisplay;
+    private ImageReader projectionReader;
+    private boolean capturing;
 
     @Override
     public void onCreate() {
@@ -85,6 +90,11 @@ public class BubbleService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!Prefs.bubble(this)) {
+            hideBubble();
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         android.util.Log.d("SOLO", "onStartCommand " + (intent == null ? "null" : String.valueOf(intent.getAction()))
                 + " code=" + CaptureBus.resultCode);
         if (intent != null && ACTION_CAPTURE.equals(intent.getAction())) {
@@ -181,82 +191,170 @@ public class BubbleService extends Service {
     private void hideBubble() { if (bubble != null) bubble.setVisibility(View.GONE); if (gear != null) gear.setVisibility(View.GONE); }
 
     private void requestProjection() {
-        android.util.Log.d("SOLO", "requestProjection");
+        android.util.Log.d("SOLO", "requestProjection hasToken=" + (projection != null));
+        if (projection != null) {
+            hideBubble();
+            ui.postDelayed(this::capture, 450);
+            return;
+        }
         hideBubble();
         Intent i = new Intent(this, ProjectionRequestActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
         startActivity(i);
     }
 
-    private void capture() {
-        android.util.Log.d("SOLO", "capture start code=" + CaptureBus.resultCode);
-        if (CaptureBus.resultCode == 0 || CaptureBus.data == null) {
-            toast("没有拿到截屏授权");
-            showBubble();
-            return;
-        }
-        final MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+    /** 截屏前把常驻通知提升为 mediaProjection 类型；失败只记录，不打断流程。 */
+    private void promoteProjectionFgs() {
         if (Build.VERSION.SDK_INT >= 34) {
             try { startForeground(2, notif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION); }
             catch (Exception e) { android.util.Log.e("SOLO", "promote fgs: " + e); }
         }
-        final MediaProjection mp;
+    }
+
+    /** 只在没有可用 token 时降回 specialUse，避免持有投屏时被系统停掉。 */
+    private void demoteFgs() {
+        if (projection != null) return;
+        if (Build.VERSION.SDK_INT >= 34) {
+            try { startForeground(1, notif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE); }
+            catch (Exception e) { android.util.Log.e("SOLO", "demote fgs: " + e); }
+        }
+    }
+
+    private void releaseProjection() {
+        VirtualDisplay vd = projectionDisplay;
+        projectionDisplay = null;
+        if (vd != null) { try { vd.release(); } catch (Exception ignored) { } }
+        ImageReader r = projectionReader;
+        projectionReader = null;
+        if (r != null) { try { r.close(); } catch (Exception ignored) { } }
+        MediaProjection mp = projection;
+        projection = null;
+        if (mp != null) {
+            try { mp.stop(); } catch (Exception e) { android.util.Log.d("SOLO", "projection stop: " + e); }
+        }
+        demoteFgs();
+    }
+
+    private boolean ensureProjection() {
+        if (projection != null && projectionDisplay != null && projectionReader != null) return true;
+
+        if (projection == null) {
+            if (CaptureBus.resultCode == 0 || CaptureBus.data == null) return false;
+            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            promoteProjectionFgs();
+            final MediaProjection mp;
+            try {
+                mp = mpm.getMediaProjection(CaptureBus.resultCode, CaptureBus.data);
+            } catch (Exception e) {
+                android.util.Log.e("SOLO", "getMediaProjection: " + e);
+                CaptureBus.resultCode = 0; CaptureBus.data = null;
+                demoteFgs();
+                return false;
+            }
+            if (mp == null) {
+                CaptureBus.resultCode = 0; CaptureBus.data = null;
+                demoteFgs();
+                return false;
+            }
+            projection = mp;
+            try {
+                mp.registerCallback(new MediaProjection.Callback() {
+                    @Override public void onStop() {
+                        android.util.Log.d("SOLO", "projection stopped");
+                        ui.post(() -> { if (projection == mp) releaseProjection(); });
+                    }
+                }, capHandler);
+            } catch (Exception e) { android.util.Log.e("SOLO", "registerCallback: " + e); }
+            CaptureBus.resultCode = 0; CaptureBus.data = null;
+            android.util.Log.d("SOLO", "projection ok");
+        }
+
+        if (projectionDisplay == null || projectionReader == null) {
+            DisplayMetrics dm = new DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            try {
+                ImageReader reader = ImageReader.newInstance(dm.widthPixels, dm.heightPixels, PixelFormat.RGBA_8888, 3);
+                VirtualDisplay vd = projection.createVirtualDisplay("solo", dm.widthPixels, dm.heightPixels,
+                        dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        reader.getSurface(), null, capHandler);
+                if (vd == null) {
+                    try { reader.close(); } catch (Exception ignored) { }
+                    releaseProjection();
+                    return false;
+                }
+                projectionReader = reader;
+                projectionDisplay = vd;
+                android.util.Log.d("SOLO", "projection display ready");
+            } catch (Exception e) {
+                android.util.Log.e("SOLO", "createVirtualDisplay: " + e);
+                releaseProjection();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 丢弃点击前积压的旧帧，避免截到悬浮球或上一次画面。 */
+    private void drainReader() {
+        ImageReader r = projectionReader;
+        if (r == null) return;
         try {
-            mp = mpm.getMediaProjection(CaptureBus.resultCode, CaptureBus.data);
-        } catch (Exception e) {
-            android.util.Log.e("SOLO", "getMediaProjection: " + e);
+            Image old;
+            while ((old = r.acquireLatestImage()) != null) old.close();
+        } catch (Exception ignored) { }
+    }
+
+    private void capture() {
+        if (capturing) return;
+        if (!ensureProjection()) {
             toast("投屏授权失效，请再点一次悬浮球");
             showBubble();
             return;
         }
-        if (mp == null) { toast("投屏授权失败"); showBubble(); return; }
-        android.util.Log.d("SOLO", "projection ok");
-        try {
-            mp.registerCallback(new MediaProjection.Callback() {
-                @Override public void onStop() { android.util.Log.d("SOLO", "projection stopped"); }
-            }, capHandler);
-        } catch (Exception e) { android.util.Log.e("SOLO", "registerCallback: " + e); }
+        capturing = true;
+        drainReader();
+        hideBubble();
+        capHandler.postDelayed(this::grabFrame, 500);
+    }
 
-        DisplayMetrics dm = new DisplayMetrics();
-        wm.getDefaultDisplay().getRealMetrics(dm);
-        final int w = dm.widthPixels, h = dm.heightPixels;
-        final ImageReader reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2);
-        final VirtualDisplay vd = mp.createVirtualDisplay("solo", w, h, dm.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.getSurface(), null, capHandler);
-
-        final Bitmap[] out = new Bitmap[1];
-        reader.setOnImageAvailableListener(r -> {
-            android.util.Log.d("SOLO", "image available");
-            if (out[0] != null) return;
-            Image img = null;
+    private void grabFrame() {
+        if (!capturing) return;
+        ImageReader r = projectionReader;
+        if (r == null) { capturing = false; ui.post(() -> { toast("截屏已停止"); showBubble(); }); return; }
+        Image img = null;
+        for (int i = 0; i < 25 && img == null; i++) {
             try { img = r.acquireLatestImage(); } catch (Exception ignored) { }
-            if (img == null) return;
-            try {
-                Image.Plane p = img.getPlanes()[0];
-                ByteBuffer buf = p.getBuffer();
-                int rowStride = p.getRowStride(), pixelStride = p.getPixelStride();
-                int pad = rowStride - pixelStride * w;
-                Bitmap raw = Bitmap.createBitmap(w + pad / pixelStride, h, Bitmap.Config.ARGB_8888);
-                raw.copyPixelsFromBuffer(buf);
-                out[0] = Bitmap.createBitmap(raw, 0, 0, w, h);
-            } catch (Exception e) {
-                out[0] = null;
-            } finally {
-                img.close();
+            if (img == null) {
+                try { Thread.sleep(80); } catch (InterruptedException ignored) { }
             }
-            reader.setOnImageAvailableListener(null, null);
-            ui.postDelayed(() -> {
-                try { vd.release(); } catch (Exception ignored) { }
-                try { reader.close(); } catch (Exception ignored) { }
-                try { mp.stop(); } catch (Exception ignored) { }
-                if (Build.VERSION.SDK_INT >= 34) {
-                    try { startForeground(1, notif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE); } catch (Exception ignored) { }
-                }
-                CaptureBus.resultCode = 0; CaptureBus.data = null;
-                if (out[0] == null) { toast("截屏失败"); showBubble(); }
-                else showAsk(out[0]); // Android 0.3.1：点球直接截整屏，不再进裁剪
-            }, 120);
-        }, capHandler);
+        }
+        if (img == null) {
+            capturing = false;
+            ui.post(() -> { toast("截屏超时，请再试一次"); showBubble(); });
+            return;
+        }
+
+        Bitmap shot = null;
+        try {
+            Image.Plane p = img.getPlanes()[0];
+            ByteBuffer buf = p.getBuffer();
+            int rowStride = p.getRowStride(), pixelStride = p.getPixelStride();
+            int pad = rowStride - pixelStride * img.getWidth();
+            Bitmap raw = Bitmap.createBitmap(img.getWidth() + pad / pixelStride, img.getHeight(), Bitmap.Config.ARGB_8888);
+            raw.copyPixelsFromBuffer(buf);
+            shot = Bitmap.createBitmap(raw, 0, 0, img.getWidth(), img.getHeight());
+        } catch (Exception e) {
+            android.util.Log.e("SOLO", "grab frame: " + e);
+        } finally {
+            img.close();
+        }
+
+        capturing = false;
+        final Bitmap out = shot;
+        ui.post(() -> {
+            if (out == null) { toast("截屏失败"); showBubble(); }
+            else showAsk(out);
+        });
     }
 
     private void showCrop(final Bitmap shot) {
@@ -303,72 +401,56 @@ public class BubbleService extends Service {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(20), dp(8), dp(20), dp(16));
+        card.setPadding(dp(20), dp(12), dp(20), dp(16));
         GradientDrawable sheetBg = new GradientDrawable();
         sheetBg.setColor(0xFFFFFFFF);
         sheetBg.setCornerRadii(new float[]{dp(20), dp(20), dp(20), dp(20), 0, 0, 0, 0});
         card.setBackground(sheetBg);
         card.setElevation(dp(10));
 
-        // 顶部拖拽条
-        View handle = new View(this);
-        GradientDrawable hb = new GradientDrawable();
-        hb.setColor(0xFFDDDDDD);
-        hb.setCornerRadius(dp(2));
-        handle.setBackground(hb);
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(40), dp(4));
-        hlp.gravity = Gravity.CENTER_HORIZONTAL;
-        hlp.topMargin = dp(2);
-        hlp.bottomMargin = dp(10);
-        card.addView(handle, hlp);
+        final boolean[] locked = {false};
+        final ImageButton lock = new ImageButton(this);
+        lock.setImageResource(R.drawable.ic_lock_open);
+        lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        lock.setPadding(dp(6), dp(6), dp(6), dp(6));
+        lock.setContentDescription("固定弹窗；固定后可滑动底层题目");
 
-        LinearLayout titleRow = new LinearLayout(this);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("截图已加入队列");
-        title.setTextColor(0xFF111111);
-        title.setTextSize(16);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        // 顶部一行：左锁定 / 右取消（不再有拖拽条和标题）
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.addView(lock, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        topRow.addView(new View(this), new LinearLayout.LayoutParams(0, dp(1), 1));
         TextView cancel = new TextView(this);
         cancel.setText("取消");
         cancel.setTextColor(0xFF2F6DF6);
         cancel.setTextSize(14);
-        cancel.setPadding(dp(10), dp(6), dp(4), dp(6));
-        titleRow.addView(cancel);
-        card.addView(titleRow);
+        cancel.setPadding(dp(10), dp(6), dp(2), dp(6));
+        topRow.addView(cancel);
+        card.addView(topRow, new LinearLayout.LayoutParams(-1, -2));
 
-        LinearLayout queueRow = new LinearLayout(this);
-        queueRow.setOrientation(LinearLayout.HORIZONTAL);
-        queueRow.setGravity(Gravity.CENTER_VERTICAL);
-        queueRow.setPadding(0, dp(8), 0, 0);
+        // 主内容行：小缩略图 + 输入框（发送按钮在输入框右侧）
+        LinearLayout mainRow = new LinearLayout(this);
+        mainRow.setOrientation(LinearLayout.HORIZONTAL);
+        mainRow.setGravity(Gravity.TOP);
+        mainRow.setPadding(0, dp(4), 0, 0);
+
         ImageView thumb = new ImageView(this);
         thumb.setImageBitmap(crop);
-        thumb.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable tb = new GradientDrawable();
         tb.setColor(0xFF222222);
         tb.setCornerRadius(dp(8));
         thumb.setBackground(tb);
         thumb.setClipToOutline(true);
-        queueRow.addView(thumb, new LinearLayout.LayoutParams(dp(54), dp(96)));
-        TextView qinfo = new TextView(this);
-        qinfo.setText("整屏截图 · 待发送\n不会自动发送 · 不存相册\n锁定后可滑动底层题目");
-        qinfo.setTextSize(12);
-        qinfo.setTextColor(0xFF666666);
-        qinfo.setLineSpacing(dp(2), 1f);
-        qinfo.setPadding(dp(12), 0, 0, 0);
-        queueRow.addView(qinfo, new LinearLayout.LayoutParams(0, -2, 1));
-        card.addView(queueRow);
-
-        View gap = new View(this);
-        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(1, dp(14));
-        card.addView(gap, glp);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(44), dp(60));
+        tlp.rightMargin = dp(10);
+        mainRow.addView(thumb, tlp);
 
         LinearLayout inputBox = new LinearLayout(this);
         inputBox.setOrientation(LinearLayout.HORIZONTAL);
-        inputBox.setGravity(Gravity.CENTER_VERTICAL);
-        inputBox.setPadding(dp(6), dp(2), dp(2), dp(2));
+        inputBox.setGravity(Gravity.BOTTOM);
+        inputBox.setPadding(dp(10), dp(2), dp(2), dp(2));
         GradientDrawable ib = new GradientDrawable();
         ib.setColor(0xFFF4F5F7);
         ib.setCornerRadius(dp(14));
@@ -380,33 +462,31 @@ public class BubbleService extends Service {
         input.setHintTextColor(0xFF9AA0A6);
         input.setTextSize(15);
         input.setMinLines(1);
-        input.setMaxLines(2);
+        input.setMaxLines(5);
         input.setTextColor(0xFF111111);
         input.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-        input.setPadding(dp(10), dp(8), dp(6), dp(8));
+        input.setPadding(dp(2), dp(8), dp(8), dp(8));
         inputBox.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
 
-        final boolean[] locked = {false};
-        final ImageButton lock = new ImageButton(this);
-        lock.setImageResource(R.drawable.ic_lock_open);
-        lock.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-        lock.setPadding(dp(8), dp(8), dp(8), dp(8));
-        lock.setContentDescription("固定弹窗；固定后可滑动底层题目");
-        inputBox.addView(lock, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        card.addView(inputBox, new LinearLayout.LayoutParams(-1, -2));
-
-        Button send = new Button(this);
+        final Button send = new Button(this);
         send.setText("发送");
-        send.setTextSize(15);
+        send.setTextSize(14);
         send.setTextColor(android.graphics.Color.WHITE);
         send.setAllCaps(false);
+        send.setGravity(Gravity.CENTER);
+        send.setPadding(0, 0, 0, 0);
+        send.setMinWidth(0); send.setMinimumWidth(0);
+        send.setMinHeight(0); send.setMinimumHeight(0);
         GradientDrawable sb = new GradientDrawable();
         sb.setColor(0xFF2F6DF6);
-        sb.setCornerRadius(dp(14));
+        sb.setCornerRadius(dp(12));
         send.setBackground(sb);
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(48));
-        slp.topMargin = dp(10);
-        card.addView(send, slp);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(56), dp(40));
+        slp.leftMargin = dp(4);
+        inputBox.addView(send, slp);
+
+        mainRow.addView(inputBox, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(mainRow, new LinearLayout.LayoutParams(-1, -2));
 
         root.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
 
@@ -433,7 +513,7 @@ public class BubbleService extends Service {
             String q = input.getText().toString().trim();
             if (q.isEmpty()) q = Prefs.prompt(this);
             send.setEnabled(false);
-            send.setText("思考中…");
+            send.setText("…");
             final String prompt = q;
             Api.ask(this, crop, prompt, new Api.Cb() {
                 @Override public void ok(String text) { ui.post(() -> showAnswer(text, crop)); }
@@ -468,17 +548,6 @@ public class BubbleService extends Service {
         bg.setCornerRadius(dp(20));
         card.setBackground(bg);
 
-        View handle = new View(this);
-        GradientDrawable hb = new GradientDrawable();
-        hb.setColor(0xFFDDDDDD);
-        hb.setCornerRadius(dp(2));
-        handle.setBackground(hb);
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(40), dp(4));
-        hlp.gravity = Gravity.CENTER_HORIZONTAL;
-        hlp.topMargin = dp(2);
-        hlp.bottomMargin = dp(10);
-        card.addView(handle, hlp);
-
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -503,8 +572,16 @@ public class BubbleService extends Service {
         body.setTextColor(0xFF222222);
         body.setLineSpacing(dp(4), 1f);
         body.setTextIsSelectable(true);
-        body.setMaxHeight(dp(360));
+        DisplayMetrics dm = new DisplayMetrics();
+        wm.getDefaultDisplay().getRealMetrics(dm);
+        final int maxBodyH = (int) (dm.heightPixels * 0.45f); // 最多约半屏 45%，超出在卡片内滚动
         sc.addView(body);
+        sc.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (v.getHeight() > maxBodyH && v.getLayoutParams().height != maxBodyH) {
+                v.getLayoutParams().height = maxBodyH;
+                v.requestLayout();
+            }
+        });
         LinearLayout.LayoutParams scp = new LinearLayout.LayoutParams(-1, -2);
         scp.topMargin = dp(8);
         card.addView(sc, scp);
@@ -563,6 +640,9 @@ public class BubbleService extends Service {
         removeOverlay();
         if (bubble != null) { try { wm.removeView(bubble); } catch (Exception ignored) { } bubble = null; }
         if (gear != null) { try { wm.removeView(gear); } catch (Exception ignored) { } gear = null; }
+        MediaProjection mp = projection;
+        projection = null;
+        if (mp != null) { try { mp.stop(); } catch (Exception ignored) { } }
         if (capThread != null) capThread.quitSafely();
         super.onDestroy();
     }

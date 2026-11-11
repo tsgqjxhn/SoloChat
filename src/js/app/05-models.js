@@ -761,6 +761,21 @@ p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [grpCk, ' 会话列
       p.appendChild(el('div', { class: 'f-row' }, [
         el('label', {}, [qbCk, ' 任务栏快速输入条（Enter 提问，Esc / × 隐藏）'])
       ]));
+      /* v0.4.0：手机端悬浮球开关（桌面无悬浮球，不显示） */
+      if (document.body.classList.contains('m-phone')){
+        var bbCk = el('input', { type: 'checkbox', 'data-cfg': 'bubble' });
+        bbCk.checked = c.bubble !== false;
+        bbCk.addEventListener('change', function(){
+          setCfg({ bubble: bbCk.checked });
+          try {
+            if (typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok) NET.bridge.send({ t: 'bubble', show: bbCk.checked });
+          } catch (e) {}
+        });
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', {}, [bbCk, ' 悬浮球截屏提问'])
+        ]));
+        p.appendChild(el('div', { class: 'hint', text: '关闭后悬浮球和常驻通知一起消失；需要时在这里重新打开。' }));
+      }
 
       /* 网络代理（原独立「代理」页；v0.3.4 起默认直连） */
       p.appendChild(el('div', { class: 'sub', text: '网络代理' }));

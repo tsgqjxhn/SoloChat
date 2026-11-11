@@ -378,10 +378,30 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           });
         }
         function pairForm(){
-          var addr = el('input', { class: 'f-in', placeholder: '电脑地址：192.168.1.5:8788', value: saved ? saved.base.replace(/^https?:\/\//, '') : '' });
+          var last = '';
+          try { last = localStorage.getItem('sc.pair.last.v1') || ''; } catch (e) {}
+          var seed = last || (saved ? saved.base.replace(/^https?:\/\//, '') : '');
+          var addr = el('input', { class: 'f-in', placeholder: '电脑地址（IP:8788，记住上次）', value: seed });
           var code = el('input', { class: 'f-in', placeholder: '6 位配对码', inputmode: 'numeric', maxlength: '6' });
           var go = el('button', { class: 'btn btn-primary', type: 'button', text: '配对' });
           var st = el('div', { class: 'hint', text: '' });
+          function saveLast(v){
+            try { localStorage.setItem('sc.pair.last.v1', String(v == null ? addr.value : v).trim()); } catch (e) {}
+          }
+          /* 没写端口就补默认 8788；路径保留在端口之后 */
+          function ensurePort(u){
+            var m = /^(https?:\/\/)?(.*)$/i.exec(u);
+            var scheme = (m && m[1]) || 'http://';
+            var rest = (m && m[2]) || '';
+            var slash = rest.indexOf('/');
+            var host = slash >= 0 ? rest.slice(0, slash) : rest;
+            var path = slash >= 0 ? rest.slice(slash) : '';
+            if (!host) return u;
+            if (!/:\d+$/.test(host)) host += ':8788';
+            return scheme + host + path;
+          }
+          addr.addEventListener('input', function(){ saveLast(); });
+          addr.addEventListener('change', function(){ saveLast(); });
           box.appendChild(el('div', { class: 'f-row' }, [el('label', { text: '电脑地址' }), addr]));
           box.appendChild(el('div', { class: 'f-row' }, [el('label', { text: '配对码' }), code]));
           box.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [go]));
@@ -390,6 +410,8 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
             var raw = String(addr.value || '').trim().replace(/\/+$/, '');
             if (!raw) return UI.toast('先填电脑地址', true);
             var base = /^https?:\/\//i.test(raw) ? raw : ('http://' + raw);
+            base = ensurePort(base).replace(/\/+$/, '');
+            saveLast(base.replace(/^https?:\/\//, ''));
             var c = String(code.value || '').trim();
             if (!/^\d{6}$/.test(c)) return UI.toast('配对码是 6 位数字', true);
             go.disabled = true; go.textContent = '连接中…';

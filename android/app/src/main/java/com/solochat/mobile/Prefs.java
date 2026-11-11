@@ -17,6 +17,7 @@ public class Prefs {
     public static final String DAV_AUTO = "davAuto";
     public static final String DAV_ENC = "davEnc";
     public static final String DAV_SYNC_PASS = "davSyncPass";
+    public static final String BUBBLE = "bubble";
 
     public static String davUrl(Context c) { return get(c).getString(DAV_URL, ""); }
     public static String davUser(Context c) { return get(c).getString(DAV_USER, ""); }
@@ -28,6 +29,9 @@ public class Prefs {
     public static boolean davAuto(Context c) { return get(c).getBoolean(DAV_AUTO, false); }
     public static boolean davEncrypt(Context c) { return get(c).getBoolean(DAV_ENC, false); }
     public static String davSyncPass(Context c) { return get(c).getString(DAV_SYNC_PASS, ""); }
+
+    /** 悬浮球总开关；关闭后悬浮球和常驻通知一起消失。 */
+    public static boolean bubble(Context c) { return get(c).getBoolean(BUBBLE, true); }
 
     public static SharedPreferences get(Context c) {
         return c.getSharedPreferences(NAME, Context.MODE_PRIVATE);

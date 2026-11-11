@@ -58,6 +58,7 @@ public class Bridge {
             else if ("notify".equals(t)) doNotify(o);
             else if ("savefile".equals(t)) doSaveFile(o);
             else if ("cfg".equals(t)) doCfg(o);
+            else if ("bubble".equals(t)) doBubble(o);
         } catch (Exception ignored) { }
     }
 
@@ -146,6 +147,28 @@ public class Bridge {
                     .apply();
             android.util.Log.d("SOLO", "cfg synced base=" + base + " model=" + model);
         } catch (Exception ignored) { }
+    }
+
+    /** 网页「通用设置 → 悬浮球截屏提问」开关：存偏好并启动/停止悬浮球服务。 */
+    private void doBubble(JSONObject o) {
+        try {
+            final boolean show = o.optBoolean("show", true);
+            Prefs.get(ctx).edit().putBoolean(Prefs.BUBBLE, show).apply();
+            if (show) {
+                /* 未授予悬浮窗权限时先不启动，回 App 后由 MainActivity 引导授权再起 */
+                if (!android.provider.Settings.canDrawOverlays(ctx)) {
+                    android.widget.Toast.makeText(ctx, "请先允许「显示在其他应用上层」", android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Intent i = new Intent(ctx, BubbleService.class).setAction(BubbleService.ACTION_SHOW);
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i); else ctx.startService(i);
+            } else {
+                ctx.stopService(new Intent(ctx, BubbleService.class));
+            }
+            android.util.Log.d("SOLO", "bubble switch show=" + show);
+        } catch (Exception e) {
+            android.util.Log.e("SOLO", "bubble switch: " + e);
+        }
     }
 
     /** 网页下载兜底：把文本写入系统 Download/SoloChat（API 29+ 走 MediaStore，无需存储权限）。 */

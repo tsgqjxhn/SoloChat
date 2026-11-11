@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 9);
         }
-        ensureOverlay();
+        if (Prefs.bubble(this)) ensureOverlay();
         handleIntent(getIntent());
         SyncJobService.schedulePeriodic(this);
         if (Prefs.davAuto(this) && !Prefs.davUrl(this).trim().isEmpty()) {
@@ -173,14 +173,24 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (Settings.canDrawOverlays(this)) { startBubble(); setBubbleVisible(false); }
+        if (Prefs.bubble(this)) {
+            if (!Settings.canDrawOverlays(this)) ensureOverlay();
+            else { startBubble(); setBubbleVisible(false); }
+        } else {
+            stopBubble();
+        }
         SyncJobService.schedulePeriodic(this);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        setBubbleVisible(true);
+        if (Prefs.bubble(this)) setBubbleVisible(true);
+        else stopBubble();
+    }
+
+    private void stopBubble() {
+        try { stopService(new Intent(this, BubbleService.class)); } catch (Exception ignored) { }
     }
 
     private void setBubbleVisible(boolean show) {

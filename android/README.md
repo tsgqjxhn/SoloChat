@@ -4,11 +4,14 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.3.10**（versionCode 13，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.0**（versionCode 14，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
-- **配对同步**：电脑端「关于 → 开启配对」启动局域网配对服务，显示电脑地址和 6 位配对码；手机端「关于 → 配对同步」填地址和码即配对。配对后可直接发送配置（含 API Key）到电脑、取电脑配置、上传/下载 `USER/MEMORY/DREAMS.md`；不再需要导出/导入 JSON。配对只用临时 token，仅同一 Wi‑Fi 局域网使用。
+- **投屏授权复用**：首次点悬浮球授权后保留 `MediaProjection`/常驻 `VirtualDisplay`，后续点球直接取帧，不再每次弹「开始录制或投射」；关闭悬浮球或系统收回投屏才失效。
+- **悬浮球开关**：手机「通用设置 → 外观与行为 → 悬浮球截屏提问」可关闭；关闭后悬浮球与常驻通知一起消失。
+- **截图弹窗**：顶部不再有拖拽条和「截图已加入队列」；锁在左上，缩略图 44×60dp，输入框右侧内嵌发送；输入最多 5 行，弹窗最多半屏，回答在 45% 屏高内增长/滚动。
+- **配对默认地址**：手机记住上次电脑地址，端口未填自动补 `8788`；配对后直接传配置（含 API Key）和记忆文件。
 - **手机 UI 收口**：Work/Agent 工具条只留设置/附件/图片/联网/扩展/更多，六类「本轮选择」合并到一个扩展按钮，打开统一的 `/` 搜索面板；面板隐藏长描述并限制高度。
 - **NVIDIA 地址修复**：Base URL 归一化时只保留一个 `/v1`；切换供应商清空上一家的 `chatPath/modelsPath`，避免 `/v1/v1/chat/completions` 404；原生截图问答同样归一化 URL。
 - **API Key 小眼睛**：设置页所有密码型 Key/Secret 输入框右侧都有眼睛按钮，点击可在明文/密文之间切换；只改输入框类型，不额外存储。
@@ -52,7 +55,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.3.10.apk`（435,942 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.3.10.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.0.apk`（437,830 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.0.apk`）
 
 ## 使用
 

@@ -50,7 +50,6 @@
             android:name=".ProjectionRequestActivity"
             android:excludeFromRecents="true"
             android:exported="false"
-            android:noHistory="true"
             android:taskAffinity="com.solochat.mobile.capture"
             android:theme="@style/Transparent" />
 

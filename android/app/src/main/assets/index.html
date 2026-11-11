@@ -1544,7 +1544,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.5.19';
+var APP_VER = 'v0.4.0';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1636,6 +1636,7 @@ var DEF_CFG = {
   theme: 'auto',                // auto | light | dark
   stream: true, useBridge: true,
   quickbar: true,               // 任务栏快速输入条（仅宿主环境生效）
+  bubble: true,                 // v0.4.0：手机悬浮球截屏提问（关闭后悬浮球和常驻通知一起消失）
   webSearch: false,             // 本次会话的联网搜索开关（输入区地球图标）
   mode: 'chat',                 // 三态模式（v2.0）：'chat' 常规对话 / 'work' 沙箱短任务 / 'agent' 真实文件工具
   fsAutoWrite: true,            // 默认文件夹（工作区）内写入免确认；工作区外逐次确认（v1.4）
@@ -9832,6 +9833,21 @@ p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [grpCk, ' 会话列
       p.appendChild(el('div', { class: 'f-row' }, [
         el('label', {}, [qbCk, ' 任务栏快速输入条（Enter 提问，Esc / × 隐藏）'])
       ]));
+      /* v0.4.0：手机端悬浮球开关（桌面无悬浮球，不显示） */
+      if (document.body.classList.contains('m-phone')){
+        var bbCk = el('input', { type: 'checkbox', 'data-cfg': 'bubble' });
+        bbCk.checked = c.bubble !== false;
+        bbCk.addEventListener('change', function(){
+          setCfg({ bubble: bbCk.checked });
+          try {
+            if (typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok) NET.bridge.send({ t: 'bubble', show: bbCk.checked });
+          } catch (e) {}
+        });
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', {}, [bbCk, ' 悬浮球截屏提问'])
+        ]));
+        p.appendChild(el('div', { class: 'hint', text: '关闭后悬浮球和常驻通知一起消失；需要时在这里重新打开。' }));
+      }
 
       /* 网络代理（原独立「代理」页；v0.3.4 起默认直连） */
       p.appendChild(el('div', { class: 'sub', text: '网络代理' }));
@@ -10841,10 +10857,30 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           });
         }
         function pairForm(){
-          var addr = el('input', { class: 'f-in', placeholder: '电脑地址：192.168.1.5:8788', value: saved ? saved.base.replace(/^https?:\/\//, '') : '' });
+          var last = '';
+          try { last = localStorage.getItem('sc.pair.last.v1') || ''; } catch (e) {}
+          var seed = last || (saved ? saved.base.replace(/^https?:\/\//, '') : '');
+          var addr = el('input', { class: 'f-in', placeholder: '电脑地址（IP:8788，记住上次）', value: seed });
           var code = el('input', { class: 'f-in', placeholder: '6 位配对码', inputmode: 'numeric', maxlength: '6' });
           var go = el('button', { class: 'btn btn-primary', type: 'button', text: '配对' });
           var st = el('div', { class: 'hint', text: '' });
+          function saveLast(v){
+            try { localStorage.setItem('sc.pair.last.v1', String(v == null ? addr.value : v).trim()); } catch (e) {}
+          }
+          /* 没写端口就补默认 8788；路径保留在端口之后 */
+          function ensurePort(u){
+            var m = /^(https?:\/\/)?(.*)$/i.exec(u);
+            var scheme = (m && m[1]) || 'http://';
+            var rest = (m && m[2]) || '';
+            var slash = rest.indexOf('/');
+            var host = slash >= 0 ? rest.slice(0, slash) : rest;
+            var path = slash >= 0 ? rest.slice(slash) : '';
+            if (!host) return u;
+            if (!/:\d+$/.test(host)) host += ':8788';
+            return scheme + host + path;
+          }
+          addr.addEventListener('input', function(){ saveLast(); });
+          addr.addEventListener('change', function(){ saveLast(); });
           box.appendChild(el('div', { class: 'f-row' }, [el('label', { text: '电脑地址' }), addr]));
           box.appendChild(el('div', { class: 'f-row' }, [el('label', { text: '配对码' }), code]));
           box.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [go]));
@@ -10853,6 +10889,8 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
             var raw = String(addr.value || '').trim().replace(/\/+$/, '');
             if (!raw) return UI.toast('先填电脑地址', true);
             var base = /^https?:\/\//i.test(raw) ? raw : ('http://' + raw);
+            base = ensurePort(base).replace(/\/+$/, '');
+            saveLast(base.replace(/^https?:\/\//, ''));
             var c = String(code.value || '').trim();
             if (!/^\d{6}$/.test(c)) return UI.toast('配对码是 6 位数字', true);
             go.disabled = true; go.textContent = '连接中…';
