@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.0';
+var APP_VER = 'v0.4.1';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1598,6 +1598,8 @@ var NET = (function(){
      围栏类工具统一收一个 {arg, body} 参数，语义与 ```op 围栏一致。 */
   function toolSchemas(){
     if (typeof EXT === 'undefined' || !EXT.all) return [];
+    var soul = (S.cfg.mode === 'soul');
+    var soulSkip = { nav: 1, chart: 1 }; /* 只由渲染器出图，没有工具循环执行入口 */
     var out = [], seen = {};
     EXT.all().forEach(function(e){
       if (!e || !e.id || seen[e.id]) return;
@@ -1605,8 +1607,10 @@ var NET = (function(){
       /* v0.4.x：原生 tools 白名单（P1-1）—— 与围栏执行路径 FS.scan/WORK.scan 用同一套判断 */
       if (e.on === false) return;                                       // 扩展里已关闭
       if (EXT.isKnownBuiltin(e.id) && !EXT.isOn(e.id)) return;          // 内置工具被关掉
-      if (e.modes && S.cfg.mode && e.modes.indexOf(S.cfg.mode) < 0) return;  // 按模式过滤
-      if (typeof PICK !== 'undefined' && PICK && PICK.deny(e.id)) return;    // 本轮未勾选
+      if (soul && soulSkip[e.id]) return;                               // Soul 不暴露无执行入口的项
+      if (soul && (e.kind === 'skill' || e.kind === 'agent')) return;   // 技能/角色走 skill 与 agent 围栏，不能当独立工具名调用
+      if (!soul && e.modes && S.cfg.mode && e.modes.indexOf(S.cfg.mode) < 0) return;  // 按模式过滤（Soul 不过滤）
+      if (!soul && typeof PICK !== 'undefined' && PICK && PICK.deny(e.id)) return;    // 本轮未勾选（Soul 不受勾选限制）
       if (typeof MODE !== 'undefined' && MODE && MODE.denied(e.id)) return;   // 当前模式禁用
       seen[e.id] = 1;
       var nm = String(e.id).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
@@ -2257,7 +2261,7 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
         }
       }
     }
-    if (S.cfg.nativeTools && (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul')){
+    if ((S.cfg.nativeTools || S.cfg.mode === 'soul') && (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul')){
       try {
         var ts = toolSchemas();
         if (ts.length){

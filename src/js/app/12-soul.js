@@ -7,6 +7,10 @@
   'use strict';
   var KEY = 'sc.soul.v1';
   var MEM_MAX = 1200, USER_MAX = 600, TOPK = 6;
+  /* v0.4.1：持续进化 */
+  var EVO_KEY = 'sc.soul.evo.v1', EVO_AT = 'sc.soul.evoAt', EVO_ON = 'sc.soul.evoOn', EVO_TURNS = 'sc.soul.evoTurns';
+  var EVO_EVERY = 6, EVO_DELAY = 15000;
+  var _evoBusy = false, _evoFresh = false;
 
   function load(){
     try { var o = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; return { user: String(o.user || ''), memory: String(o.memory || ''), updated: o.updated || 0 }; }
@@ -38,6 +42,15 @@
     var days = Object.keys(d).sort();
     while (days.length > 14){ delete d[days.shift()]; }
     try { localStorage.setItem(DKEY, JSON.stringify(d)); } catch (e) {}
+    /* v0.4.1：累计成功轮数，够 6 轮就延迟安排一次自动进化（不打断流式） */
+    try {
+      var n = (+localStorage.getItem(EVO_TURNS) || 0) + 1;
+      localStorage.setItem(EVO_TURNS, String(n));
+      if (n >= EVO_EVERY && evoOn() && !_evoFresh){
+        _evoFresh = true;
+        setTimeout(maybeEvolve, EVO_DELAY);
+      }
+    } catch (e) {}
   }
   function dailyText(n){
     var d = loadDaily(), days = Object.keys(d).sort().slice(-n), out = [];
@@ -181,6 +194,162 @@
         .catch(function(){ try { localStorage.removeItem('sc.soul.dreamAt'); } catch (e) {} });
     } catch (e) {}
   }
+  /* ===== v0.4.1：自动进化（记忆 + 可复用技能） ===== */
+  function evoOn(v){
+    if (typeof v === 'boolean'){
+      try { localStorage.setItem(EVO_ON, v ? '1' : '0'); } catch (e) {}
+      return v;
+    }
+    try { return localStorage.getItem(EVO_ON) !== '0'; } catch (e) { return true; }
+  }
+  function evoLog(){
+    try { var a = JSON.parse(localStorage.getItem(EVO_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function evoSave(list){
+    try { localStorage.setItem(EVO_KEY, JSON.stringify((list || []).slice(-30))); } catch (e) {}
+  }
+  function evoTurns(){ try { return +localStorage.getItem(EVO_TURNS) || 0; } catch (e) { return 0; } }
+  function evoResetTurns(){ try { localStorage.setItem(EVO_TURNS, '0'); } catch (e) {} }
+  function evolve(force){
+    if (!force && !evoOn()) return Promise.resolve({ ok: false, reason: '自动进化已关闭' });
+    if (_evoBusy) return Promise.resolve({ ok: false, reason: '进化正在进行中' });
+    var S0 = (typeof S !== 'undefined') ? S : null;
+    if (!window.NET || !NET.chatOnce) return Promise.resolve({ ok: false, reason: '联网组件未加载' });
+    if (!S0 || !S0.cfg || !S0.cfg.currentModel) return Promise.resolve({ ok: false, reason: '还没有选择模型' });
+    if (!S0.cfg.baseURL && !(NET.isMock && NET.isMock())) return Promise.resolve({ ok: false, reason: '还没有配置 Base URL' });
+    var logs = dailyText(3);
+    if (logs.length < 200) return Promise.resolve({ ok: false, reason: '最近日记太少（再聊几轮）' });
+    _evoBusy = true;
+    var oldMem = lines(load().memory).map(function(l){ return entryOf(l).text; });
+    var skillNames = [];
+    try { skillNames = EXT.registry().filter(function(x){ return x.kind === 'skill' && x.on !== false; }).map(function(x){ return x.name; }); } catch (e) {}
+    var sys = '你是 Soul 的自主进化器。读下面最近的对话与已有记忆/技能，只做两件事：\n'
+      + '1) 提炼稳定、可长期复用的事实或偏好（写进长期记忆）；\n'
+      + '2) 如果这次任务形成了可重复的成功流程，写/更新一个技能。\n'
+      + '只输出 JSON，不要解释：{"memory":["- 稳定事实/偏好"],"skill":{"name":"lowercase-slug","title":"...","desc":"...","body":"# ..."},"note":"一句话"}\n'
+      + '约束：memory ≤6 条、每条 ≤80 字；没有就空数组。skill 只在流程可复用且这次确实成功时返回，否则给 null；'
+      + '正文必须含「何时用 / 步骤 / 坑 / 验证」四段，≤1800 字。不要编造，不要写密钥/密码/token/证件/卡号，不要重复已有记忆或技能。';
+    var usr = '【已有长期记忆】\n' + (oldMem.join('\n') || '（空）') +
+      '\n\n【已有技能】\n' + (skillNames.join('、') || '（无）') +
+      '\n\n【最近 3 天日记】\n' + logs.slice(0, 8000);
+    return NET.chatOnce([{ role: 'system', content: sys }, { role: 'user', content: usr }], { temperature: 0.1, maxTokens: 1200, timeout: 60000 })
+      .then(function(r){
+        var txt = String((r && r.content) || '');
+        var m = /\{[\s\S]*\}/.exec(txt);
+        if (!m) throw new Error('模型没有返回 JSON');
+        var j = JSON.parse(m[0]);
+        var applied = 0;
+        (j.memory || []).slice(0, 6).forEach(function(s){
+          var t = String(s || '').replace(/^[-•]\s*/, '').replace(/^\[[0-9]{4}-[0-9]{2}-[0-9]{2}\]\s*/, '').trim();
+          if (!t || t.length > 80) return;
+          if (sensitive(t)) return;
+          if (oldMem.some(function(x){ return sim(x, t) >= 0.65; })) return;
+          var rr = remember(t);
+          if (rr && rr.ok) applied++;
+        });
+        var skName = '';
+        var sk = j.skill;
+        if (sk && typeof sk === 'object'){
+          var nm = String(sk.name || '').toLowerCase().trim();
+          var body = String(sk.body || '').trim();
+          if (/^[a-z][a-z0-9-]{1,24}$/.test(nm) && body && body.length <= 1800 && !sensitive(body)){
+            try {
+              var up = EXT.upsert({ kind: 'skill', name: nm, title: String(sk.title || nm).slice(0, 80),
+                desc: String(sk.desc || '').slice(0, 160), body: body, modes: ['soul', 'work', 'agent'] });
+              if (up && up.ok) skName = nm;
+            } catch (e) {}
+          }
+        }
+        var note = String(j.note || '').replace(/\s+/g, ' ').slice(0, 200);
+        var log = evoLog();
+        log.push({ ts: Date.now(), mem: applied, skill: skName, note: note });
+        evoSave(log);
+        try { localStorage.setItem(EVO_AT, String(Date.now())); } catch (e) {}
+        evoResetTurns();
+        return { ok: true, mem: applied, skill: skName, note: note };
+      })
+      .catch(function(e){ return { ok: false, reason: (e && e.message) || String(e) }; })
+      .then(function(res){ _evoBusy = false; _evoFresh = false; return res; });
+  }
+  function maybeEvolve(){
+    /* 自动进化只在 Soul 模式运行：切到 Chat/Work/Agent 后，logTurn 排下的定时器不能再写记忆/技能 */
+    if (typeof S === 'undefined' || !S || !S.cfg || S.cfg.mode !== 'soul'){ _evoFresh = false; return; }
+    if (!evoOn()){ _evoFresh = false; return; }
+    if (evoTurns() < EVO_EVERY){ _evoFresh = false; return; }
+    var S0 = (typeof S !== 'undefined') ? S : null;
+    if (S0 && (S0.sending || (S0.pend || 0) > 0)){
+      setTimeout(maybeEvolve, EVO_DELAY);
+      return;
+    }
+    _evoFresh = true;
+    evolve(false).then(function(r){
+      if (r && r.ok){
+        var bits = [];
+        if (r.mem) bits.push('记忆 +' + r.mem);
+        if (r.skill) bits.push('技能 ' + r.skill);
+        try { UI.toast('Soul 自动进化：' + (bits.join(' · ') || r.note || '完成')); } catch (e) {}
+      } else {
+        _evoFresh = false;
+      }
+    });
+  }
+  function evoStatus(){
+    var last = 0; try { last = +localStorage.getItem(EVO_AT) || 0; } catch (e) {}
+    var skills = 0;
+    try { skills = EXT.registry().filter(function(x){ return x.kind === 'skill' && x.on !== false; }).length; } catch (e) {}
+    return { on: evoOn(), at: last, mem: lines(load().memory).length, skills: skills, turns: evoTurns(), log: evoLog() };
+  }
+  function evoRow(it){
+    var row = mk('div', 'soul-skill-row');
+    var when = it && it.ts ? new Date(it.ts).toLocaleString() : '';
+    var bits = [];
+    if (it.mem) bits.push('记忆 +' + it.mem);
+    if (it.skill) bits.push('技能 ' + it.skill);
+    row.appendChild(mk('span', null, when + ' · ' + (bits.join(' · ') || '无变更') + (it.note ? ' · ' + it.note : '')));
+    return row;
+  }
+  function openEvo(){
+    var st = evoStatus();
+    var mask = mk('div', 'soul-mask'), box = mk('div', 'soul-box'), head = mk('div', 'soul-head');
+    head.appendChild(mk('b', null, 'Soul · 进化日志'));
+    var close = mk('button', 'soul-btn', '关闭'); head.appendChild(close);
+    var lbl = mk('div', 'soul-lbl', '自动进化：每 6 轮成功对话后在后台提炼记忆/技能（可关闭）');
+    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = st.on;
+    var cbRow = mk('label', 'soul-foot');
+    cbRow.appendChild(cb); cbRow.appendChild(mk('span', 'soul-status', '开启自动进化'));
+    cb.onchange = function(){ evoOn(!!cb.checked); try { UI.toast(cb.checked ? '已开启自动进化' : '已关闭自动进化'); } catch (e) {} };
+    var stat = mk('div', 'soul-status',
+      '上次进化：' + (st.at ? new Date(st.at).toLocaleString() : '还没有') +
+      ' · 记忆 ' + st.mem + ' 条 · 技能 ' + st.skills + ' 个 · 距下次还差 ' + Math.max(0, EVO_EVERY - st.turns) + ' 轮');
+    var list = mk('div', 'soul-skills');
+    if (!st.log.length) list.appendChild(mk('div', 'soul-status', '还没有进化记录。'));
+    st.log.slice(-30).reverse().slice(0, 12).forEach(function(it){ list.appendChild(evoRow(it)); });
+    var foot = mk('div', 'soul-foot');
+    var now = mk('button', 'soul-btn soul-primary', '立即进化');
+    var mem = mk('button', 'soul-btn', '编辑长期记忆');
+    var status = mk('span', 'soul-status', '');
+    foot.appendChild(status); foot.appendChild(mem); foot.appendChild(now);
+    box.appendChild(head); box.appendChild(lbl); box.appendChild(cbRow); box.appendChild(stat); box.appendChild(list); box.appendChild(foot);
+    mask.appendChild(box); document.body.appendChild(mask);
+    function closeFn(){ mask.remove(); }
+    close.onclick = closeFn;
+    mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
+    mem.onclick = function(){ closeFn(); openFull(); };
+    now.onclick = function(){
+      now.disabled = true; status.textContent = '进化中…';
+      evolve(true).then(function(r){
+        now.disabled = false;
+        if (r && r.ok){
+          status.textContent = '完成：记忆 +' + r.mem + (r.skill ? ' · 技能 ' + r.skill : '') + (r.note ? ' · ' + r.note : '');
+          var log = evoLog();
+          list.textContent = '';
+          log.slice(-30).reverse().slice(0, 12).forEach(function(it){ list.appendChild(evoRow(it)); });
+        } else {
+          status.textContent = '未执行：' + ((r && r.reason) || '未知原因');
+        }
+      });
+    };
+  }
   /* S2：敏感信息拒写（宁可少记，不可泄密） */
   function sensitive(t){
     return /(api[\s_-]?key|密钥|密码|passw(or)?d|secret|token|sk-[A-Za-z0-9_-]{8,}|身份证|银行卡|信用卡|卡号|\b\d{16,19}\b|家庭住址|门牌)/i.test(t);
@@ -224,6 +393,68 @@
       .slice(0, TOPK * 2)
       .map(function(x){ return x.e; });
   }
+  /* ===== v0.4.1：完全自主 —— 扩展目录 + 自主准则 ===== */
+  function clip(s, n){
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+  /* 全部已启用扩展的紧凑目录；按 kind+name 稳定排序；总长 ≤7000，工具/技能优先，prompt 最后 */
+  function catalog(){
+    var reg = [];
+    try { if (typeof EXT !== 'undefined' && EXT && EXT.registry) reg = EXT.registry() || []; } catch (e) { reg = []; }
+    var G = { tool: [], skill: [], agent: [], plugin: [], mcp: [], prompt: [] };
+    reg.forEach(function(it){
+      if (!it || it.on === false || !it.kind) return;
+      var k = it.kind, nm = String(it.name || it.title || '').trim();
+      if (!G[k] || !nm) return;
+      if (k === 'plugin') G.plugin.push(nm);
+      else if (k === 'prompt') G.prompt.push({ name: nm, body: String(it.body || it.desc || '') });
+      else if (k === 'mcp') G.mcp.push(nm + (it.url ? ' ' + it.url : ''));
+      else G[k].push(nm + (it.desc || it.title ? '：' + clip(it.desc || it.title, 90) : ''));
+    });
+    ['tool', 'skill', 'agent', 'plugin', 'mcp', 'prompt'].forEach(function(k){
+      if (k === 'prompt') G[k].sort(function(a, b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+      else G[k].sort();
+    });
+    var MAX = 7000, out = [], used = 0;
+    function section(title, list, cap){
+      if (!list || !list.length) return;
+      var avail = MAX - used;
+      if (avail < 80) return;
+      var head = title + '\n', body = list.join('\n');
+      var txt = head + body;
+      if (cap && txt.length > cap) txt = txt.slice(0, cap) + '\n…（已截断）';
+      if (txt.length > avail) txt = txt.slice(0, Math.max(0, avail - 24)) + '\n…（目录过长已截断）';
+      out.push(txt); used += txt.length + 2;
+    }
+    var head = '【扩展目录（全部已启用，Soul 可自选）】';
+    out.push(head); used += head.length + 1;
+    section('工具（围栏首行：```工具名 参数）：', G.tool);
+    section('技能（先看目录，需要时 ```skill 名字 取全文）：', G.skill);
+    section('智能体（```agent 名字 任务）：', G.agent);
+    section('插件：', G.plugin);
+    section('MCP：', G.mcp);
+    var pl = [];
+    var pcap = 3000, pused = 0;
+    G.prompt.forEach(function(p){
+      if (pused >= pcap) return;
+      var body = clip(p.body, 600);
+      var line = '- ' + p.name + '：' + body;
+      if (pused + line.length > pcap) line = line.slice(0, Math.max(0, pcap - pused)) + '…';
+      pl.push(line); pused += line.length + 1;
+    });
+    section('提示词（可直接参考，不必声明调用）：', pl, pcap);
+    var txt = out.join('\n\n');
+    return txt.length > MAX ? txt.slice(0, MAX) : txt;
+  }
+  function autonomyPrompt(){
+    return '【Soul 自主准则】\n'
+      + '- 你是 Soul。用户不需要、也不能替你勾选插件/技能/工具；全部扩展（已启用）对你开放，按任务自选最少必要工具。\n'
+      + '- 先看下面的扩展目录再动手；调用工具就是在回复里写围栏，围栏首行是工具名和参数。\n'
+      + '- 不要声称调用了不存在的工具；工具失败就按错误修正一次，仍失败就说明卡在哪一步。\n'
+      + '- 高风险或不可逆操作（删除、覆盖、执行命令、装软件、付费、上传）仍按现有权限逐次确认，不要绕过。\n'
+      + '- 长期记忆与技能由系统在后台自动沉淀；不要编造「已写入记忆」「已创建技能」。';
+  }
   function prompt(q){
     var o = load(), L = [], used = 0;
     if (o.user.trim()) L.push('【用户画像】\n' + o.user.trim().slice(0, USER_MAX));
@@ -249,8 +480,11 @@
         if (out.length) L.push('【本轮相关记忆】\n' + out.join('\n'));
       }
     }
-    if (!L.length) return '';
-    return 'Soul 记忆（长期、跨会话；以文件为准，冲突时问用户；本轮用到 ' + used + ' 条）：\n' + L.join('\n\n');
+    var memBlock = L.length
+      ? 'Soul 记忆（长期、跨会话；以文件为准，冲突时问用户；本轮用到 ' + used + ' 条）：\n' + L.join('\n\n')
+      : '';
+    var cat = catalog();
+    return (memBlock ? memBlock + '\n\n' : '') + autonomyPrompt() + (cat ? '\n\n' + cat : '');
   }
   function mk(tag, cls, txt){ var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
   function open(){
@@ -304,14 +538,19 @@
     try { return JSON.parse(localStorage.getItem(PKEY) || '[]') || []; } catch (e) { return []; }
   }
   function pendingSave(list){ try { localStorage.setItem(PKEY, JSON.stringify(list.slice(-30))); } catch (e) {} }
-  function candidate(text){
+  function candidate(text, auto){
     var t = String(text || '').trim().replace(/\s+/g, ' ');
-    if (!t || t.length < 6 || t.length > 160) return null;
-    if (sensitive(t)) return null;
-    if (!/(我喜欢|我习惯|我通常|我一般|我每周|我每天|以后都|以后别|下次别|别再|记住我|我的.{0,8}是|我在用|我住|我叫)/.test(t)) return null;
+    if (!t || t.length < 6 || t.length > 160) return auto ? { ok: false, action: 'skip', text: t } : null;
+    if (sensitive(t)) return auto ? { ok: false, action: 'rejected', text: t } : null;
+    if (!/(我喜欢|我习惯|我通常|我一般|我每周|我每天|以后都|以后别|下次别|别再|记住我|我的.{0,8}是|我在用|我住|我叫)/.test(t)) return auto ? { ok: false, action: 'skip', text: t } : null;
     var list = pendingLoad();
-    if (list.some(function(x){ return sim(x.text, t) >= 0.55; })) return null;
-    if (lines(load().memory).some(function(l){ return sim(entryOf(l).text, t) >= 0.55; })) return null;
+    if (list.some(function(x){ return sim(x.text, t) >= 0.55; })) return auto ? { ok: false, action: 'dup', text: t } : null;
+    if (lines(load().memory).some(function(l){ return sim(entryOf(l).text, t) >= 0.55; })) return auto ? { ok: false, action: 'dup', text: t } : null;
+    /* v0.4.1：自动沉淀 —— 过敏感与去重后直接写长期记忆，不再进待确认 */
+    if (auto === true){
+      var r = remember(t);
+      return { ok: !!r.ok, action: r.ok ? (r.action || 'add') : 'rejected', text: t };
+    }
     var sc = 0.45 + (/(喜欢|习惯|每周|每天|以后|别)/.test(t) ? 0.3 : 0) + (t.length <= 60 ? 0.2 : 0);
     var item = { id: 'p' + Date.now().toString(36), text: t, ts: Date.now(), score: Math.min(1, sc) };
     list.push(item); pendingSave(list);
@@ -498,6 +737,41 @@
       tl.appendChild(row);
     });
     pT.appendChild(tl);
+    /* v0.4.1：进化页签 */
+    var pE = pane('evo');
+    var st0 = evoStatus();
+    pE.appendChild(mk('div', 'soul-lbl', '持续进化：每 6 轮成功对话后在后台自动提炼稳定记忆与可复用技能'));
+    var ecb = document.createElement('input'); ecb.type = 'checkbox'; ecb.checked = st0.on;
+    var ecbRow = mk('label', 'soul-foot');
+    ecbRow.appendChild(ecb);
+    ecbRow.appendChild(mk('span', 'soul-status', '开启自动进化（关掉后只保留 /evolve 手动执行）'));
+    ecb.onchange = function(){
+      evoOn(!!ecb.checked);
+      status.textContent = ecb.checked ? '已开启自动进化' : '已关闭自动进化';
+    };
+    pE.appendChild(ecbRow);
+    pE.appendChild(mk('div', 'soul-status',
+      '上次进化：' + (st0.at ? new Date(st0.at).toLocaleString() : '还没有') +
+      ' · 累计记忆 ' + st0.mem + ' 条 · 技能 ' + st0.skills + ' 个'));
+    var eActions = mk('div', 'soul-foot');
+    var eNow = mk('button', 'soul-btn soul-primary', '立即进化');
+    var eLog = mk('button', 'soul-btn', '查看日志');
+    eActions.appendChild(eNow); eActions.appendChild(eLog);
+    pE.appendChild(eActions);
+    var eList = mk('div', 'soul-skills');
+    if (!st0.log.length) eList.appendChild(mk('div', 'soul-status', '还没有进化记录。'));
+    st0.log.slice(-30).reverse().slice(0, 6).forEach(function(it){ eList.appendChild(evoRow(it)); });
+    pE.appendChild(eList);
+    eNow.onclick = function(){
+      eNow.disabled = true;
+      evolve(true).then(function(r){
+        eNow.disabled = false;
+        status.textContent = (r && r.ok) ? ('已进化：记忆 +' + r.mem + (r.skill ? ' · 技能 ' + r.skill : '')) : ('未执行：' + ((r && r.reason) || '未知'));
+        eList.textContent = '';
+        evoLog().slice(-30).reverse().slice(0, 6).forEach(function(it){ eList.appendChild(evoRow(it)); });
+      });
+    };
+    eLog.onclick = function(){ closeFn(); openEvo(); };
     var foot = mk('div', 'soul-foot');
     var status = mk('span', 'soul-status', '本地保存；宿主内同时写 %USERPROFILE%\\SoloChat\\memory');
     var fi = document.createElement('input'); fi.type = 'file'; fi.accept = '.md,.txt'; fi.style.display = 'none';
@@ -511,7 +785,7 @@
     function closeFn(){ mask.remove(); }
     close.onclick = closeFn;
     mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
-    var first = tabBtn('user', '用户画像'); tabBtn('mem', '长期记忆'); tabBtn('pend', '待确认'); tabBtn('day', '日记'); tabBtn('time', '时间线'); tabBtn('skill', '技能');
+    var first = tabBtn('user', '用户画像'); tabBtn('mem', '长期记忆'); tabBtn('pend', '待确认'); tabBtn('day', '日记'); tabBtn('time', '时间线'); tabBtn('skill', '技能'); tabBtn('evo', '进化');
     first.classList.add('on'); pU.style.display = '';
     imp.onclick = function(){ fi.click(); };
     fi.onchange = function(){
@@ -570,5 +844,8 @@
     logTurn: logTurn, daily: dailyText, dream: dream, dreams: dreams, rollback: rollback, hydrate: hydrate, openDreams: openDreams,
     cronAdd: cronAdd, cronList: cronList, cronDel: cronDel, tick: tick, heartbeat: heartbeat,
     candidate: candidate, pendingList: pendingList, pendingAccept: pendingAccept, pendingDrop: pendingDrop,
-    timeline: timeline, maybeDream: maybeDream, semOn: semOn };
+    timeline: timeline, maybeDream: maybeDream, semOn: semOn,
+    /* v0.4.1：完全自主 + 持续进化 */
+    catalog: catalog, autonomyPrompt: autonomyPrompt, evolve: evolve, evoLog: evoLog, evoOn: evoOn,
+    evoStatus: evoStatus, openEvo: openEvo, maybeEvolve: maybeEvolve };
 })();

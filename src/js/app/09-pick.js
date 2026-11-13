@@ -23,18 +23,21 @@ var PICK = (function(){
     return out;
   }
   /* 只有勾了工具/插件才算「限定工具集」；只勾技能/提示词不动工具 */
-  function restrict(){ return (ids('tool').length + ids('plugin').length) > 0; }
+  function soul(){ return (S.cfg.mode || 'chat') === 'soul'; }
+  function restrict(){ if (soul()) return false; return (ids('tool').length + ids('plugin').length) > 0; }
   function deny(op){
+    if (soul()) return '';
     if (!restrict()) return '';
     var r = resolve();
     if (r.tools.indexOf(op) >= 0) return '';
     return '本轮只允许这些工具：' + r.tools.join('、') + '；' + op + ' 不在名单里（输入框「/」可改）';
   }
-  function agents(){ var r = resolve(); return r.agents.length ? r.agents : null; }
+  function agents(){ if (soul()) return null; var r = resolve(); return r.agents.length ? r.agents : null; }
   function block(mode){
+    mode = mode || S.cfg.mode || 'chat';
+    if (mode === 'soul') return ''; /* Soul 由系统注入全部扩展目录，不受勾选限制 */
     var r = resolve();
     if (!r.on) return '';
-    mode = mode || S.cfg.mode || 'chat';
     var L = ['本轮扩展（用户勾选，优先级高于默认清单）：'];
     if (restrict()) L.push('- 工具白名单：' + (r.tools.join('、') || '（无）') + '；名单外的围栏会被拦截。');
     if (mode !== 'chat'){
@@ -191,6 +194,11 @@ var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
   text: function(key){ var o = S.cfg.sysEdits || {}; if (Object.prototype.hasOwnProperty.call(o, key)) return o[key] || ''; return MODE.texts[key] || ''; },
            /* v1.28.1：某个工具在当前模式是否可用（渲染时给「不会执行」的围栏打标） */
     toolAllowed: function(op){
+      /* v0.4.1：Soul 使用全部已启用扩展，不标「本轮不执行」 */
+      if (S.cfg.mode === 'soul'){
+        try { if (typeof EXT !== 'undefined' && EXT.isOn) return EXT.isOn(op); } catch (e) {}
+        return true;
+      }
       /* v0.4.1：Chat 里用户勾了工具，围栏就真的会执行，不再标「本轮不执行」 */
       if (S.cfg.mode === 'chat' && typeof PICK !== 'undefined' && PICK.restrict())
         return PICK.resolve().tools.indexOf(op) >= 0;
@@ -617,10 +625,10 @@ var SENSITIVE = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'cmd', 'g
   }
   function profiles(mode){
   if (mode === 'chat') return []; // v0.3.90：Chat 不派子智能体，纯对话 + 流式就是它该有的样子
-    var a = am(), out = [];
+    var a = am(), out = [], soul = (mode === 'soul');
     ROLES.forEach(function(r){ if (inScope(r, a)) out.push(r); });
     EXT.all().forEach(function(it){
-      if (it.kind === 'agent' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0 && inScope(it, a)) out.push(it);
+      if (it.kind === 'agent' && it.on !== false && (soul || (it.modes || ['work']).indexOf(mode) >= 0) && inScope(it, a)) out.push(it);
     });
     return out;
   }
@@ -1101,6 +1109,8 @@ var EXTRACT = (function(){
 var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
+  /* v0.4.1：Soul 下 Work 只执行 Work 专属操作，共享操作交给 FS，避免重复执行 */
+  var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   /* v1.29.4 重写：目标 / 工具 / 路由 / 纪律 / 输出 五段，保留全部工具与既有约定 */
   var PROTOCOL = 'Work 协议：在页面沙箱里完成短任务；沙箱不联网、不写磁盘（除 vfs）。\n' +
@@ -1306,9 +1316,11 @@ var WORK = (function(){
     if (w0.cancel || !msg || msg.status !== 'ok') return;
     /* v0.9.5：本轮有提问卡 → 停下来等用户回答，绝不自己往下跑 */
     if (/```ask\b/.test(String(msg.content || ''))){ w0.waitAsk = true; return; }
-  if (S.cfg.mode !== 'work' && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
-    autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件） */
+  var soul = (S.cfg.mode === 'soul');
+  if (S.cfg.mode !== 'work' && !soul && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
+    if (!soul) autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件）；Soul 不自动落盘 */
     var calls = scan(msg.content);
+    if (soul) calls = calls.filter(function(c){ return SOUL_OPS.indexOf(c.op) >= 0; });
     if (!calls.length) return;
     if (!w0.turns){ w0.errStreak = 0; w0.lastErr = ''; w0.healed = 0; }
     if (LIMITS.WORK_MAX_TURNS > 0 && w0.turns >= LIMITS.WORK_MAX_TURNS){ UI.toast('已达 Work 轮次上限（' + LIMITS.WORK_MAX_TURNS + '），请人工查看产物', true); return; }

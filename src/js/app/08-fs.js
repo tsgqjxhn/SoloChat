@@ -71,7 +71,9 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var s0 = stOf(msg && msg.sid);
     /* v0.4.1：Chat 里勾了工具就也跑工具循环（只跑白名单里的） */
     var chatTools = (S.cfg.mode === 'chat') && PICK.restrict();
-    if ((S.cfg.mode !== 'agent' && !chatTools) || s0.cancel || !msg || msg.status !== 'ok') return;
+    /* v0.4.1：Soul 完全自主 —— 与 Agent 同权，工具围栏真的执行 */
+    var soul = S.cfg.mode === 'soul';
+    if (((S.cfg.mode !== 'agent' && !soul) && !chatTools) || s0.cancel || !msg || msg.status !== 'ok') return;
     /* v0.9.5：本轮有提问卡 → 停下来等用户回答 */
     if (/```ask\b/.test(String(msg.content || ''))) return;
     var calls = scan(msg.content), reads = [], writes = [], i;
@@ -453,7 +455,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
      确认框须写明【位置】与【操作内容】，用户同意后带 out=1 交给宿主再校验。 */
   function apply(mid, path, btn){
     var msg = (mid && typeof mid === 'object') ? mid : byId(mid); /* v0.3.3：后台会话的消息不在 S.msgs 里 */
-    if (btn && S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭', true); return; }
+    if (btn && S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul'){ UI.toast('文件 Agent 已关闭', true); return; }
     var block = msg && findWrite(msg.content, path);
     if (!block){ UI.toast('找不到对应的写入申请', true); return; }
     var outside = isOutside(path);
@@ -490,7 +492,7 @@ if (r && r.snap){ var sk = snapKey(msg.sid, ws, path); var arr = SC_SNAPS[sk]; i
   /* v1.28.4：撤销这次写入 —— 用写入前快照恢复，只覆盖 SoloChat 自己写过的那一份 */
   /* v0.3.23：一条回复里多处写入，一次应用完（对标 Cursor 的 Accept all） */
   function applyAll(mid){
-    if (S.cfg.mode !== 'agent'){ UI.toast('文件 Agent 已关闭：切到 Agent 模式才能应用写入', true); return; } // v0.3.29
+    if (S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul'){ UI.toast('文件 Agent 已关闭：切到 Agent 模式才能应用写入', true); return; } // v0.3.29
     var msg = byId(mid); if (!msg) return;
     var seen = {}, n = 0;
     var _outside = []; scan(msg.content).forEach(function(c){ if (c.op === 'fs-write' && isOutside(c.path) && _outside.indexOf(c.path) < 0) _outside.push(c.path); });
@@ -688,6 +690,27 @@ var EXT = (function(){
     setCfg({ ext: u }); save();
     return item.name;
   }
+  /* v0.4.1：技能 upsert（只处理用户 skill，不碰内置工具/包元数据） */
+  function upsert(item){
+    if (!item || item.kind !== 'skill') throw new Error('upsert 只支持 kind=skill');
+    var nm = String(item.name || '').trim();
+    if (!/^[a-z][a-z0-9-]{1,24}$/.test(nm)) throw new Error('技能名只能用小写字母/数字/短横，2-25 字符');
+    if (isKnownBuiltin(nm)) throw new Error('不能覆盖内置项：' + nm);
+    var u = userItems().slice(), hit = -1, i;
+    for (i = 0; i < u.length; i++) if (u[i].kind === 'skill' && (u[i].name === nm || u[i].id === nm)){ hit = i; break; }
+    if (hit >= 0){
+      var it = u[hit];
+      if (item.body != null) it.body = String(item.body);
+      if (item.title) it.title = String(item.title);
+      if (item.desc != null) it.desc = String(item.desc);
+      if (item.modes && item.modes.length) it.modes = item.modes.slice();
+      it.on = true;
+      setCfg({ ext: u }); save();
+      return { ok: true, action: 'update', name: nm };
+    }
+    add({ kind: 'skill', name: nm, title: item.title || nm, desc: item.desc || '', body: item.body || '', modes: item.modes || ['soul'] });
+    return { ok: true, action: 'add', name: nm };
+  }
   function delPkg(pkg){
     if (!pkg) return 0;
     var u = userItems().filter(function(x){ return x.pkg !== pkg; });
@@ -709,19 +732,20 @@ var EXT = (function(){
     return n;
   }
   function toolsFor(mode){
-    var out = [];
+    var out = [], soul = (mode === 'soul');
     var u = userItems();
     for (var i = 0; i < u.length; i++){
       var it = u[i];
       if (it.kind !== 'tool' || it.on === false) continue;
-      if ((it.modes || ['work']).indexOf(mode) < 0) continue;
+      if (!soul && (it.modes || ['work']).indexOf(mode) < 0) continue;
       out.push(it);
     }
     return out;
   }
   function skillsFor(mode){
+    var soul = (mode === 'soul');
     return userItems().filter(function(it){
-      return it.kind === 'skill' && it.on !== false && (it.modes || ['work']).indexOf(mode) >= 0;
+      return it.kind === 'skill' && it.on !== false && (soul || (it.modes || ['work']).indexOf(mode) >= 0);
     });
   }
   function hasTool(name){
@@ -1426,9 +1450,9 @@ function importFiles(list){
     var lines = [], t = toolsFor(mode), s2 = skillsFor(mode), i, off = [];
     for (i = 0; i < BUILTIN.length; i++)
       if (BUILTIN[i].modes.indexOf(mode) >= 0 && !isOn(BUILTIN[i].id)) off.push(BUILTIN[i].id);
-    /* v0.4.0c：本轮勾选了工具/技能时，只把选中的列给模型 */
+    /* v0.4.0c：本轮勾选了工具/技能时，只把选中的列给模型（Soul 不看勾选） */
     try {
-      if (typeof PICK !== 'undefined' && PICK){
+      if (mode !== 'soul' && typeof PICK !== 'undefined' && PICK){
         var r = PICK.resolve();
         if (r.on){
           if (PICK.restrict()) t = t.filter(function(x){ return r.tools.indexOf(x.name) >= 0; });
@@ -1452,7 +1476,7 @@ function importFiles(list){
     return lines.join('\n');
   }
   return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
-    isOn: isOn, setOn: setOn, add: add, del: del, importPlugin: importPlugin, find: find,
+    isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,

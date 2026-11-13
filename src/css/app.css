@@ -1254,3 +1254,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone #tb-mode{display:none}
   body.m-phone #sel-model{max-width:92px}
 }
+
+/* v0.4.1：Soul 自主模式 —— 不需要在输入区勾选扩展，隐藏六类插件按钮 */
+body.m-soul .pk-btn,
+body.m-soul #btn-pk-all,
+body.m-phone.m-soul .m-pk-all{display:none!important}

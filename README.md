@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.0 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.1 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,15 +85,19 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,392,512 字节**（v0.4.0，FileVersion 0.4.0.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,209,577 字节 / 20,681 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,209,649 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,414,016 字节**（v0.4.1，FileVersion 0.4.1.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,231,037 字节 / 21,039 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **17 个文件 / 1,231,109 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
-## Android 版（v0.4.0，弹窗模型 / 超时 / 空回答修复）
+## Android 版（v0.4.1，Soul 自主进化）
 
-`dist/SoloChat-Android-0.4.0.apk`（**442,966 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 18）
+`dist/SoloChat-Android-0.4.1.apk`（**449,162 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 19）
+
+- **Soul 完全自主**：输入区不再显示插件/技能/工具选择；所有已启用扩展自动进入 Soul 的扩展目录，按需调用。
+- **持续进化**：每轮自动沉淀稳定记忆；每 6 轮成功对话后台反思一次，自动新增/更新可复用技能，并有「进化」页签、`/evolve` 命令和开关。
+- **真实工具执行**：Soul 与 Agent 同权执行文件工具，同时能执行 Work 的 vfs / run / Python 沙箱 / 浏览器等；原生 function calling 在 Soul 下自动开启。
 
 - **截图弹窗模型独立配置**：设置 → 连接与模型 → 模型页新增「截图弹窗模型」，可单独选视觉模型，留空跟随当前聊天模型；原生 `Prefs.POPUP_MODEL` 与主应用自动同步。
 - **截图超时修复**：`ImageReader` 改为常驻监听，空闲时持续丢帧，避免队列积满；截图等待延至 5 秒，第二次及后续截图不再频繁超时。

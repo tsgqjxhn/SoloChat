@@ -4,10 +4,12 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.0**（versionCode 18，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.1**（versionCode 19，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **Soul 完全自主**：输入区不再显示插件/技能/工具选择；所有已启用扩展进入 Soul 的扩展目录，按需调用；Soul 与 Agent 同权执行文件工具，也能执行 Work 的 vfs / run / Python 沙箱 / 浏览器等；原生 function calling 在 Soul 下自动开启。
+- **持续进化**：每轮自动沉淀稳定记忆；每 6 轮成功对话后台反思一次，自动新增/更新可复用技能；新增「进化」页签、`/evolve` 命令和开关。
 - **截图弹窗模型独立配置**：设置 → 连接与模型 → 模型页新增「截图弹窗模型」，可单独选视觉模型，留空跟随当前聊天模型；原生 `Prefs.POPUP_MODEL` 与主应用自动同步。
 - **截图超时修复**：`ImageReader` 常驻监听、空闲持续丢帧，避免队列积满；等待 5 秒，第二次及后续截图不再频繁超时。
 - **回答 null 修复**：兼容 `content:null`、数组 content、`reasoning_content`、`choices[].text`；仍为空提示「模型返回空内容」，不再显示 null。
@@ -63,7 +65,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.0.apk`（442,966 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.0.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.1.apk`（449,162 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.1.apk`）
 
 ## 使用
 
