@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.1 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.2 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -85,19 +85,22 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 
 | 项目 | 当前值 |
 |---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,414,016 字节**（v0.4.1，FileVersion 0.4.1.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,231,037 字节 / 21,039 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **17 个文件 / 1,231,109 字节**（模板 + css/svg/js 分段） |
+| 发布产物 | `dist/SoloChatHost.exe` **3,466,752 字节**（v0.4.2，FileVersion 0.4.2.0），单文件，无散落 dll |
+| 主产物 | `index.html` **1,284,038 字节 / 22,018 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
+| 源码 | `src/` **19 个文件 / 1,284,110 字节**（模板 + css/svg/js 分段） |
 | 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
 | 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
 
-## Android 版（v0.4.1，Soul 自主进化）
+## Android 版（v0.4.2，Soul 人格 / 语音 / 视频）
 
-`dist/SoloChat-Android-0.4.1.apk`（**449,162 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 19）
+`dist/SoloChat-Android-0.4.2.apk`（**463,370 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 20）
 
-- **Soul 完全自主**：输入区不再显示插件/技能/工具选择；所有已启用扩展自动进入 Soul 的扩展目录，按需调用。
-- **持续进化**：每轮自动沉淀稳定记忆；每 6 轮成功对话后台反思一次，自动新增/更新可复用技能，并有「进化」页签、`/evolve` 命令和开关。
-- **真实工具执行**：Soul 与 Agent 同权执行文件工具，同时能执行 Work 的 vfs / run / Python 沙箱 / 浏览器等；原生 function calling 在 Soul 下自动开启。
+- **模式切换条**：四个模式下中心坐标固定（浏览器实测误差 0px），不再随空态内容跳动。
+- **Work 长任务**：去掉所有「短任务」限制文案，协议明确允许长任务和多步工具连续执行；`WORK_MAX_TURNS=0`。
+- **Soul 极简 + 人格**：Soul 输入区隐藏附件/联网/生图；人格设置含脸（头像）、性格、声音 TTS、能力（LLM/生图/生视频/搜索/附件）、记忆、身体，修改即保存、下一轮生效。
+- **+更多统一入口**：深度研究、生成图片、生成视频、语音输入 STT、语音合成 TTS 全部从 +更多 开关/进入。
+- **TTS/STT**：浏览器 Web Speech API；不支持时明确提示。
+- **生成视频**：可配置 `/videos/generations` 兼容端点，支持同步 URL 与 60×3s 轮询，只显示 https / 相对地址结果。
 
 - **截图弹窗模型独立配置**：设置 → 连接与模型 → 模型页新增「截图弹窗模型」，可单独选视觉模型，留空跟随当前聊天模型；原生 `Prefs.POPUP_MODEL` 与主应用自动同步。
 - **截图超时修复**：`ImageReader` 改为常驻监听，空闲时持续丢帧，避免队列积满；截图等待延至 5 秒，第二次及后续截图不再频繁超时。

@@ -575,6 +575,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
   flex-direction:column;text-align:center;padding:24px;
 }
 #empty.show{display:flex}
+body.empty-open #msg-scroll{overflow:hidden}
 /* v2.9.1：居中的只有 .e-wrap（图标+标题+模式选择），其余内容绝对定位在其下方，
    这样三种模式切换时模式选择组件的水平/垂直位置完全不动，只有下侧内容变化 */
 #empty .e-wrap{position:relative;display:flex;flex-direction:column;align-items:center}
@@ -596,6 +597,10 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 #empty .e-modes{display:flex;justify-content:center;margin:2px 0}
 #empty .e-modes .seg{padding:3px}
 #empty .e-modes .seg button{padding:6px 16px;font-size:13px}
+/* v0.4.2：模式条固定在 #empty 上，不再随各模式图标/标题/说明的高度漂移；
+   v2.9.2：改为 position:fixed（视口），不受 #msg-scroll 的 scrollTop 与滚动条宽度影响；
+   四模式水平/垂直像素位置完全一致（验收：getBoundingClientRect 误差 ≤1px） */
+#empty .e-modes-fixed{position:fixed;top:max(68px, calc(50% - 190px));left:50%;transform:translateX(-50%);margin:0;z-index:2}
 #empty .e-temp{
   position:absolute;top:4px;right:4px;display:inline-flex;align-items:center;gap:6px;
   padding:5px 12px;border-radius:var(--r-pill);border:1px solid var(--hairline);
@@ -997,10 +1002,12 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .cv-status{flex:1;color:var(--muted);font-size:12px}
 /* Soul：长期记忆弹层 */
 .soul-mask{position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
-.soul-box{width:min(760px,90vw);max-height:86vh;display:flex;flex-direction:column;gap:8px;padding:16px 18px;background:var(--bg);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:auto}
-.soul-head{display:flex;align-items:center;justify-content:space-between}
+.soul-box{width:min(760px,90vw);max-height:86vh;display:flex;flex-direction:column;gap:8px;padding:16px 18px;background:var(--canvas,var(--bg,#faf9f5));border:1px solid var(--hairline);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:auto}
+.soul-head{display:flex;align-items:center;justify-content:space-between;flex:none}
+.soul-panes{min-height:0}
+.soul-foot{flex:none}
 .soul-lbl{color:var(--muted);font-size:12px;margin-top:6px}
-.soul-ta{width:100%;box-sizing:border-box;min-height:80px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--text);font:12px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
+.soul-ta{width:100%;box-sizing:border-box;min-height:80px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--card);color:var(--ink);font:12px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
 .soul-ta-lg{min-height:150px}
 .soul-foot{display:flex;align-items:center;gap:8px;margin-top:6px}
 .soul-status{flex:1;color:var(--muted);font-size:12px}
@@ -1008,7 +1015,7 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .soul-heart{margin-top:10px;color:var(--faint);font-size:12px}
 .cron-card{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:10px 12px;border:1px solid var(--hairline);border-radius:10px;background:var(--soft)}
 .cron-card .cron-txt{flex:1;min-width:160px;font-size:13px}
-.soul-tabs{display:flex;gap:6px;margin:2px 0 8px}
+.soul-tabs{display:flex;gap:6px;margin:2px 0 8px;flex:none}
 .soul-tab{height:26px;padding:0 10px;border:1px solid var(--hairline);border-radius:999px;background:var(--card);color:var(--muted);font:inherit;font-size:12px;cursor:pointer}
 .soul-tab.on{background:var(--primary);border-color:var(--primary);color:#fff}
 .soul-pane{display:none}
@@ -1017,7 +1024,7 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .soul-skills{max-height:40vh;overflow:auto}
 .soul-skill-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--hairline-soft);font-size:12px}
 .soul-skill-row span{flex:1}
-.soul-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.soul-btn{height:28px;padding:0 10px;border:1px solid var(--hairline);border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
 .soul-btn:hover{background:var(--lift)}
 .soul-primary{background:var(--primary);border-color:var(--primary);color:#fff}
 /* #20：流式期间藏起代码工具条，结束后淡入 */
@@ -1259,3 +1266,49 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 body.m-soul .pk-btn,
 body.m-soul #btn-pk-all,
 body.m-phone.m-soul .m-pk-all{display:none!important}
+
+/* v0.4.2：Soul 极简输入区 —— 隐藏附件/联网/生图入口；只留人格 + 更多（+语音按钮） */
+body.m-soul #btn-attach,
+body.m-soul #btn-web,
+body.m-soul #btn-img,
+body.m-soul .m-set-btn{display:none!important}
+#btn-img{display:none!important} /* 生图统一从「+更多」进入 */
+#btn-soul-profile{display:none;align-items:center;justify-content:center}
+body.m-soul #btn-soul-profile{display:inline-flex!important}
+#btn-stt,#btn-tts{display:none;align-items:center;justify-content:center;font-size:17px;line-height:1}
+body.voice-stt #btn-stt{display:inline-flex!important}
+body.voice-tts #btn-tts{display:inline-flex!important}
+.sp-face{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;overflow:hidden;font-size:17px;line-height:1}
+.sp-face img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+
+/* Soul 空态头像（脸） */
+#empty .e-avatar{width:76px;height:76px;border-radius:22px;display:flex;align-items:center;justify-content:center;
+  background:var(--soft);border:1px solid var(--hairline);overflow:hidden;font-size:44px;line-height:1}
+#empty .e-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+#empty .e-soul-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+
+/* Soul 人格设置弹层 */
+.soul-tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+.soul-tabs::-webkit-scrollbar{display:none}
+.soul-profile-face{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:4px 0 8px}
+.soul-face{width:84px;height:84px;border-radius:24px;display:flex;align-items:center;justify-content:center;
+  background:var(--soft);border:1px solid var(--hairline);overflow:hidden;font-size:46px;line-height:1;flex:none}
+.soul-face img{width:100%;height:100%;object-fit:cover}
+.soul-face-side{flex:1;min-width:220px}
+.soul-emoji-row{display:flex;gap:6px;flex-wrap:wrap}
+.soul-emoji{width:34px;height:34px;border:1px solid var(--hairline);border-radius:9px;background:var(--card);font-size:19px;line-height:1;cursor:pointer}
+.soul-emoji:hover{background:var(--lift)}
+.soul-field{margin:8px 0}
+.soul-field>label{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+.soul-inp{width:100%;box-sizing:border-box;height:32px;padding:0 10px;border:1px solid var(--hairline);border-radius:8px;
+  background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.soul-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.soul-check{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:13px;color:var(--body);cursor:pointer}
+.soul-check input{flex:none}
+.soul-note{color:var(--faint);font-size:11.5px;line-height:1.6;margin:4px 0 0}
+.soul-saved{color:var(--success);font-size:11.5px;margin-left:6px}
+@media (max-width:520px){
+  body.m-phone #empty .e-modes-fixed{top:max(60px, calc(50% - 168px))}
+  .soul-grid2{grid-template-columns:1fr}
+  .soul-box{width:min(96vw,760px);padding:14px}
+}

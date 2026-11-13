@@ -1113,7 +1113,7 @@ var WORK = (function(){
   var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   /* v1.29.4 重写：目标 / 工具 / 路由 / 纪律 / 输出 五段，保留全部工具与既有约定 */
-  var PROTOCOL = 'Work 协议：在页面沙箱里完成短任务；沙箱不联网、不写磁盘（除 vfs）。\n' +
+  var PROTOCOL = 'Work 协议：在页面沙箱里完成任务；长任务、多步任务都可以连续执行，不要因为任务长就要求切 Agent。沙箱不联网、不写磁盘（除 vfs）。\n' +
     '工具（围栏首行是参数）：\n' +
     '```browser URL —— 应用内浏览器打开网页（要登录态、要看页面本身时用）。\n' +
     '```browser-read [URL] —— 读应用内浏览器当前页（或先打开 URL）：回标题 + 正文 + 链接；JS 渲染、点过「加载更多」的页面用这个。\n' +

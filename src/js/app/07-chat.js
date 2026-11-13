@@ -57,7 +57,12 @@ function holdBusy(d, sid){
   function updateEmpty(){
     var draft = !S.msgs.length;
     $empty.classList.toggle('show', draft);
+    document.body.classList.toggle('empty-open', draft);
     if (!draft) return;
+    /* v2.9.2：草稿态可能带着上一轮滚动位置进来（Chat 首次渲染时 scrollTop=84），
+       会让空态与固定模式条错位；渲染空态前先把滚动位置归零。非空会话不受影响 */
+    try { if ($scroll) $scroll.scrollTop = 0; } catch(e){}
+    setTimeout(function(){ try { if (!S.msgs.length && $scroll) $scroll.scrollTop = 0; } catch(e){} }, 0);
     var cs = curSession();
     var ws = (cs && cs.workspace) || (!cs ? S.pendWs : '');
     $empty.textContent = '';
@@ -74,10 +79,10 @@ function holdBusy(d, sid){
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    var modes = el('div', { class: 'e-modes' });
+    var modes = el('div', { class: 'e-modes e-modes-fixed' });
     /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
     var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
-      title: '模式：Chat 常规对话 / Work 沙箱短任务（产物进工作区）/ Agent 真实文件工具 / Soul 长期记忆' });
+      title: '模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格' });
     [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
       var b = el('button', { type: 'button', 'data-mode': t[0] });
       b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
@@ -86,37 +91,45 @@ function holdBusy(d, sid){
       seg.appendChild(b);
     });
     modes.appendChild(seg);
+    /* v0.4.2：模式条直接挂到 #empty（不在 .e-wrap 内），四个模式坐标完全固定 */
+    $empty.appendChild(modes);
     if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
       ic.setAttribute('style', 'width:76px;height:76px;color:var(--primary)');
       return ic;
     }
-    if (S.cfg.mode === 'soul'){ // Soul：自主 · 长期记忆 · 持续进化
-      core.appendChild(bigIcon('user', true));
-      core.appendChild(el('h1', { text: 'Soul：自主 · 长期记忆 · 持续进化' }));
+    if (S.cfg.mode === 'soul'){ // Soul：以「人」为中心 —— 脸 + 名字 + 自主记忆
+      var _sp = (window.SOUL && SOUL.profile) ? SOUL.profile() : null;
+      var _name = (_sp && _sp.name) || 'Soul';
+      var _face = (window.SOUL && SOUL.avatar) ? SOUL.avatar() : ((_sp && _sp.avatarEmoji) || '🌙');
+      var av = el('div', { class: 'e-avatar', title: 'Soul 的脸（人格设置里可改）' });
+      if (/^data:image\//i.test(String(_face))) av.appendChild(el('img', { src: _face, alt: _name }));
+      else av.appendChild(el('span', { text: String(_face || '🌙') }));
+      core.appendChild(av);
+      core.appendChild(el('h1', { text: _name + '：自主 · 长期记忆 · 持续进化' }));
       core.appendChild(el('div', { class: 'soul-heart', text: '无需勾选扩展：Soul 会自动使用全部技能、工具和智能体' }));
-      core.appendChild(modes);
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '关联工作区文件夹（可选）：Soul 需要读文件时只能访问这里'
       }, [icon('ws'), el('span', { id: 'ws-label', text: ws ? (ws.split(/[\\/]/).filter(Boolean).pop() || ws) : '选择文件夹（可选）' })]));
       renderWsBtn();
+      var spro = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-profile', text: '人格设置' });
+      spro.addEventListener('click', function(){ if (window.SOUL && SOUL.openProfile) SOUL.openProfile(); else UI.toast('人格组件未加载', true); });
       var smem = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-mem', text: '编辑长期记忆（/memory）' });
       smem.addEventListener('click', function(){ if (window.SOUL) window.SOUL.open(); });
       var sevo = el('button', { class: 'btn btn-sec', type: 'button', 'data-act': 'soul-evo', text: '进化日志（/evolve log）' });
       sevo.addEventListener('click', function(){ if (window.SOUL && SOUL.openEvo) SOUL.openEvo(); else UI.toast('记忆组件未加载', true); });
-      extra.appendChild(el('div', { class: 'row' }, [smem, sevo]));
+      extra.appendChild(el('div', { class: 'row e-soul-row' }, [spro, smem, sevo]));
       try {
         var _hb = (window.SOUL && SOUL.heartbeat) ? SOUL.heartbeat() : null;
-        if (_hb) extra.appendChild(el('div', { class: 'soul-heart', text: '上次聊到「' + (_hb.last || '—') + '」 · 今天 ' + _hb.turns + ' 轮 · 记忆 ' + _hb.mem + ' 条' }));
+        if (_hb) extra.appendChild(el('div', { class: 'soul-heart', text: _name + ' · 上次聊到「' + (_hb.last || '—') + '」 · 今天 ' + _hb.turns + ' 轮 · 记忆 ' + _hb.mem + ' 条' }));
       } catch (e) {}
       return;
     }
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
       core.appendChild(el('h1', { text: 'Agent：真实文件工具' }));
-      core.appendChild(modes);
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '选择工作区文件夹：本次会话中 AI 只能读写该文件夹内的文件（开始后不可更改）'
@@ -124,10 +137,9 @@ function holdBusy(d, sid){
       renderWsBtn();
       return;
     }
-    if (S.cfg.mode === 'work'){ // Work 空态（v2.0，v2.7 换新图标，v2.9 去掉小字）
+    if (S.cfg.mode === 'work'){ // Work 空态（v2.0，v2.7 换新图标，v2.9 去掉小字；v0.4.2 支持长任务）
       core.appendChild(bigIcon('work', false));
       core.appendChild(el('h1', { text: 'Work：虚拟沙箱' }));
-      core.appendChild(modes);
       /* v3.0 #17：一键脚手架，省掉让模型重造骨架的 token */
       extra.appendChild(el('div', { class: 'tpl-row' }, [
         ['static', '静态页模板'], ['spa', '单页应用模板'], ['chart', '图表页模板']
@@ -142,7 +154,6 @@ function holdBusy(d, sid){
     var greet = h < 6 ? '夜深了' : h < 12 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     core.appendChild(bigIcon('logo', true));
     core.appendChild(el('h1', { text: greet + '，想聊点什么？' }));
-    core.appendChild(modes);
     var sugs = pickSugs(4); /* v2.9：每次新草稿随机 4 条，不再固定「写信」 */
     var srow = el('div', { class: 'e-sugs' });
     for (var i = 0; i < sugs.length; i++)
@@ -1703,6 +1714,23 @@ function sendMessage(){
     if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) closeModePop();
   });
 
+  /* v0.4.2：语音按钮显隐（STT/TTS 各自开关，不改动其他输入区图标） */
+  function applyVoiceClasses(){
+    var st = !!(S.cfg && S.cfg.sttEnabled), tt = !!(S.cfg && S.cfg.ttsEnabled);
+    document.body.classList.toggle('voice-stt', st);
+    document.body.classList.toggle('voice-tts', tt);
+    var bs = document.getElementById('btn-stt'), bt = document.getElementById('btn-tts');
+    if (bs) bs.title = st ? '语音输入（STT）：点一下开始说话' : '语音输入：未启用（+更多 里开启）';
+    if (bt) bt.title = tt ? '朗读最后一条回复（TTS）' : '语音合成：未启用（+更多 里开启）';
+  }
+  function syncSoulFaceBtn(){
+    var n = document.querySelector('#btn-soul-profile .sp-face');
+    if (!n || !window.SOUL || !SOUL.avatar) return;
+    var av = SOUL.avatar();
+    n.textContent = '';
+    if (/^data:image\//i.test(String(av))) n.appendChild(el('img', { src: av, alt: 'Soul 头像' }));
+    else n.textContent = String(av || '🌙');
+  }
   /* 输入区控件（v1.2）：模式/模型/思考 */
   function renderComposerCtl(){
     var mdName = $('#tb-mode-name');
@@ -1710,6 +1738,8 @@ function sendMessage(){
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
     document.body.classList.toggle('m-chat', (S.cfg.mode || 'chat') === 'chat');
     document.body.classList.toggle('m-soul', _isSoul);
+    applyVoiceClasses();
+    syncSoulFaceBtn();
     if (_isSoul){
       var _pk = S.cfg.picks || {}, _has = false;
       for (var _k in _pk) if (Object.prototype.hasOwnProperty.call(_pk, _k) && (_pk[_k] || []).length){ _has = true; break; }
@@ -1896,8 +1926,14 @@ function sendMessage(){
   }
   function popMore(){
     popMode = 'more';
-    var items = [{ t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' }];
-    if (S.cfg.mode === 'chat') items.push({ t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' });
+    var items = [
+      { t: (S.cfg.research ? '✓ 深度研究' : '深度研究'), p: '多地检索再写报告', act: 'go-research' },
+      { t: '生成图片', p: '输入描述 → 生图', act: 'go-img' },
+      { t: '生成视频', p: '需配置视频接口（Base / 模型）', act: 'go-video' },
+      { t: (S.cfg.sttEnabled ? '✓ 语音输入 STT' : '语音输入 STT'), p: '麦克风转文字', act: 'go-stt' },
+      { t: (S.cfg.ttsEnabled ? '✓ 语音合成 TTS' : '语音合成 TTS'), p: '朗读最后一条回复', act: 'go-tts' }
+    ];
+    items.push({ t: '/ 提示词库', p: (S.cfg.prompts || []).length + ' 条', act: 'go-prompt' });
     items.push({ t: '@ 导入历史会话', p: '并入当前会话', act: 'go-at' });
     items.push({ t: '交接会话', p: '带上文切换到另一个模式', act: 'go-handoff' });
     items.push({ t: '多智能体流水线', p: '方案 → 执行 → 验证 → 交付', act: 'go-pipe' });
@@ -1961,9 +1997,27 @@ function sendMessage(){
       closePop(); $input.focus(); return;
     }
     if (pact === 'go-research'){
-      if ((S.cfg.mode || 'chat') !== 'chat'){ toast('深度研究只在 Chat 模式下可用', true); return; }
       S.cfg.research = !S.cfg.research; saveCfg(); popMore();
       toast(S.cfg.research ? '深度研究：开（会多轮检索再写报告）' : '深度研究：关');
+      return;
+    }
+    if (pact === 'go-img'){ closePop(); return openImgGen(); }
+    if (pact === 'go-video'){ closePop(); return openVideoGen(); }
+    if (pact === 'go-stt'){
+      S.cfg.sttEnabled = !S.cfg.sttEnabled; saveCfg(); applyVoiceClasses(); popMore();
+      if (S.cfg.sttEnabled && !(window.VOICE && VOICE.listenSupported && VOICE.listenSupported()))
+        toast('浏览器不支持语音识别；可换用桌面版或 Chrome/Edge', true);
+      else toast(S.cfg.sttEnabled ? '语音输入：开（输入区显示麦克风）' : '语音输入：关');
+      return;
+    }
+    if (pact === 'go-tts'){
+      S.cfg.ttsEnabled = !S.cfg.ttsEnabled; saveCfg();
+      try { if (window.SOUL && SOUL.setProfile) SOUL.setProfile({ voice: { enabled: !!S.cfg.ttsEnabled } }); } catch (e) {}
+      applyVoiceClasses(); popMore();
+      if (!S.cfg.ttsEnabled && window.VOICE) VOICE.stop();
+      if (S.cfg.ttsEnabled && !(window.VOICE && VOICE.speakSupported && VOICE.speakSupported()))
+        toast('当前环境不支持语音合成', true);
+      else toast(S.cfg.ttsEnabled ? '语音合成：开（输入区显示朗读按钮）' : '语音合成：关');
       return;
     }
     if (pact === 'go-handoff'){ closePop(); return openHandoff(); }
@@ -2163,6 +2217,103 @@ function sendMessage(){
       if (!prompt){ UI.toast('请输入描述', true); return; }
       UI.closeModal();
       startImgGen(prompt, sz.value, parseInt(nn.value, 10) || 1);
+    });
+  }
+  /* v0.4.2：生成视频（最小可用）——配置 Base / 模型 / 尺寸 / 秒数，结果只接受 https 或相对地址 */
+  function videoDisplayUrl(u){
+    u = String(u || '').trim();
+    if (!u) return '';
+    if (/^https:\/\//i.test(u)) return /\.(mp4|webm|ogv|mov|m4v)(\?\S*)?$/i.test(u) ? u : u + '#solo-video.mp4';
+    if (/^\/(?!\/)/.test(u)) return /\.(mp4|webm|ogv|mov|m4v)(\?\S*)?$/i.test(u) ? u : u + '#solo-video.mp4';
+    return '';
+  }
+  function openVideoGen(){
+    var vp = (window.SOUL && SOUL.profile) ? SOUL.profile() : null;
+    var va = (vp && vp.abilities) || {};
+    var ta = el('textarea', { class: 'f-in', rows: '4', placeholder: '描述你想生成的视频画面、镜头和动作…', style: 'width:100%;min-height:90px;resize:vertical' });
+    var base = el('input', { class: 'f-in', type: 'text', value: S.cfg.videoBase || va.videoBase || '', placeholder: 'https://api.example.com/v1' });
+    var model = el('input', { class: 'f-in', type: 'text', value: S.cfg.videoModel || va.videoModel || '', placeholder: '如 sora-2 / veo-3 / kling-v2' });
+    var sz = el('select', { class: 'f-in' });
+    ['1280x720','720x1280','1024x1024','1920x1080'].forEach(function(v){
+      sz.appendChild(el('option', { value: v, text: v, selected: (S.cfg.videoSize || '1280x720') === v ? '' : null }));
+    });
+    var sec = el('input', { class: 'f-in', type: 'number', min: '1', max: '60', step: '1', value: String(S.cfg.videoSeconds || 5) });
+    var box = el('div', { class: 'img-gen-modal' }, [
+      el('h3', { text: '生成视频' }),
+      el('div', { class: 'f-row' }, [el('label', { text: '提示词' }), ta]),
+      el('div', { class: 'f-row f-row-2' }, [
+        el('div', {}, [el('label', { text: '尺寸' }), sz]),
+        el('div', {}, [el('label', { text: '秒数' }), sec])
+      ]),
+      el('div', { class: 'f-row' }, [el('label', { text: '视频接口 Base URL（留空则不可用；Key 跟随当前 API Key）' }), base]),
+      el('div', { class: 'f-row' }, [el('label', { text: '视频模型' }), model]),
+      el('div', { class: 'soul-note', text: '接口按 /videos/generations 调用；返回 {url} 或 {id} 时自动轮询。只显示 https 或相对地址的结果，失败会明确报错，不生成假视频。' }),
+      el('div', { class: 'f-actions' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '取消', 'data-m': 'close' }),
+        el('button', { class: 'btn btn-primary', type: 'button', text: '生成', id: 'video-gen-go' })
+      ])
+    ]);
+    UI.openModal(box);
+    setTimeout(function(){ try { ta.focus(); } catch(e){} }, 0);
+    var go = box.querySelector('#video-gen-go');
+    if (go) go.addEventListener('click', function(){
+      var prompt = String(ta.value || '').trim();
+      if (!prompt){ UI.toast('请输入视频描述', true); return; }
+      var vb = String(base.value || '').trim(), vm = String(model.value || '').trim();
+      if (!vb){ UI.toast('请先填写视频接口 Base URL（也可在 Soul 人格设置 → 能力里配置）', true); return; }
+      setCfg({ videoBase: vb, videoModel: vm, videoSize: sz.value, videoSeconds: Math.max(1, Math.min(60, parseInt(sec.value, 10) || 5)), soulProfile: (function(){
+        if (!window.SOUL || !SOUL.profile) return S.cfg.soulProfile;
+        var p = SOUL.profile(); p.abilities.videoBase = vb; p.abilities.videoModel = vm; return p;
+      })() });
+      saveCfg();
+      UI.closeModal();
+      startVideoGen(prompt, { size: sz.value, seconds: Math.max(1, Math.min(60, parseInt(sec.value, 10) || 5)) });
+    });
+  }
+  function startVideoGen(prompt, opt){
+    if (typeof VIDEO === 'undefined'){ UI.toast('视频模块未加载', true); return; }
+    if (!VIDEO.available()){ UI.toast('先在 +更多 → 生成视频 里配置视频接口 Base', true); return; }
+    opt = opt || {};
+    var s = curSession() || createSession('视频生成');
+    var userMsg = { id: uuid(), sid: s.id, role: 'user', content: prompt, status: 'ok', ts: Date.now(), attachments: [] };
+    var asstMsg = { id: uuid(), sid: s.id, role: 'assistant', content: '视频生成中…', status: 'streaming', ts: Date.now(), attachments: [] };
+    S.msgs.push(userMsg); S.msgs.push(asstMsg);
+    try { DB.putMessage(userMsg).catch(function(){}); } catch(e){}
+    try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
+    try { if (typeof DB.putSession === 'function' && s) DB.putSession(s).catch(function(){}); } catch(e){}
+    touchSession(prompt.slice(0, 18));
+    appendMsgNode(userMsg); appendMsgNode(asstMsg);
+    updateEmpty();
+    maybeScroll(true);
+    VIDEO.generate({
+      prompt: prompt,
+      size: opt.size || S.cfg.videoSize || '1280x720',
+      seconds: opt.seconds || S.cfg.videoSeconds || 5,
+      onFrame: function(st){
+        asstMsg.content = '视频生成中…' + (st ? '（' + st + '）' : '');
+        try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
+        repaintMsg(asstMsg.id);
+      },
+      onDone: function(url){
+        var show = videoDisplayUrl(url);
+        if (!show){
+          asstMsg.status = 'error'; asstMsg.errMsg = '接口返回了非 https / 相对地址，已拒绝显示：' + String(url || '').slice(0, 200); asstMsg.content = '';
+          try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
+          repaintMsg(asstMsg.id);
+          UI.toast('视频地址不安全（只允许 https / 相对地址）', true);
+          return;
+        }
+        asstMsg.status = 'ok'; asstMsg.errMsg = ''; asstMsg.content = '已生成视频：' + prompt + '\n\n' + show + '\n';
+        try { DB.putMessage(asstMsg).catch(function(){}); } catch(e){}
+        repaintMsg(asstMsg.id);
+        maybeScroll(true);
+      },
+      onError: function(e){
+        asstMsg.status = 'error'; asstMsg.errMsg = (e && e.message) || String(e); asstMsg.content = '';
+        try { DB.putMessage(asstMsg).catch(function(){}); } catch(e2){}
+        repaintMsg(asstMsg.id);
+        UI.toast('视频生成失败：' + asstMsg.errMsg, true);
+      }
     });
   }
   function startImgGen(prompt, size, n, targetId){
@@ -3197,7 +3348,8 @@ function sendMessage(){
     editCancel: editCancel, deleteMsg: deleteMsg, copyMsg: copyMsg, copyText: copyText,
     addFiles: addFiles, renderChips: renderChips, onScroll: onScroll,
     repaintMsg: repaintMsg, appendMsgNode: appendMsgNode,
-    openImgGen: openImgGen, imgDownload: imgDownload, imgCopyPrompt: imgCopyPrompt, imgRegen: imgRegen,
+    openImgGen: openImgGen, openVideoGen: openVideoGen, imgDownload: imgDownload, imgCopyPrompt: imgCopyPrompt, imgRegen: imgRegen,
+    applyVoiceClasses: applyVoiceClasses,
     autosize: autosize, doExport: doExport, doImport: doImport, reloadSessions: reloadSessions,
     updateEmpty: updateEmpty, setSending: setSending, quickAsk: quickAsk, refreshFsRoots: refreshFsRoots,
     quickCmd: quickCmd, notifyQuickState: notifyQuickState, resetQuick: resetQuick,
@@ -3416,6 +3568,39 @@ $('#sidebar').addEventListener('click', function(e){
       return;
     }
     if (t.closest('#btn-more')) return void UI.moreToggle();
+    if (t.closest('#btn-soul-profile')){
+      if (window.SOUL && SOUL.openProfile) SOUL.openProfile();
+      else UI.toast('人格组件未加载', true);
+      return;
+    }
+    if (t.closest('#btn-stt')){
+      var sb = t.closest('#btn-stt');
+      if (!(window.VOICE && VOICE.listenSupported && VOICE.listenSupported()))
+        return void UI.toast('当前浏览器不支持语音识别（STT）；桌面版/Chrome/Edge 可用', true);
+      if (sb.getAttribute('data-on') === '1') return void UI.toast('正在听…说完会自动停');
+      sb.setAttribute('data-on', '1');
+      UI.toast('正在听…说完会自动停');
+      VOICE.listen(function(txt){
+        sb.removeAttribute('data-on');
+        if (!txt) return;
+        var inp = document.getElementById('input');
+        if (!inp) return;
+        var s0 = (typeof inp.selectionStart === 'number') ? inp.selectionStart : inp.value.length;
+        var s1 = (typeof inp.selectionEnd === 'number') ? inp.selectionEnd : inp.value.length;
+        inp.value = inp.value.slice(0, s0) + txt + inp.value.slice(s1);
+        try { inp.selectionStart = inp.selectionEnd = s0 + txt.length; } catch (e) {}
+        UI.autosize(); inp.focus();
+      }).catch(function(e){
+        sb.removeAttribute('data-on');
+        UI.toast('语音识别失败：' + ((e && e.message) || e), true);
+      });
+      return;
+    }
+    if (t.closest('#btn-tts')){
+      if (window.VOICE && VOICE.speakLast) VOICE.speakLast().catch(function(e){ UI.toast('朗读失败：' + ((e && e.message) || e), true); });
+      else UI.toast('语音组件未加载', true);
+      return;
+    }
     if (t.closest('#btn-sesscfg')){ // session groups v0.4.2：发送前（草稿态）也能打开会话参数
       var cs = curSession();
       UI.sessCfgDlg(cs || null);

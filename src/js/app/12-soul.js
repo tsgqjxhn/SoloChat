@@ -223,7 +223,11 @@
     var oldMem = lines(load().memory).map(function(l){ return entryOf(l).text; });
     var skillNames = [];
     try { skillNames = EXT.registry().filter(function(x){ return x.kind === 'skill' && x.on !== false; }).map(function(x){ return x.name; }); } catch (e) {}
-    var sys = '你是 Soul 的自主进化器。读下面最近的对话与已有记忆/技能，只做两件事：\n'
+    var _P = profile();
+    var _pers = String(_P.personality || '').replace(/\s+/g, ' ').trim().slice(0, 260);
+    var sys = '你是 Soul 的自主进化器。当前人格：' + (_P.name || 'Soul') + '；性格/边界：' + (_pers || '温暖、直接、可靠，尊重用户偏好')
+      + '。提炼时不要违背这个人的说话方式与边界。\n'
+      + '读下面最近的对话与已有记忆/技能，只做两件事：\n'
       + '1) 提炼稳定、可长期复用的事实或偏好（写进长期记忆）；\n'
       + '2) 如果这次任务形成了可重复的成功流程，写/更新一个技能。\n'
       + '只输出 JSON，不要解释：{"memory":["- 稳定事实/偏好"],"skill":{"name":"lowercase-slug","title":"...","desc":"...","body":"# ..."},"note":"一句话"}\n'
@@ -455,6 +459,454 @@
       + '- 高风险或不可逆操作（删除、覆盖、执行命令、装软件、付费、上传）仍按现有权限逐次确认，不要绕过。\n'
       + '- 长期记忆与技能由系统在后台自动沉淀；不要编造「已写入记忆」「已创建技能」。';
   }
+  /* ===== v0.4.2：Soul 人格（脸 / 性格 / 声音 / 能力 / 记忆 / 身体） ===== */
+  function pdef(){
+    var d = (typeof DEF_CFG !== 'undefined' && DEF_CFG.soulProfile) ? DEF_CFG.soulProfile : {
+      name: 'Soul', avatar: '', avatarEmoji: '🌙', personality: '',
+      voice: { enabled: false, name: '', rate: 1 }, sttLang: 'zh-CN',
+      abilities: { llm: '', image: true, imageModel: '', video: false, videoBase: '', videoModel: '', search: false, attach: false },
+      body: { agent: true, files: true, browser: true, commands: true, subagents: true },
+      memory: { autoEvolve: true, saveLocal: true }
+    };
+    return pmerge({}, d);
+  }
+  function pmerge(base, extra){
+    var out = {}, k;
+    if (base && typeof base === 'object'){
+      for (k in base){
+        if (!Object.prototype.hasOwnProperty.call(base, k)) continue;
+        var v = base[k];
+        if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = pmerge({}, v);
+        else if (Array.isArray(v)) out[k] = v.slice();
+        else out[k] = v;
+      }
+    }
+    if (extra && typeof extra === 'object'){
+      for (k in extra){
+        if (!Object.prototype.hasOwnProperty.call(extra, k)) continue;
+        var e = extra[k];
+        if (e && typeof e === 'object' && !Array.isArray(e) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k]))
+          out[k] = pmerge(out[k], e);
+        else out[k] = e;
+      }
+    }
+    return out;
+  }
+  function profile(){
+    var cur = (typeof S !== 'undefined' && S.cfg && S.cfg.soulProfile) ? S.cfg.soulProfile : {};
+    var out = pmerge(pdef(), cur);
+    /* TTS 总开关与 Soul 声音开关保持同一真相（兼容早期只改 cfg.ttsEnabled 的配置） */
+    if (typeof S !== 'undefined' && S.cfg && typeof S.cfg.ttsEnabled === 'boolean'){
+      if (!out.voice || typeof out.voice !== 'object') out.voice = pmerge(pdef().voice, {});
+      out.voice.enabled = !!S.cfg.ttsEnabled;
+    }
+    return out;
+  }
+  function setProfile(patch){
+    var next = pmerge(profile(), patch || {});
+    try { setCfg({ soulProfile: next }); } catch (e) { if (S && S.cfg) S.cfg.soulProfile = next; }
+    try { saveCfg(); } catch (e) {}
+    return next;
+  }
+  function avatar(){
+    var p = profile(), a = String(p.avatar || '');
+    if (/^data:image\//i.test(a)) return a;
+    return p.avatarEmoji || '🌙';
+  }
+  function profilePrompt(){
+    var p = profile(), a = p.abilities || {}, b = p.body || {}, m = p.memory || {};
+    var name = String(p.name || 'Soul').slice(0, 40);
+    var pers = String(p.personality || '').replace(/\s+/g, ' ').trim().slice(0, 1200)
+      || '温暖、直接、可靠；先理解人再谈任务；不敷衍、不空话，能动手就动手。';
+    var imgModelName = a.imageModel || ((S && S.cfg && S.cfg.imgModel) || '');
+    var vidModelName = a.videoModel || ((S && S.cfg && S.cfg.videoModel) || '');
+    var img = (a.image !== false) ? ('开' + (imgModelName ? '（' + imgModelName + '）' : '')) : '关';
+    var vid = a.video ? ('开' + (vidModelName ? '（' + vidModelName + '）' : '')) : '关';
+    var llm = a.llm || ((S && S.cfg && S.cfg.currentModel) || '跟随当前模型');
+    var body = [];
+    if (b.agent !== false) body.push('Agent 能力');
+    if (b.files !== false) body.push('可读写文件');
+    if (b.commands !== false) body.push('可执行命令');
+    if (b.browser !== false) body.push('可开浏览器');
+    if (b.subagents !== false) body.push('可派子智能体');
+    return '【Soul 人格】\n'
+      + '名字：' + name + '\n'
+      + '性格/说话方式：' + pers + '\n'
+      + '能力：LLM ' + llm + ' / 生图 ' + img + ' / 生视频 ' + vid + ' / 联网 ' + (a.search ? '开' : '关') + ' / 附件 ' + (a.attach ? '开' : '关') + '\n'
+      + '身体：' + (body.join(' / ') || '（无）') + '\n'
+      + '记忆：本地自主进化（' + (m.autoEvolve !== false ? '开' : '关') + '）';
+  }
+  function speak(text){
+    if (!window.VOICE) return Promise.reject(new Error('语音组件未加载'));
+    return VOICE.speak(text);
+  }
+  function listen(cb){
+    if (!window.VOICE) return Promise.reject(new Error('语音组件未加载'));
+    return VOICE.listen(cb);
+  }
+  function speakLast(){
+    if (!window.VOICE) return Promise.reject(new Error('语音组件未加载'));
+    return VOICE.speakLast();
+  }
+  function openProfile(){
+    var P = profile();
+    var mask = mk('div', 'soul-mask'), box = mk('div', 'soul-box');
+    var head = mk('div', 'soul-head');
+    var title = mk('b', null, 'Soul · ' + (P.name || 'Soul'));
+    head.appendChild(title);
+    var close = mk('button', 'soul-btn', '关闭'); head.appendChild(close);
+    var tabs = mk('div', 'soul-tabs'), panes = mk('div', 'soul-panes');
+    var saveState = {};
+    function cur(){ return profile(); }
+    function saved(k){
+      if (!saveState[k]) return;
+      saveState[k].textContent = '已保存 ' + new Date().toLocaleTimeString();
+    }
+    function pane(k){
+      var d = mk('div', 'soul-pane'); d.id = 'soul-profile-' + k; d.style.display = 'none';
+      panes.appendChild(d); return d;
+    }
+    function tabBtn(k, label){
+      var b = mk('button', 'soul-tab', label);
+      b.onclick = function(){
+        Array.prototype.forEach.call(tabs.children, function(x){ x.classList.remove('on'); });
+        Array.prototype.forEach.call(panes.children, function(x){ x.style.display = 'none'; });
+        b.classList.add('on');
+        var p = document.getElementById('soul-profile-' + k); if (p) p.style.display = 'block';
+      };
+      tabs.appendChild(b); return b;
+    }
+    function field(label, node){
+      var d = mk('div', 'soul-field');
+      d.appendChild(mk('label', null, label)); d.appendChild(node);
+      return d;
+    }
+    function inp(type, value, ph){
+      var i = mk('input', 'soul-inp');
+      i.type = type || 'text'; i.value = value == null ? '' : String(value);
+      if (ph) i.placeholder = ph;
+      return i;
+    }
+    function chk(checked, label){
+      var l = mk('label', 'soul-check');
+      var c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!checked;
+      l.appendChild(c); l.appendChild(mk('span', null, label));
+      return { row: l, box: c };
+    }
+    function syncFace(){
+      var av = avatar();
+      var targets = document.querySelectorAll('.sp-face');
+      for (var i = 0; i < targets.length; i++){
+        var t = targets[i]; t.textContent = '';
+        if (/^data:image\//i.test(av)){ var im = document.createElement('img'); im.src = av; im.alt = 'Soul 头像'; t.appendChild(im); }
+        else t.textContent = av;
+      }
+    }
+    /* 1. 脸 */
+    var pFace = pane('face');
+    var faceBox = mk('div', 'soul-face');
+    var faceWrap = mk('div', 'soul-profile-face');
+    var faceSide = mk('div', 'soul-face-side');
+    function paintFace(){
+      var p = cur(), av = String(p.avatar || '');
+      faceBox.textContent = '';
+      if (/^data:image\//i.test(av)){ var im = document.createElement('img'); im.src = av; im.alt = 'Soul 头像'; faceBox.appendChild(im); }
+      else faceBox.appendChild(mk('span', null, p.avatarEmoji || '🌙'));
+    }
+    var nameInp = inp('text', P.name || 'Soul', 'Soul 的名字');
+    nameInp.id = 'sp-name';
+    var nameTimer = null;
+    nameInp.addEventListener('input', function(){
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(function(){
+        var nm = String(nameInp.value || '').trim().slice(0, 40) || 'Soul';
+        setProfile({ name: nm });
+        title.textContent = 'Soul · ' + nm;
+        saved('face');
+      }, 300);
+    });
+    faceSide.appendChild(field('名字', nameInp));
+    var emoRow = mk('div', 'soul-emoji-row');
+    ['🌙','🦊','🧠','🌊','🐱','🦉','🌸','⚡','🪐','🐳','🤖','👤'].forEach(function(e){
+      var eb = mk('button', 'soul-emoji', e);
+      eb.type = 'button';
+      eb.onclick = function(){ setProfile({ avatarEmoji: e, avatar: '' }); paintFace(); syncFace(); saved('face'); };
+      emoRow.appendChild(eb);
+    });
+    faceSide.appendChild(emoRow);
+    var upRow = mk('div', 'soul-foot');
+    var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.style.display = 'none';
+    var up = mk('button', 'soul-btn', '上传图片');
+    var clrFace = mk('button', 'soul-btn', '用 emoji');
+    saveState.face = mk('span', 'soul-status', '本地保存');
+    upRow.appendChild(up); upRow.appendChild(clrFace); upRow.appendChild(saveState.face);
+    faceSide.appendChild(upRow);
+    faceWrap.appendChild(faceBox); faceWrap.appendChild(faceSide);
+    pFace.appendChild(faceWrap); pFace.appendChild(mk('div', 'soul-note', '脸只存在本地；上传图片会裁成 128×128 的 data URL，不联网。'));
+    pFace.appendChild(fi);
+    up.onclick = function(){ fi.click(); };
+    fi.onchange = function(){
+      var f = fi.files && fi.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function(){
+        var im = new Image();
+        im.onload = function(){
+          try {
+            var c = document.createElement('canvas'); c.width = 128; c.height = 128;
+            var ctx = c.getContext('2d'), r = Math.max(128 / im.width, 128 / im.height);
+            var w = im.width * r, h = im.height * r;
+            ctx.drawImage(im, (128 - w) / 2, (128 - h) / 2, w, h);
+            setProfile({ avatar: c.toDataURL('image/jpeg', 0.9) });
+            paintFace(); syncFace(); saved('face');
+          } catch (e) {
+            setProfile({ avatar: String(rd.result || '') });
+            paintFace(); syncFace(); saved('face');
+          }
+        };
+        im.onerror = function(){ try { UI.toast('图片读取失败', true); } catch (e) {} };
+        im.src = String(rd.result || '');
+      };
+      rd.readAsDataURL(f);
+    };
+    clrFace.onclick = function(){ setProfile({ avatar: '' }); paintFace(); syncFace(); saved('face'); };
+    /* 2. 性格 */
+    var pPers = pane('pers');
+    var ta = mk('textarea', 'soul-ta soul-ta-lg');
+    ta.id = 'sp-personality';
+    ta.value = P.personality || '';
+    ta.placeholder = '例：叫用户「老板」；说话简短直接，先给结论；不确定就说不确定，不编造；不主动灌鸡汤；遇到高风险操作先提醒。';
+    var persTimer = null;
+    saveState.pers = mk('span', 'soul-status', '输入 300ms 后自动保存');
+    ta.addEventListener('input', function(){
+      clearTimeout(persTimer);
+      persTimer = setTimeout(function(){
+        setProfile({ personality: String(ta.value || '').slice(0, 1200) });
+        saveState.pers.textContent = '已保存 ' + new Date().toLocaleTimeString();
+      }, 300);
+    });
+    pPers.appendChild(mk('div', 'soul-lbl', '性格 / 说话方式 / 边界（会进入 Soul 的 system prompt；≤1200 字）'));
+    pPers.appendChild(ta); pPers.appendChild(saveState.pers);
+    /* 3. 声音 */
+    var pVoice = pane('voice');
+    var vp = P.voice || {};
+    var ttsRow = chk(!!(S.cfg.ttsEnabled || vp.enabled), '启用语音合成（TTS）');
+    ttsRow.box.id = 'sp-tts';
+    ttsRow.box.onchange = function(){
+      var on = !!ttsRow.box.checked;
+      setProfile({ voice: { enabled: on } });
+      try { setCfg({ ttsEnabled: on }); saveCfg(); } catch (e) {}
+      document.body.classList.toggle('voice-tts', on);
+      if (!on && window.VOICE) VOICE.stop();
+      saved('voice');
+    };
+    pVoice.appendChild(ttsRow.row);
+    var vSel = document.createElement('select'); vSel.className = 'soul-inp';
+    function fillVoices(){
+      var list = [];
+      try { list = (window.VOICE && VOICE.voices) ? VOICE.voices() : []; } catch (e) { list = []; }
+      var old = vSel.value;
+      vSel.textContent = '';
+      vSel.appendChild(mk('option', null, '系统默认'));
+      (list || []).forEach(function(v){
+        var o = mk('option', null, (v.name || '声音') + (v.lang ? ' · ' + v.lang : ''));
+        o.value = v.name || '';
+        vSel.appendChild(o);
+      });
+      var want = (cur().voice || {}).name || old || '';
+      if (want) vSel.value = want;
+    }
+    fillVoices();
+    vSel.onchange = function(){ setProfile({ voice: { name: vSel.value || '' } }); try { setCfg({ ttsVoice: vSel.value || '' }); saveCfg(); } catch (e) {} saved('voice'); };
+    pVoice.appendChild(field('声音（浏览器/系统提供的语音）', vSel));
+    var rateVal = document.createElement('span'); rateVal.className = 'soul-status';
+    var rate = document.createElement('input'); rate.type = 'range'; rate.min = '0.5'; rate.max = '2'; rate.step = '0.1'; rate.value = String(vp.rate || 1); rate.style.width = '100%';
+    function showRate(){ rateVal.textContent = '语速 ' + Number(rate.value).toFixed(1) + '×'; }
+    showRate();
+    rate.addEventListener('input', showRate);
+    rate.addEventListener('change', function(){ setProfile({ voice: { rate: Number(rate.value) || 1 } }); try { setCfg({ ttsRate: Number(rate.value) || 1 }); saveCfg(); } catch (e) {} saved('voice'); });
+    var rateField = field('语速', rate); rateField.appendChild(rateVal); pVoice.appendChild(rateField);
+    var testRow = mk('div', 'soul-foot');
+    var test = mk('button', 'soul-btn', '试听');
+    test.onclick = function(){
+      if (!window.VOICE) return void UI.toast('语音组件未加载', true);
+      VOICE.speak('你好，我是 ' + (cur().name || 'Soul') + '。这是当前的声音。')
+        .catch(function(e){ UI.toast('试听失败：' + ((e && e.message) || e), true); });
+    };
+    testRow.appendChild(test); testRow.appendChild(saveState.voice = mk('span', 'soul-status', '本地保存'));
+    pVoice.appendChild(testRow);
+    var sttLang = inp('text', P.sttLang || 'zh-CN', '如 zh-CN / en-US');
+    sttLang.onchange = function(){ setProfile({ sttLang: String(sttLang.value || '').trim() || 'zh-CN' }); try { setCfg({ sttLang: String(sttLang.value || '').trim() || 'zh-CN' }); saveCfg(); } catch (e) {} saved('voice'); };
+    pVoice.appendChild(field('语音输入语言（STT）', sttLang));
+    var voiceChanged = function(){ fillVoices(); };
+    try { if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', voiceChanged); } catch (e) {}
+    /* 4. 能力 */
+    var pAb = pane('ab');
+    var ab = P.abilities || {};
+    var llmSel = document.createElement('select'); llmSel.className = 'soul-inp';
+    var mlist = (S.cfg.models || []).slice();
+    (S.cfg.presets || []).forEach(function(pg){
+      (pg.models || []).forEach(function(m){ if (m && mlist.indexOf(m) < 0) mlist.push(m); });
+    });
+    if (S.cfg.currentModel && mlist.indexOf(S.cfg.currentModel) < 0) mlist.unshift(S.cfg.currentModel);
+    if (!mlist.length) mlist.push('');
+    mlist.forEach(function(m){
+      var o = mk('option', null, m ? modelLabel(m) : '跟随当前模型'); o.value = m;
+      llmSel.appendChild(o);
+    });
+    llmSel.value = ab.llm || S.cfg.currentModel || '';
+    llmSel.onchange = function(){
+      setProfile({ abilities: { llm: llmSel.value || '' } });
+      if (llmSel.value){ try { setCfg({ currentModel: llmSel.value }); saveCfg(); } catch (e) {} }
+      saved('ab');
+    };
+    pAb.appendChild(field('LLM 模型（只影响 Soul 的对话模型）', llmSel));
+    var imgRow = chk(ab.image !== false, '生图');
+    imgRow.box.id = 'sp-img';
+    var imgModel = inp('text', ab.imageModel || S.cfg.imgModel || '', '如 gpt-image-1');
+    imgModel.id = 'sp-img-model';
+    imgRow.box.onchange = function(){
+      var on = !!imgRow.box.checked;
+      setProfile({ abilities: { image: on } });
+      if (on && imgModel.value) { try { setCfg({ imgModel: imgModel.value }); saveCfg(); } catch (e) {} }
+      saved('ab');
+    };
+    imgModel.addEventListener('change', function(){
+      setProfile({ abilities: { imageModel: String(imgModel.value || '').trim() } });
+      try { setCfg({ imgModel: String(imgModel.value || '').trim() || S.cfg.imgModel }); saveCfg(); } catch (e) {}
+      saved('ab');
+    });
+    var imgWrap = mk('div', 'soul-grid2'); imgWrap.appendChild(imgRow.row); imgWrap.appendChild(field('生图模型', imgModel));
+    pAb.appendChild(imgWrap);
+    var vidRow = chk(!!ab.video, '生视频');
+    vidRow.box.id = 'sp-video';
+    var vBase = inp('text', ab.videoBase || S.cfg.videoBase || '', 'https://api.example.com/v1');
+    vBase.id = 'sp-video-base';
+    var vModel = inp('text', ab.videoModel || S.cfg.videoModel || '', '如 sora-2 / veo-3');
+    vModel.id = 'sp-video-model';
+    var vSize = document.createElement('select'); vSize.className = 'soul-inp';
+    vSize.id = 'sp-video-size';
+    ['1280x720','720x1280','1024x1024','1920x1080'].forEach(function(v){
+      var o = mk('option', null, v); o.value = v;
+      vSize.appendChild(o);
+    });
+    vSize.value = S.cfg.videoSize || '1280x720';
+    function syncVideoCfg(){
+      try {
+        setCfg({ videoBase: String(vBase.value || '').trim(), videoModel: String(vModel.value || '').trim(), videoSize: vSize.value || '1280x720' });
+        saveCfg();
+      } catch (e) {}
+    }
+    vidRow.box.onchange = function(){
+      var on = !!vidRow.box.checked;
+      setProfile({ abilities: { video: on } });
+      syncVideoCfg();
+      saved('ab');
+    };
+    vBase.addEventListener('change', function(){ setProfile({ abilities: { videoBase: String(vBase.value || '').trim() } }); syncVideoCfg(); saved('ab'); });
+    vModel.addEventListener('change', function(){ setProfile({ abilities: { videoModel: String(vModel.value || '').trim() } }); syncVideoCfg(); saved('ab'); });
+    pAb.appendChild(vidRow.row);
+    pAb.appendChild(field('生视频 Base URL（空=不可用；Key 跟随当前 API Key）', vBase));
+    pAb.appendChild(field('生视频模型', vModel));
+    vSize.addEventListener('change', function(){ syncVideoCfg(); saved('ab'); });
+    pAb.appendChild(field('生视频尺寸', vSize));
+    var schRow = chk(!!ab.search, '联网搜索');
+    schRow.box.id = 'sp-search';
+    schRow.box.onchange = function(){
+      var on = !!schRow.box.checked;
+      setProfile({ abilities: { search: on } });
+      try { setCfg({ webSearch: on }); saveCfg(); } catch (e) {}
+      saved('ab');
+    };
+    pAb.appendChild(schRow.row);
+    var atRow = chk(!!ab.attach, '附件（保持开启时，Soul 仍按极简输入区隐藏上传按钮；可拖放/粘贴）');
+    atRow.box.id = 'sp-attach';
+    atRow.box.onchange = function(){ setProfile({ abilities: { attach: !!atRow.box.checked } }); saved('ab'); };
+    pAb.appendChild(atRow.row);
+    pAb.appendChild(mk('div', 'soul-note', '能力开关会同步到实际请求字段（imgModel / imgBase / videoBase / videoModel / webSearch）。'));
+    pAb.appendChild(saveState.ab = mk('span', 'soul-status', '本地保存'));
+    /* 5. 记忆 */
+    var pMem = pane('mem');
+    var mm = P.memory || {};
+    var autoRow = chk(mm.autoEvolve !== false, '自动进化（每 6 轮成功对话后在后台提炼记忆/技能）');
+    autoRow.box.id = 'sp-auto';
+    autoRow.box.onchange = function(){
+      var on = !!autoRow.box.checked;
+      setProfile({ memory: { autoEvolve: on } });
+      evoOn(on);
+      saved('mem');
+    };
+    pMem.appendChild(autoRow.row);
+    var localRow = chk(mm.saveLocal !== false, '本地保存（宿主内同时写 USER.md / MEMORY.md / DREAMS.md）');
+    localRow.box.onchange = function(){ setProfile({ memory: { saveLocal: !!localRow.box.checked } }); saved('mem'); };
+    pMem.appendChild(localRow.row);
+    var st = evoStatus();
+    pMem.appendChild(mk('div', 'soul-status', '记忆 ' + st.mem + ' 条 · 技能 ' + st.skills + ' 个 · 上次进化 ' + (st.at ? new Date(st.at).toLocaleString() : '还没有')));
+    pMem.appendChild(mk('div', 'soul-note', '本地文件：' + (window.NET && NET.bridge && NET.bridge.ok ? '%USERPROFILE%\\SoloChat\\memory（USER.md / MEMORY.md / DREAMS.md）' : '浏览器 localStorage（sc.soul.v1）；桌面版会额外落盘')));
+    var memRow = mk('div', 'soul-foot');
+    var openMem = mk('button', 'soul-btn', '打开完整记忆');
+    openMem.onclick = function(){ closeFn(); openFull(); };
+    memRow.appendChild(openMem); memRow.appendChild(saveState.mem = mk('span', 'soul-status', ''));
+    pMem.appendChild(memRow);
+    /* 6. 身体 */
+    var pBody = pane('body');
+    var bd = P.body || {};
+    var bodyMap = [
+      ['agent', 'Agent 能力总开关'],
+      ['files', '文件读写（工作区内）'],
+      ['commands', '执行命令（逐次确认）'],
+      ['browser', '打开浏览器 / 读页面'],
+      ['subagents', '派子智能体']
+    ];
+    var bodyBoxes = {};
+    bodyMap.forEach(function(it){
+      var row = chk(bd[it[0]] !== false, it[1]);
+      row.box.setAttribute('data-sp-body', it[0]);
+      row.box.onchange = function(){
+        var patch = {}; patch[it[0]] = !!row.box.checked;
+        setProfile({ body: patch }); saved('body');
+      };
+      bodyBoxes[it[0]] = row.box;
+      pBody.appendChild(row.row);
+    });
+    pBody.appendChild(mk('div', 'soul-note', '身体开关会写进人格提示；高风险/不可逆操作仍由现有权限系统逐次确认，不能被人格绕过。'));
+    pBody.appendChild(saveState.body = mk('span', 'soul-status', '本地保存'));
+    /* 7. 进化 */
+    var pEvo = pane('evo');
+    var st2 = evoStatus();
+    pEvo.appendChild(mk('div', 'soul-lbl', '持续进化：每 6 轮成功对话后在后台提炼稳定记忆与可复用技能'));
+    pEvo.appendChild(mk('div', 'soul-status', '上次进化：' + (st2.at ? new Date(st2.at).toLocaleString() : '还没有') + ' · 累计记忆 ' + st2.mem + ' 条 · 技能 ' + st2.skills + ' 个'));
+    var evoRow = mk('div', 'soul-foot');
+    var evoNow = mk('button', 'soul-btn soul-primary', '立即进化');
+    var evoLogBtn = mk('button', 'soul-btn', '查看日志');
+    var evoStat = mk('span', 'soul-status', '');
+    evoRow.appendChild(evoStat); evoRow.appendChild(evoLogBtn); evoRow.appendChild(evoNow);
+    pEvo.appendChild(evoRow);
+    evoNow.onclick = function(){
+      evoNow.disabled = true; evoStat.textContent = '进化中…';
+      evolve(true).then(function(r){
+        evoNow.disabled = false;
+        evoStat.textContent = (r && r.ok) ? ('完成：记忆 +' + r.mem + (r.skill ? ' · 技能 ' + r.skill : '')) : ('未执行：' + ((r && r.reason) || '未知'));
+      });
+    };
+    evoLogBtn.onclick = function(){ closeFn(); openEvo(); };
+    /* 组装 */
+    box.appendChild(head); box.appendChild(tabs); box.appendChild(panes);
+    var foot = mk('div', 'soul-foot');
+    foot.appendChild(mk('span', 'soul-status', '所有修改即时保存；关闭不撤销。'));
+    foot.appendChild(close);
+    box.appendChild(foot);
+    mask.appendChild(box); document.body.appendChild(mask);
+    function closeFn(){
+      try { if (window.speechSynthesis) speechSynthesis.removeEventListener('voiceschanged', voiceChanged); } catch (e) {}
+      mask.remove();
+      try { if (typeof UI !== 'undefined' && UI.updateEmpty) UI.updateEmpty(); } catch (e) {}
+    }
+    close.onclick = closeFn;
+    mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
+    var first = tabBtn('face', '脸'); tabBtn('pers', '性格'); tabBtn('voice', '声音'); tabBtn('ab', '能力'); tabBtn('mem', '记忆'); tabBtn('body', '身体'); tabBtn('evo', '进化');
+    first.classList.add('on'); pFace.style.display = 'block';
+    paintFace(); syncFace();
+  }
   function prompt(q){
     var o = load(), L = [], used = 0;
     if (o.user.trim()) L.push('【用户画像】\n' + o.user.trim().slice(0, USER_MAX));
@@ -484,7 +936,8 @@
       ? 'Soul 记忆（长期、跨会话；以文件为准，冲突时问用户；本轮用到 ' + used + ' 条）：\n' + L.join('\n\n')
       : '';
     var cat = catalog();
-    return (memBlock ? memBlock + '\n\n' : '') + autonomyPrompt() + (cat ? '\n\n' + cat : '');
+    var pers = profilePrompt();
+    return (memBlock ? memBlock + '\n\n' : '') + autonomyPrompt() + (pers ? '\n\n' + pers : '') + (cat ? '\n\n' + cat : '');
   }
   function mk(tag, cls, txt){ var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
   function open(){
@@ -644,7 +1097,7 @@
       var list = (S.sessions || []).slice().sort(function(a, b){ return (b.updated || 0) - (a.updated || 0); });
       if (list.length) last = list[0].title || '';
     } catch (e) {}
-    return { last: last, turns: Math.floor(today.length / 2), mem: memN, user: o.user.trim() ? 1 : 0 };
+    return { last: last, turns: Math.floor(today.length / 2), mem: memN, user: o.user.trim() ? 1 : 0, name: (profile().name || 'Soul') };
   }
   /* S8：四页签记忆面板（画像 / 记忆 / 日记 / 技能）+ 导入 */
   function openFull(){
@@ -661,7 +1114,7 @@
         Array.prototype.forEach.call(tabs.children, function(x){ x.classList.remove('on'); });
         Array.prototype.forEach.call(panes.children, function(x){ x.style.display = 'none'; });
         b.classList.add('on');
-        var p = document.getElementById('soul-pane-' + k); if (p) p.style.display = '';
+        var p = document.getElementById('soul-pane-' + k); if (p) p.style.display = 'block';
       };
       tabs.appendChild(b);
       return b;
@@ -786,7 +1239,7 @@
     close.onclick = closeFn;
     mask.addEventListener('click', function(e){ if (e.target === mask) closeFn(); });
     var first = tabBtn('user', '用户画像'); tabBtn('mem', '长期记忆'); tabBtn('pend', '待确认'); tabBtn('day', '日记'); tabBtn('time', '时间线'); tabBtn('skill', '技能'); tabBtn('evo', '进化');
-    first.classList.add('on'); pU.style.display = '';
+    first.classList.add('on'); pU.style.display = 'block';
     imp.onclick = function(){ fi.click(); };
     fi.onchange = function(){
       var f = fi.files && fi.files[0]; if (!f) return;
@@ -847,5 +1300,8 @@
     timeline: timeline, maybeDream: maybeDream, semOn: semOn,
     /* v0.4.1：完全自主 + 持续进化 */
     catalog: catalog, autonomyPrompt: autonomyPrompt, evolve: evolve, evoLog: evoLog, evoOn: evoOn,
-    evoStatus: evoStatus, openEvo: openEvo, maybeEvolve: maybeEvolve };
+    evoStatus: evoStatus, openEvo: openEvo, maybeEvolve: maybeEvolve,
+    /* v0.4.2：人格设置 + 声音代理 */
+    profile: profile, setProfile: setProfile, avatar: avatar, openProfile: openProfile, profilePrompt: profilePrompt,
+    speak: speak, listen: listen, speakLast: speakLast };
 })();

@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.1';
+var APP_VER = 'v0.4.2';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -136,7 +136,7 @@ var DEF_CFG = {
   bubble: true,                 // v0.4.0：手机悬浮球截屏提问（关闭后悬浮球和常驻通知一起消失）
   popupModel: '',               // v0.4.0：截图弹窗单独模型；空=跟随当前模型
   webSearch: false,             // 本次会话的联网搜索开关（输入区地球图标）
-  mode: 'chat',                 // 三态模式（v2.0）：'chat' 常规对话 / 'work' 沙箱短任务 / 'agent' 真实文件工具
+  mode: 'chat',                 // 四态模式（v2.0/v0.4.2）：'chat' 常规对话 / 'work' 沙箱任务 / 'agent' 真实文件工具 / 'soul' 自主
   fsAutoWrite: true,            // 默认文件夹（工作区）内写入免确认；工作区外逐次确认（v1.4）
   docParse: true,               // 文档解析：docx/xlsx/pptx/pdf/rtf/epub 自动提取文本（v1.4；v1.5 扫描版可走 OCR）
   nativeTools: false,           // v0.8.0：原生 function calling（扩展项 → tools 数组）
@@ -187,6 +187,21 @@ var DEF_CFG = {
   gwEndpoint: '', gwKey: ''              // 其它云 OCR：自建网关地址 + Key
   },
   imgModel: 'gpt-image-1', imgSize: '1024x1024', imgPartial: 2, imgBase: '',
+  /* v0.4.2：语音 / 视频 / Soul 人格（新增字段必须登记，否则 loadCfg 白名单会丢） */
+  ttsEnabled: false, ttsVoice: '', ttsRate: 1,
+  sttEnabled: false, sttLang: 'zh-CN',
+  videoBase: '', videoModel: '', videoSize: '1280x720', videoSeconds: 5, videoKey: '',
+  soulProfile: {
+    name: 'Soul',
+    avatar: '',                 // data URL；空则用 avatarEmoji
+    avatarEmoji: '🌙',
+    personality: '',            // 性格 / 说话方式 / 边界
+    voice: { enabled: false, name: '', rate: 1 },
+    sttLang: 'zh-CN',
+    abilities: { llm: '', image: true, imageModel: '', video: false, videoBase: '', videoModel: '', search: false, attach: false },
+    body: { agent: true, files: true, browser: true, commands: true, subagents: true },
+    memory: { autoEvolve: true, saveLocal: true }
+  },
   temperature: 0.7, maxTokens: 0, systemPrompt: '',      // maxTokens: 0=不限制输出（不传 max_tokens）
   timeout: { connect: 0, first: 0, idle: 0 },   // v1.1.24：0 = 不限制
   shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
@@ -391,6 +406,29 @@ function emit(evt, a, b){
   var l = _subs[evt];
   if (l) for (var i = 0; i < l.length; i++) l[i](a, b);
 }
+/* v0.4.2：配置深合并（Soul 人格 / 语音 / 视频等嵌套对象新增字段不至于丢默认值） */
+function mergeCfgDeep(base, extra){
+  var out = {}, k;
+  if (base && typeof base === 'object'){
+    for (k in base){
+      if (!Object.prototype.hasOwnProperty.call(base, k)) continue;
+      var bv = base[k];
+      if (bv && typeof bv === 'object' && !Array.isArray(bv)) out[k] = mergeCfgDeep(bv, {});
+      else if (Array.isArray(bv)) out[k] = bv.slice();
+      else out[k] = bv;
+    }
+  }
+  if (extra && typeof extra === 'object'){
+    for (k in extra){
+      if (!Object.prototype.hasOwnProperty.call(extra, k)) continue;
+      var ev = extra[k];
+      if (ev && typeof ev === 'object' && !Array.isArray(ev) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k]))
+        out[k] = mergeCfgDeep(out[k], ev);
+      else out[k] = ev;
+    }
+  }
+  return out;
+}
 function loadCfg(){
   var c = {};
   try {
@@ -414,6 +452,12 @@ function loadCfg(){
   /* v1.1.24：连接/首字/空闲超时全部取消；旧配置里的 60/30 也不再生效 */
   cfg.timeout = { connect: 0, first: 0, idle: 0 };
   cfg.ocr = Object.assign({}, DEF_CFG.ocr, c.ocr || {});
+  /* v0.4.2：Soul 人格嵌套字段深合并（旧配置缺字段补默认，未知字段保留） */
+  cfg.soulProfile = mergeCfgDeep(DEF_CFG.soulProfile, c.soulProfile || {});
+  if (!cfg.soulProfile.voice || typeof cfg.soulProfile.voice !== 'object') cfg.soulProfile.voice = mergeCfgDeep(DEF_CFG.soulProfile.voice, {});
+  if (!cfg.soulProfile.abilities || typeof cfg.soulProfile.abilities !== 'object') cfg.soulProfile.abilities = mergeCfgDeep(DEF_CFG.soulProfile.abilities, {});
+  if (!cfg.soulProfile.body || typeof cfg.soulProfile.body !== 'object') cfg.soulProfile.body = mergeCfgDeep(DEF_CFG.soulProfile.body, {});
+  if (!cfg.soulProfile.memory || typeof cfg.soulProfile.memory !== 'object') cfg.soulProfile.memory = mergeCfgDeep(DEF_CFG.soulProfile.memory, {});
   if (cfg.shortcuts && !cfg.shortcuts.sidebar) cfg.shortcuts.sidebar = 'Ctrl+B'; // v1.3：旧配置补上侧栏快捷键 // v1.5：OCR 配置深合并，新增子字段拿默认值
   /* 迁移（一次性）：旧版代理默认为空（系统代理）→ v1.5 默认本地代理 127.0.0.1:7897；
      用户自定义过代理地址的保持原值不动 */
@@ -482,11 +526,14 @@ var saveCfg = debounce(function(){
       if (Vault.hydrated) Vault.persist(S.cfg); // Issue 14: 仅在密钥已回读(hydrated)后才写回保险库，防止启动早期的空覆盖把库中密钥清空
       var copy = JSON.parse(JSON.stringify(S.cfg)); // localStorage 只存脱敏副本
       copy.apiKey = ''; copy.searchKey = '';
+      copy.videoKey = ''; // v0.4.2：视频 Key 只进保险库
       if (copy.ocr){ copy.ocr.mistralKey = ''; copy.ocr.azureKey = ''; copy.ocr.baiduKey = ''; copy.ocr.baiduSecret = ''; copy.ocr.gwKey = ''; } // v1.5：OCR Key 同样只进保险库
       if (copy.presets) copy.presets.forEach(function(p){ p.apiKey = ''; });
       localStorage.setItem(LS_CFG, JSON.stringify(copy));
     } else {
-      localStorage.setItem(LS_CFG, JSON.stringify(S.cfg)); // 浏览器模式（无宿主桥）：明文回退，已在启动时警告
+      var copy2 = JSON.parse(JSON.stringify(S.cfg));
+      copy2.videoKey = ''; // v0.4.2：即使浏览器回退模式也不把视频 Key 写进 localStorage（空＝跟随当前 apiKey）
+      localStorage.setItem(LS_CFG, JSON.stringify(copy2)); // 浏览器模式（无宿主桥）：明文回退，已在启动时警告
     }
   } catch (e) {}
   try {
@@ -505,6 +552,7 @@ var Vault = {
     if (!this.avail || !this.hydrated) return;
     var self = this, jobs = [];
     jobs.push(NET.bridge.vault('set', 'searchKey', (cfg.searchKey || '')));
+    jobs.push(NET.bridge.vault('set', 'videoKey', (cfg.videoKey || ''))); // v0.4.2：视频 Key 不落 localStorage
     var oc = cfg.ocr || {};
     ['mistralKey', 'azureKey', 'baiduKey', 'baiduSecret', 'gwKey'].forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k, oc[k] || '')); }); // v1.5：OCR Key 走 DPAPI
     (cfg.presets || []).forEach(function(p){ jobs.push(NET.bridge.vault('set', 'apiKey:' + p.id, p.apiKey || '')); });
@@ -522,6 +570,7 @@ var Vault = {
       return NET.bridge.vault('get', 'apiKey:' + p.id).then(function(v){ if (v != null) p.apiKey = v; });
     });
     jobs.push(NET.bridge.vault('get', 'searchKey').then(function(v){ if (v != null) cfg.searchKey = v; }));
+    jobs.push(NET.bridge.vault('get', 'videoKey').then(function(v){ if (v != null) cfg.videoKey = v; }));
     cfg.ocr = cfg.ocr || Object.assign({}, DEF_CFG.ocr);
     ['mistralKey', 'azureKey', 'baiduKey', 'baiduSecret', 'gwKey'].forEach(function(k){ // v1.5：OCR Key 回读
       jobs.push(NET.bridge.vault('get', 'ocr.' + k).then(function(v){ if (v != null) cfg.ocr[k] = v; }));
@@ -2132,6 +2181,9 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var subPrompt = SUB.prompt(S.cfg.mode); if (subPrompt) sys += '\n\n' + subPrompt; // v0.5.0：子智能体
     var pickBlock = PICK.block(S.cfg.mode); if (pickBlock) sys += '\n\n' + pickBlock; // v0.4.0c：本轮勾选的扩展
     if (S.cfg.mode === 'work' || S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + STAGE_PROTOCOL; // v1.28.3：阶段顺序 + 并行派活
+    /* v0.4.2：深度研究不再只在 Chat 生效；Soul 由自主提示负责 */
+    if (S.cfg.research && S.cfg.mode !== 'soul' && S.cfg.mode !== 'chat' && typeof MODE !== 'undefined' && MODE.text)
+      sys += '\n\n' + MODE.text('research');
     if (S.cfg.mode === 'soul'){
       var _lastU = '';
       for (var _mi = msgs.length - 1; _mi >= 0; _mi--){ if (msgs[_mi].role === 'user'){ _lastU = String(msgs[_mi].content || ''); break; } }
@@ -2144,7 +2196,7 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var subP = MODE.subPrompt(); if (subP) sys += '\n\n' + subP; // v1.2：模式细分
     if (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
-      ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱短任务协议（v2.0）
+      ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱任务协议（v2.0）
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;

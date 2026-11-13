@@ -590,7 +590,7 @@ var _sv = SC_SNAPS[uk] || SC_SNAPS[path]; var snap = Array.isArray(_sv) ? ((_sv[
   };
 })();
 
-/* ==== Work 模式（v2.0）：虚拟沙箱短任务循环 ====
+/* ==== Work 模式（v2.0）：虚拟沙箱任务循环 ====
    与 FS 同构：assistant 落定 → 扫 ```run / ```vfs-write / ```vfs-list 围栏 →
    串行执行（RUNNER.runCapture / DB.workfsPut）→ [run-result] 回灌 → startStream 续跑。
    纯页内：无服务端、不写磁盘；VFS 仅存 IndexedDB workfs（按会话隔离）。 */
