@@ -591,8 +591,9 @@ function fetchStream(opt){
       .then(function(j){ if (t) clearTimeout(t); return parseNonStream(j); })
       .catch(function(){ if (t) clearTimeout(t); return null; });
   }
-  /* 搜索规划（档③，v1.4.2）：模型先自判「是否需要联网」，需要则同时给出「简化检索词」。
-     返回 {need:bool, q:string}。调用失败/关改写 → 回退 {need:true, q:原查询}（维持联网开关的旧行为）。 */
+  /* 搜索规划（档③，v1.4.2 / 本次）：模型给出「简化检索词」。need 字段仅为兼容保留；
+     searchWeb 不再因为 need:false 跳过联网（用户手动打开联网开关即视为要搜索）。
+     调用失败/关改写 → 回退 {need:true, q:原查询}。 */
   function planSearch(q, msgs){
     var fb = { need: true, q: q };
     if (!S.cfg.searchRewrite || isMock()) return Promise.resolve(fb);
@@ -1183,30 +1184,39 @@ function fetchStream(opt){
     return out.join('\n\n');
   }
 
+  /* 搜索是否可用：开关只决定「开不开」，这里判断「开了能不能搜」。
+     bing 是未接入的占位；searxng/custom 不要 Key 但要地址。 */
+  function searchReady(){
+    var prov = (S.cfg.searchProvider || 'none').toLowerCase();
+    if (!prov || prov === 'none' || prov === 'bing') return false;
+    if (prov === 'searxng') return !!String(S.cfg.searchBase || '').trim();
+    if (prov === 'custom') return !!(S.cfg.searchCustom && String(S.cfg.searchCustom.url || '').trim());
+    return !!String(S.cfg.searchKey || '').trim();
+  }
+
   /* 入口：raw=用户原话；onStage=阶段回调（更新 live 指示器）；永不 reject */
   function searchWeb(raw, onStage, force){
     var stage = typeof onStage === 'function' ? onStage : function(){};
-    var prov = (S.cfg.searchProvider || 'none').toLowerCase();
-    var key = S.cfg.searchKey || '';
-    var noKey0 = (prov === 'searxng' || prov === 'custom');   // 这两家不需要 Key
-    if (prov === 'none' || !prov || (!key && !noKey0)) return Promise.resolve(null);
+    if (!searchReady()){ stage('未配置搜索提供商'); return Promise.resolve(null); }
     var t0 = Date.now();
     var num = clamp(parseInt(S.cfg.searchCount, 10) || 5, 1, 10);
     var prep = prepQuery(raw, lastUserBefore(S.msgs, raw));
     var q = prep.q;
-    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q }; }
+    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, fail: true }; }
     stage('判断是否需要联网搜索…');
     /* v0.2.1：Work 里是模型显式要求检索（search 围栏），跳过「是否需要联网」的二次判定，省一次模型调用 */
     return (force ? Promise.resolve({ need: true, q: prep.q })
                   : planSearch(prep.q, S.msgs).catch(function(){ return { need: true, q: prep.q }; }))
       .then(function(plan){
-        if (plan && plan.need === false) return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, skip: true };
-        q = (plan && plan.q) || prep.q;
+        if (plan && plan.need === false){
+          q = prep.q; // 用户手动开了联网开关：仍然搜索，只忽略“是否需要”的判断
+        } else {
+          q = (plan && plan.q) || prep.q;
+        }
         stage('正在联网搜索：' + q);
         return runProviders(q, num);
       })
       .then(function(list){
-        if (list && list.skip) return list; // 模型判定无需联网，透传 skip
         if (!list || !list.length){ stage('搜索无结果'); return fail(); }
         stage('抓取网页正文…');
         return fetchPages(list).then(function(l2){
@@ -1732,6 +1742,7 @@ function fetchStream(opt){
     modelCaps: modelCaps,
     reasonProfile: reasonProfile, // v0.2.5：UI 侧按模型名取思考档位
     estimate: estimate,
+    searchReady: searchReady,
     searchWeb: function(raw, onStage, force){
     return searchWeb(raw, onStage, force).then(function(r){
       try { RUNNER.addSources((r && r.query) || String(raw || '').slice(0, 40), (r && r.items) || [], !!(r && r.block), (r && r.err) || (r && r.skip ? '模型判断无需联网' : '')); } catch (e) {}

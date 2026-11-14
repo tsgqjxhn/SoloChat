@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.3';
+var APP_VER = 'v0.4.4';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -172,7 +172,7 @@ var DEF_CFG = {
   searchCustom: {},             // 自定义搜索：{ url, path, fTitle, fUrl, fText, method, headers }
   searchModel: 'gemini-2.0-flash',  // Google Grounding 用的 Gemini 模型
   searchKey: '', searchCount: 5,
-  searchRewrite: true,          // 智能搜索决策：发送前用模型自判是否需要联网，需要则同时给出简化检索词（失败回退原查询）
+  searchRewrite: true,          // 智能改写检索词：联网开关打开后仍会搜索，此项只用模型把问题精简成检索词（失败回退原查询）
   searchFetch: true,            // 正文抓取：对前 N 条结果抓网页正文替代摘要（失败保留摘要）
   searchFetchCount: 3,          // 抓取条数 0~5
   proxy: 'direct',               // v0.3.4：默认直连；留空 = 系统代理；也可填 http://127.0.0.1:7897 这类地址
@@ -2197,6 +2197,12 @@ sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     if (S.cfg.mode === 'agent' || S.cfg.mode === 'soul') sys += '\n\n' + '命令：' + '```cmd <完整命令行>'+ '```' +
       '（如 ' + '```cmd npm test```' + '），在当前工作区执行；每次执行前会弹确认框由用户批准，被拒绝即视为用户不同意，别原样重试。' +
       ' Git 用 ' + '```git status```' + ' / ' + '```git diff```' + ' 写法，同样要确认。'; // Work 沙箱任务协议（v2.0）
+    /* 联网检索结果已注入时，覆盖 Chat「无工具」的默认说法；没有结果时明确告知模型别假装联网 */
+    if (searchBlock){
+      sys += '\n\n' + '【本轮联网检索】用户已打开联网搜索，本轮已注入检索结果。即使当前是 Chat 模式、没有工具调用能力，也不要回答“没有可用工具/无法联网/无法读取文件”；必须依据下方检索结果作答，并在关键结论后用 [标题](网址) 标注来源。检索结果没有覆盖的部分要明确说明「搜索结果未覆盖」。';
+    } else if (S.cfg.webSearch && (S.cfg.mode || 'chat') === 'chat'){
+      sys += '\n\n' + '【本轮联网检索失败】用户已打开联网搜索，但本轮没有拿到结果；请明确说明「本轮未检索到可用结果」，不要声称已经联网或看过网页。';
+    }
     var p = effParams(session, S.cfg);
     if (session.summaryTs) msgs = msgs.filter(function(m){ return m.ts > session.summaryTs; }); // 自动压缩后跳过已摘要历史
     var picked = [], chars = 0;

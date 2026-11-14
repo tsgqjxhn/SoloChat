@@ -830,6 +830,12 @@ function sendMessage(){
       maybeScroll(true);
       var go = function(block, meta){ startStream(attsData, attsText, block, meta); attsData = null; attsText = null; };
       if (S.cfg.webSearch && !NET.isMock()){
+        /* 开关开着但提供商/Key/地址没配好：不假装联网，明确提示后按普通回答发送 */
+        if (!NET.searchReady()){
+          toast('联网搜索未配置：设置 → 连接与模型 → 在线搜索，选择提供商并填 Key；自定义/SearXNG 填地址后才能用', true);
+          go(null, { fail: true });
+          return;
+        }
         var live = el('div', { class: 'srch', text: '正在联网搜索：' + text });
         $('#msg-list').appendChild(live); maybeScroll(false);
         var stage = function(s){ if (s){ live.textContent = s; maybeScroll(false); } };
@@ -837,7 +843,7 @@ function sendMessage(){
           live.remove();
           if (r && r.skip){ go(null); return; } // 模型判定无需联网 → 直接作答，不提示
           if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
-          go(r && r.block, r);
+          go(r && r.block, r || { fail: true });
         });
       } else go(null);
     });
@@ -886,6 +892,7 @@ function sendMessage(){
       model: sessModel(s) /* session groups v0.4.2：记录实际应答模型 */
     };
   try { if (searchMeta && searchMeta.items && searchMeta.items.length) asst.srcs = searchMeta.items.slice(0, 6).map(function(x){ return { t: x.t || x.title || '', u: x.u || x.url || '' }; }); } catch (e) {} // v0.3.32：本轮来源挂到消息上
+  try { if (searchMeta && searchMeta.fail) asst.searchFail = true; } catch (e) {}
     var st = bg ? beginStreamBG(asst, msgs) : beginStream(asst);
     notifyBusy(); // v2.2：告知宿主有生成在跑（隐藏/最小化时不要压内存挂起）
     if (!bg){
@@ -902,6 +909,9 @@ function sendMessage(){
           })(searchMeta.items[si]);
         }
         st.node.insertBefore(sd, st.body);
+      } else if (searchMeta && searchMeta.fail){
+        /* 搜索失败/未配置：只加一行轻提示，不阻塞回答；模型侧另有系统提示说明未拿到结果 */
+        st.node.insertBefore(el('div', { class: 'srch', text: '本轮联网搜索未返回结果，以下回答未使用联网结果' }), st.body);
       }
       setSending(true);
     }
@@ -3565,12 +3575,17 @@ $('#sidebar').addEventListener('click', function(e){
     if (t.closest('#btn-attach')) return void $('#file-input').click();
     if (t.closest('#btn-img')) return void UI.openImgGen();
     if (t.closest('#btn-web')){
+      var wb = t.closest('#btn-web');
+      /* 打开前先检查配置：未配置就保持关闭，明确告知怎么配（不弹设置层，不打断会话） */
+      if (!S.cfg.webSearch && !NET.searchReady()){
+        wb.classList.remove('on');
+        UI.toast('联网搜索未配置：设置 → 连接与模型 → 在线搜索，选择提供商并填 Key；自定义/SearXNG 填地址后才能用', true);
+        return;
+      }
       S.cfg.webSearch = !S.cfg.webSearch;
       saveCfg();
-      t.closest('#btn-web').classList.toggle('on', S.cfg.webSearch);
-      if (S.cfg.webSearch && ((S.cfg.searchProvider || 'none') === 'none' || !S.cfg.searchKey))
-        UI.toast('联网搜索已开启，但尚未配置搜索提供商（设置 → 连接与模型）', true);
-      else UI.toast(S.cfg.webSearch ? '联网搜索已开启' : '联网搜索已关闭');
+      wb.classList.toggle('on', S.cfg.webSearch);
+      UI.toast(S.cfg.webSearch ? '联网搜索已开启' : '联网搜索已关闭');
       UI.notifyQuickState();
       return;
     }

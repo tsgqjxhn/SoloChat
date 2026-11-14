@@ -688,11 +688,11 @@ function buildSettings(){
         var ftCk = el('input', { type: 'checkbox', 'data-cfg': 'searchFetch' });
         ftCk.checked = c.searchFetch !== false;
         b.appendChild(el('div', { class: 'f-row' }, [
-          el('label', {}, [rwCk, ' 智能搜索决策']),
+          el('label', {}, [rwCk, ' 智能改写检索词']),
           el('label', { style: 'margin-left:18px' }, [ftCk, ' 抓取网页正文'])
         ]));
         b.appendChild(field('正文抓取条数', cfgInput('searchFetchCount', 'number'),
-          '智能搜索决策：联网开关打开后，先用模型自判「是否需要联网」——需要则给出简化检索词再搜索，不需要则直接作答（约 1~2 秒，失败回退原问题照常搜索）；' +
+          '智能改写检索词：联网开关打开后会搜索；此项只用模型把问题精简成检索词，不再跳过搜索（约 1~2 秒，失败回退原问题照常搜索）。' +
           '回答正文会自动在引用处标注 [标题](网址) 可点击链接。抓取正文：对前几条结果抓网页全文替代摘要（0~5 条，浏览器直连受 CORS 限制时自动回退摘要）。'));
       }, false));
 
