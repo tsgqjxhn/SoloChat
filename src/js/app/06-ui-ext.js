@@ -1604,6 +1604,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     } catch (e) {}
   }
   function newDraft(groupId){
+    try { RUNNER.closeWebSidebar(); } catch (e) {} // 新会话不继承上一会话的网页侧栏
     dropTempSessions(); // v2.8：新建即丢弃上一个临时会话（不写历史、不留痕）
     revokePreviews(); // v2.2：新建草稿不中止其它会话的生成
     S.sid = null; S.windowSize = LIMITS.DOM_WINDOW; S.msgs = [];
@@ -1643,6 +1644,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     return 'chat';
   }
   function selectSession(sid){
+    try { RUNNER.closeWebSidebar(); } catch (e) {} // 同模式切会话也要清掉网页侧栏
     /* v2.2：切会话不再中止正在进行的生成 —— 原会话转后台继续跑，回来还能看到它 */
     dropTempSessions(sid); // v2.8：切到别的会话 = 离开临时会话，内存态直接丢弃
     revokePreviews(); // 切换时 revoke 上一会话预览 URL（§5.2.7）

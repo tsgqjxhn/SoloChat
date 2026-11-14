@@ -1732,7 +1732,14 @@ function sendMessage(){
     else n.textContent = String(av || '🌙');
   }
   /* 输入区控件（v1.2）：模式/模型/思考 */
+  var _lastPanelMode = null;
   function renderComposerCtl(){
+    var _mNow = S.cfg.mode || 'chat';
+    /* 模式从设置/会话参数等路径切换时，也清掉上一模式的网页侧栏（只关 web 标签，不误伤工作区） */
+    if (_lastPanelMode && _lastPanelMode !== _mNow && document.body.classList.contains('rn-open')){
+      try { RUNNER.closeWebSidebar(); } catch (e) {}
+    }
+    _lastPanelMode = _mNow;
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
@@ -3733,9 +3740,11 @@ $('#sidebar').addEventListener('click', function(e){
     var mb = t.closest('#seg-mode [data-mode]');
     if (mb){
       var _newMode = mb.getAttribute('data-mode');
+      var _oldMode = S.cfg.mode;
       var _patch = { mode: _newMode, persona: '', modePin: true };
       if (_newMode === 'soul') _patch.picks = {}; /* Soul 自主使用全部扩展，清掉旧勾选 */
       setCfg(_patch);
+      if (_newMode !== _oldMode) { try { RUNNER.closeWebSidebar(); } catch (e) {} }
       MODE.mountUI();
       UI.renderComposerCtl();
       UI.updateEmpty();

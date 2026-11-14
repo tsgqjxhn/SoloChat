@@ -1588,7 +1588,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.2';
+var APP_VER = 'v0.4.3';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -8291,8 +8291,20 @@ function fitSide(){
     });
   }
 
+  /* 模式/会话切换前的网页侧栏清理：只关「网页」标签，不动「工作区」等其它标签。
+     close() 内已调用 webHostHide()，宿主原生 WebView2 会一并收起。 */
+  function closeWebSidebar(){
+    try {
+      var r = $('#runner');
+      if (!r || r.getAttribute('data-tab') !== 'web') return false;
+      if (!document.body.classList.contains('rn-open')) return false;
+      close();
+      return true;
+    } catch (e) { return false; }
+  }
+
   return { run: run, runCapture: runCapture, close: close, open: open, reset: reset, download: download, runVfs: runVfs,
-    openWeb: openWeb, renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, curKind: function(){ return cur && cur.kind; },
+    openWeb: openWeb, renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, closeWebSidebar: closeWebSidebar, curKind: function(){ return cur && cur.kind; },
     previewTo: previewTo, previewSource: previewSource, pvKind: pvKind, previewRefreshIf: previewRefreshIf,
     webHostHide: webHostHide, webHostRestore: webHostRestore }; /* v2.5/v2.8 · v1.1.8 弹窗/灯箱让位 */
 })();
@@ -12212,6 +12224,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     } catch (e) {}
   }
   function newDraft(groupId){
+    try { RUNNER.closeWebSidebar(); } catch (e) {} // 新会话不继承上一会话的网页侧栏
     dropTempSessions(); // v2.8：新建即丢弃上一个临时会话（不写历史、不留痕）
     revokePreviews(); // v2.2：新建草稿不中止其它会话的生成
     S.sid = null; S.windowSize = LIMITS.DOM_WINDOW; S.msgs = [];
@@ -12251,6 +12264,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     return 'chat';
   }
   function selectSession(sid){
+    try { RUNNER.closeWebSidebar(); } catch (e) {} // 同模式切会话也要清掉网页侧栏
     /* v2.2：切会话不再中止正在进行的生成 —— 原会话转后台继续跑，回来还能看到它 */
     dropTempSessions(sid); // v2.8：切到别的会话 = 离开临时会话，内存态直接丢弃
     revokePreviews(); // 切换时 revoke 上一会话预览 URL（§5.2.7）
@@ -14115,7 +14129,14 @@ function sendMessage(){
     else n.textContent = String(av || '🌙');
   }
   /* 输入区控件（v1.2）：模式/模型/思考 */
+  var _lastPanelMode = null;
   function renderComposerCtl(){
+    var _mNow = S.cfg.mode || 'chat';
+    /* 模式从设置/会话参数等路径切换时，也清掉上一模式的网页侧栏（只关 web 标签，不误伤工作区） */
+    if (_lastPanelMode && _lastPanelMode !== _mNow && document.body.classList.contains('rn-open')){
+      try { RUNNER.closeWebSidebar(); } catch (e) {}
+    }
+    _lastPanelMode = _mNow;
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
@@ -16116,9 +16137,11 @@ $('#sidebar').addEventListener('click', function(e){
     var mb = t.closest('#seg-mode [data-mode]');
     if (mb){
       var _newMode = mb.getAttribute('data-mode');
+      var _oldMode = S.cfg.mode;
       var _patch = { mode: _newMode, persona: '', modePin: true };
       if (_newMode === 'soul') _patch.picks = {}; /* Soul 自主使用全部扩展，清掉旧勾选 */
       setCfg(_patch);
+      if (_newMode !== _oldMode) { try { RUNNER.closeWebSidebar(); } catch (e) {} }
       MODE.mountUI();
       UI.renderComposerCtl();
       UI.updateEmpty();

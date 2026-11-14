@@ -4,10 +4,11 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.2**（versionCode 20，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.3**（versionCode 21，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **侧栏隔离**：Work 打开的「网页」侧边栏在切换模式/会话/新建会话时自动收起，宿主 WebView2 同步隐藏；「工作区」标签保留。
 - **模式切换条固定**：四个模式中心坐标一致，不再随空态内容/滚动位置跳动。
 - **Work 长任务**：去掉「短任务」文案，协议允许长任务、多步工具连续执行。
 - **Soul 人格**：极简输入区（隐藏附件/联网/生图）；人格设置含脸、性格、声音、能力、记忆、身体、进化，修改即时保存并在下一轮生效。
@@ -68,7 +69,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.2.apk`（463,370 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.2.apk`）
+仓库已放一份：`dist/SoloChat-Android-0.4.3.apk`（463,778 字节，证书 `CN=SoloChat`；桌面也放了一份 `SoloChat-Android-0.4.3.apk`）
 
 ## 使用
 

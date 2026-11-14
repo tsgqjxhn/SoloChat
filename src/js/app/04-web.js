@@ -869,8 +869,20 @@ function fitSide(){
     });
   }
 
+  /* 模式/会话切换前的网页侧栏清理：只关「网页」标签，不动「工作区」等其它标签。
+     close() 内已调用 webHostHide()，宿主原生 WebView2 会一并收起。 */
+  function closeWebSidebar(){
+    try {
+      var r = $('#runner');
+      if (!r || r.getAttribute('data-tab') !== 'web') return false;
+      if (!document.body.classList.contains('rn-open')) return false;
+      close();
+      return true;
+    } catch (e) { return false; }
+  }
+
   return { run: run, runCapture: runCapture, close: close, open: open, reset: reset, download: download, runVfs: runVfs,
-    openWeb: openWeb, renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, curKind: function(){ return cur && cur.kind; },
+    openWeb: openWeb, renderWs: renderWs, setTab: setTab, syncForSession: syncForSession, addSources: addSources, renderSrc: renderSrc, srcs: function(){ return SRCS; }, open: open, close: close, closeWebSidebar: closeWebSidebar, curKind: function(){ return cur && cur.kind; },
     previewTo: previewTo, previewSource: previewSource, pvKind: pvKind, previewRefreshIf: previewRefreshIf,
     webHostHide: webHostHide, webHostRestore: webHostRestore }; /* v2.5/v2.8 · v1.1.8 弹窗/灯箱让位 */
 })();
