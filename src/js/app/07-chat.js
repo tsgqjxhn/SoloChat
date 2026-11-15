@@ -842,7 +842,8 @@ function sendMessage(){
         NET.searchWeb(text, stage).then(function(r){
           live.remove();
           if (r && r.skip){ go(null); return; } // 模型判定无需联网 → 直接作答，不提示
-          if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
+          if (r && r.err) toast('搜索失败：' + String(r.err).slice(0, 180), true);
+          else if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
           go(r && r.block, r || { fail: true });
         });
       } else go(null);
@@ -911,7 +912,13 @@ function sendMessage(){
         st.node.insertBefore(sd, st.body);
       } else if (searchMeta && searchMeta.fail){
         /* 搜索失败/未配置：只加一行轻提示，不阻塞回答；模型侧另有系统提示说明未拿到结果 */
-        st.node.insertBefore(el('div', { class: 'srch', text: '本轮联网搜索未返回结果，以下回答未使用联网结果' }), st.body);
+        var sfTxt = '本轮联网搜索未返回结果，以下回答未使用联网结果';
+        if (searchMeta.err){
+          var se = String(searchMeta.err).replace(/\s+/g, ' ').trim();
+          if (se.length > 100) se = se.slice(0, 100) + '…';
+          sfTxt = '搜索失败：' + se + '（以下回答未使用联网结果）';
+        }
+        st.node.insertBefore(el('div', { class: 'srch', text: sfTxt }), st.body);
       }
       setSending(true);
     }

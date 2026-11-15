@@ -912,9 +912,33 @@ function fetchStream(opt){
     return jobs.length ? Promise.all(jobs).then(function(){ return list; }) : Promise.resolve(list);
   }
 
+  var lastHttpErr = '';
+  /* 从非 2xx 响应体提取可读错误：优先 error / message / code（Firecrawl 的 insufficient_credits 必须保留） */
+  function httpErrText(body){
+    var raw = String(body == null ? '' : body).trim(), j = null;
+    if (!raw) return '';
+    try { j = JSON.parse(raw); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object') return raw.replace(/\s+/g, ' ').slice(0, 200);
+    var out = [];
+    function push(v){
+      if (v == null || v === '' || out.length >= 6) return;
+      if (typeof v === 'object'){
+        if (Array.isArray(v)){ for (var i = 0; i < v.length && out.length < 6; i++) push(v[i]); return; }
+        var ks = ['error', 'code', 'type', 'message', 'detail', 'details', 'reason'];
+        for (var k = 0; k < ks.length; k++) if (v[ks[k]] != null) push(v[ks[k]]);
+        return;
+      }
+      var s = String(v).replace(/\s+/g, ' ').trim();
+      if (s && out.indexOf(s) < 0 && out.length < 6) out.push(s);
+    }
+    push(j.code); push(j.error); push(j.message);
+    if (!out.length) push(j.detail || j.details || j.reason);
+    return (out.length ? out.join('；') : raw).replace(/\s+/g, ' ').slice(0, 200);
+  }
   /* POST/GET JSON 双通道：桥/fetch，超时或非 2xx 返回 null */
   function httpJSON(req, ms){
     ms = ms || 15000;
+    lastHttpErr = '';
     if (bridge.ok && S.cfg.useBridge){
       return new Promise(function(resolve){
         var id = 's' + (++bridge.seq), acc = '', fin = false;
@@ -924,7 +948,12 @@ function fetchStream(opt){
           onChunk: function(t){ if (acc.length < 1000000) acc += t; },
           onDone: function(status){
             if (fin) return; stop();
-            if (status && (status < 200 || status >= 300)) return resolve(null);
+            if (status && (status < 200 || status >= 300)){
+              var em = httpErrText(acc);
+              lastHttpErr = 'HTTP ' + status + (em ? '：' + em : '');
+              return resolve(null);
+            }
+            lastHttpErr = '';
             try { resolve(req.parse(JSON.parse(acc))); } catch (e) { resolve(null); }
           },
           onError: function(){ stop(); resolve(null); }
@@ -936,8 +965,18 @@ function fetchStream(opt){
     var t = setTimeout(function(){ ac.abort(); }, ms);
     var mth = req.method || 'POST';
     return fetch(req.url, { method: mth, headers: req.headers, body: mth === 'GET' ? undefined : req.body, signal: ac.signal })
-      .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.json(); })
-      .then(function(j){ clearTimeout(t); try { return j ? req.parse(j) : null; } catch (e) { return null; } })
+      .then(function(res){
+        clearTimeout(t);
+        if (!res.ok){
+          return res.text().then(function(txt){
+            var em = httpErrText(txt);
+            lastHttpErr = 'HTTP ' + res.status + (em ? '：' + em : '');
+            return null;
+          }, function(){ lastHttpErr = 'HTTP ' + res.status; return null; });
+        }
+        return res.json();
+      })
+      .then(function(j){ clearTimeout(t); if (!j) return null; lastHttpErr = ''; try { return req.parse(j); } catch (e) { return null; } })
       .catch(function(){ clearTimeout(t); return null; });
   }
   /* 各源响应解析（命名函数，便于单测抓取） */
@@ -1197,12 +1236,13 @@ function fetchStream(opt){
   /* 入口：raw=用户原话；onStage=阶段回调（更新 live 指示器）；永不 reject */
   function searchWeb(raw, onStage, force){
     var stage = typeof onStage === 'function' ? onStage : function(){};
+    lastHttpErr = '';
     if (!searchReady()){ stage('未配置搜索提供商'); return Promise.resolve(null); }
     var t0 = Date.now();
     var num = clamp(parseInt(S.cfg.searchCount, 10) || 5, 1, 10);
     var prep = prepQuery(raw, lastUserBefore(S.msgs, raw));
     var q = prep.q;
-    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, fail: true }; }
+    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, fail: true, err: lastHttpErr || '' }; }
     stage('判断是否需要联网搜索…');
     /* v0.2.1：Work 里是模型显式要求检索（search 围栏），跳过「是否需要联网」的二次判定，省一次模型调用 */
     return (force ? Promise.resolve({ need: true, q: prep.q })

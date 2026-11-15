@@ -1605,7 +1605,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.4';
+var APP_VER = 'v0.4.5';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -4815,9 +4815,33 @@ function fetchStream(opt){
     return jobs.length ? Promise.all(jobs).then(function(){ return list; }) : Promise.resolve(list);
   }
 
+  var lastHttpErr = '';
+  /* 从非 2xx 响应体提取可读错误：优先 error / message / code（Firecrawl 的 insufficient_credits 必须保留） */
+  function httpErrText(body){
+    var raw = String(body == null ? '' : body).trim(), j = null;
+    if (!raw) return '';
+    try { j = JSON.parse(raw); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object') return raw.replace(/\s+/g, ' ').slice(0, 200);
+    var out = [];
+    function push(v){
+      if (v == null || v === '' || out.length >= 6) return;
+      if (typeof v === 'object'){
+        if (Array.isArray(v)){ for (var i = 0; i < v.length && out.length < 6; i++) push(v[i]); return; }
+        var ks = ['error', 'code', 'type', 'message', 'detail', 'details', 'reason'];
+        for (var k = 0; k < ks.length; k++) if (v[ks[k]] != null) push(v[ks[k]]);
+        return;
+      }
+      var s = String(v).replace(/\s+/g, ' ').trim();
+      if (s && out.indexOf(s) < 0 && out.length < 6) out.push(s);
+    }
+    push(j.code); push(j.error); push(j.message);
+    if (!out.length) push(j.detail || j.details || j.reason);
+    return (out.length ? out.join('；') : raw).replace(/\s+/g, ' ').slice(0, 200);
+  }
   /* POST/GET JSON 双通道：桥/fetch，超时或非 2xx 返回 null */
   function httpJSON(req, ms){
     ms = ms || 15000;
+    lastHttpErr = '';
     if (bridge.ok && S.cfg.useBridge){
       return new Promise(function(resolve){
         var id = 's' + (++bridge.seq), acc = '', fin = false;
@@ -4827,7 +4851,12 @@ function fetchStream(opt){
           onChunk: function(t){ if (acc.length < 1000000) acc += t; },
           onDone: function(status){
             if (fin) return; stop();
-            if (status && (status < 200 || status >= 300)) return resolve(null);
+            if (status && (status < 200 || status >= 300)){
+              var em = httpErrText(acc);
+              lastHttpErr = 'HTTP ' + status + (em ? '：' + em : '');
+              return resolve(null);
+            }
+            lastHttpErr = '';
             try { resolve(req.parse(JSON.parse(acc))); } catch (e) { resolve(null); }
           },
           onError: function(){ stop(); resolve(null); }
@@ -4839,8 +4868,18 @@ function fetchStream(opt){
     var t = setTimeout(function(){ ac.abort(); }, ms);
     var mth = req.method || 'POST';
     return fetch(req.url, { method: mth, headers: req.headers, body: mth === 'GET' ? undefined : req.body, signal: ac.signal })
-      .then(function(res){ clearTimeout(t); if (!res.ok) return null; return res.json(); })
-      .then(function(j){ clearTimeout(t); try { return j ? req.parse(j) : null; } catch (e) { return null; } })
+      .then(function(res){
+        clearTimeout(t);
+        if (!res.ok){
+          return res.text().then(function(txt){
+            var em = httpErrText(txt);
+            lastHttpErr = 'HTTP ' + res.status + (em ? '：' + em : '');
+            return null;
+          }, function(){ lastHttpErr = 'HTTP ' + res.status; return null; });
+        }
+        return res.json();
+      })
+      .then(function(j){ clearTimeout(t); if (!j) return null; lastHttpErr = ''; try { return req.parse(j); } catch (e) { return null; } })
       .catch(function(){ clearTimeout(t); return null; });
   }
   /* 各源响应解析（命名函数，便于单测抓取） */
@@ -5100,12 +5139,13 @@ function fetchStream(opt){
   /* 入口：raw=用户原话；onStage=阶段回调（更新 live 指示器）；永不 reject */
   function searchWeb(raw, onStage, force){
     var stage = typeof onStage === 'function' ? onStage : function(){};
+    lastHttpErr = '';
     if (!searchReady()){ stage('未配置搜索提供商'); return Promise.resolve(null); }
     var t0 = Date.now();
     var num = clamp(parseInt(S.cfg.searchCount, 10) || 5, 1, 10);
     var prep = prepQuery(raw, lastUserBefore(S.msgs, raw));
     var q = prep.q;
-    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, fail: true }; }
+    function fail(){ return { block: null, n: 0, ms: Date.now() - t0, items: [], query: q, fail: true, err: lastHttpErr || '' }; }
     stage('判断是否需要联网搜索…');
     /* v0.2.1：Work 里是模型显式要求检索（search 围栏），跳过「是否需要联网」的二次判定，省一次模型调用 */
     return (force ? Promise.resolve({ need: true, q: prep.q })
@@ -9901,6 +9941,7 @@ function buildSettings(){
           i.autocomplete = 'off';
           return i;
         })(), '仅存本机。各官网申请：google.serper.dev / serpapi.com / brave.com/search/api / tavily.com / firecrawl.dev / bochaai.com / jina.ai / exa.ai'));
+        b.appendChild(el('div', { class: 'hint', text: 'Firecrawl 报 HTTP 402 / insufficient_credits 表示账号额度为 0，不是应用没联网；请换用有额度的提供商或充值/重置额度。' }));
         b.appendChild(field('结果条数', cfgInput('searchCount', 'number'), '1~10，默认 5。结果按条截断，总量受上下文裁剪保护。'));
         b.appendChild(field('Google Grounding 模型', cfgInput('searchModel', 'text', 'gemini-2.0-flash'),
           '仅 Google 这一项用：走 Gemini 的 google_search 工具，直接返回带引用的回答（不是 SERP 列表）。Key 用同一栏的搜索 API Key。'));
@@ -13273,7 +13314,8 @@ function sendMessage(){
         NET.searchWeb(text, stage).then(function(r){
           live.remove();
           if (r && r.skip){ go(null); return; } // 模型判定无需联网 → 直接作答，不提示
-          if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
+          if (r && r.err) toast('搜索失败：' + String(r.err).slice(0, 180), true);
+          else if (!r || !r.block) toast('搜索未返回结果，仅按原问题回答');
           go(r && r.block, r || { fail: true });
         });
       } else go(null);
@@ -13342,7 +13384,13 @@ function sendMessage(){
         st.node.insertBefore(sd, st.body);
       } else if (searchMeta && searchMeta.fail){
         /* 搜索失败/未配置：只加一行轻提示，不阻塞回答；模型侧另有系统提示说明未拿到结果 */
-        st.node.insertBefore(el('div', { class: 'srch', text: '本轮联网搜索未返回结果，以下回答未使用联网结果' }), st.body);
+        var sfTxt = '本轮联网搜索未返回结果，以下回答未使用联网结果';
+        if (searchMeta.err){
+          var se = String(searchMeta.err).replace(/\s+/g, ' ').trim();
+          if (se.length > 100) se = se.slice(0, 100) + '…';
+          sfTxt = '搜索失败：' + se + '（以下回答未使用联网结果）';
+        }
+        st.node.insertBefore(el('div', { class: 'srch', text: sfTxt }), st.body);
       }
       setSending(true);
     }

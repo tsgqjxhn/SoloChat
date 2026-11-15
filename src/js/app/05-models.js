@@ -667,6 +667,7 @@ function buildSettings(){
           i.autocomplete = 'off';
           return i;
         })(), '仅存本机。各官网申请：google.serper.dev / serpapi.com / brave.com/search/api / tavily.com / firecrawl.dev / bochaai.com / jina.ai / exa.ai'));
+        b.appendChild(el('div', { class: 'hint', text: 'Firecrawl 报 HTTP 402 / insufficient_credits 表示账号额度为 0，不是应用没联网；请换用有额度的提供商或充值/重置额度。' }));
         b.appendChild(field('结果条数', cfgInput('searchCount', 'number'), '1~10，默认 5。结果按条截断，总量受上下文裁剪保护。'));
         b.appendChild(field('Google Grounding 模型', cfgInput('searchModel', 'text', 'gemini-2.0-flash'),
           '仅 Google 这一项用：走 Gemini 的 google_search 工具，直接返回带引用的回答（不是 SERP 列表）。Key 用同一栏的搜索 API Key。'));
