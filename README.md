@@ -4,6 +4,8 @@
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
+主应用仓库保持极简；扩展包与 Python 运行时放在同级目录 **`../extensions/`**（独立 Git 仓库），发布前用 `node tools/sync-extensions.mjs` 同步到 `dist/plugins/`。
+
 ![首屏](screenshots/home.png)
 
 ## 四种模式
@@ -56,6 +58,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ### 扩展系统
 
+- **外部扩展仓库**：扩展包与运行时在 `../extensions/`，不放进主应用 Git；新增扩展不需要修改主应用源码。
 - **六类内容**：智能体 / 插件 / 技能 / 工具 / 提示词 / MCP，统一走 `EXT.registry()`。
 - **原生 function calling**：Work / Agent / Soul 可把工具 schema 交给支持 function calling 的模型；结果回到既有围栏执行链。
 - **自定义工具**：声明式 HTTP，不执行任意 JS；可设置 URL / 方法 / headers / 字段。
@@ -114,21 +117,26 @@ APK 输出到 `android/app/build/outputs/apk/release/app-release.apk`。
 ## 项目结构
 
 ```text
-SoloChat/
+SoloChat/                    # 主应用仓库（极简）
 ├── src/                    # 源码：index.template.html + css/svg/js 分段
 ├── index.html              # 构建产物（单文件运行时；不手改）
 ├── host/                   # WebView2 宿主（Program.cs / csproj / app.ico）
 ├── android/                # 原生 Android 壳（WebView + 悬浮截图 + 分享 + WebDAV）
-├── tools/                  # build.mjs / verify.mjs / build-android.mjs
-├── plugins/                # Python 3.11 运行时与市场清单
-├── examples/               # 示例扩展包
-├── screenshots/            # README 截图
+├── tools/                  # build.mjs / verify.mjs / build-android.mjs / sync-extensions.mjs
 ├── docs/                   # 工程规范、扩展规范、变更记录、历史设计
+├── screenshots/            # README 截图
 ├── dist/                   # 发布产物：exe + 当前 APK
 └── LICENSE                 # MIT
+
+../extensions/              # 独立扩展仓库（同级目录）
+├── plugins/                # 运行时插件 + market.json
+├── packages/               # 扩展包：一个文件夹一个包
+│   ├── _template/          # 新建扩展从这里复制
+│   └── 示例扩展包/
+└── README.md
 ```
 
-扩展市场源码在 `ext/plugins` 分支；分类分支为 `ext/agents`、`ext/plugins`、`ext/skills`、`ext/tools`、`ext/prompts`。
+扩展市场源码在 `ext/plugins` 分支；分类分支为 `ext/agents`、`ext/plugins`、`ext/skills`、`ext/tools`、`ext/prompts`。本地扩展目录的 Git 配置见 `../extensions/README.md`。
 
 ## 构建与验证
 
@@ -136,6 +144,7 @@ SoloChat/
 node tools/build.mjs          # src/ → index.html
 node tools/build.mjs --check  # 构建新鲜度
 node tools/verify.mjs         # 7 项静态闸门：语法/字节/行数/重复 id/版本/非空/新鲜度
+node tools/sync-extensions.mjs # ../extensions/plugins → dist/plugins
 node tools/build-android.mjs  # 注入 Android assets
 ```
 
@@ -145,6 +154,7 @@ node tools/build-android.mjs  # 注入 Android assets
 
 - 当前版本 **v0.4.5**；桌面 `APP_VER` / FileVersion **0.4.5.0**；Android `versionCode 23`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
+- 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
 - GitHub Releases：[`v0.4.0` 历史归档](https://github.com/tsgqjxhn/SoloChat/releases/tag/v0.4.0)；最新代码/tag 为 `v0.4.5`。
 
