@@ -1,10 +1,10 @@
 # SoloChat
 
-**v0.4.5 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.6 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
-主应用仓库保持极简；扩展包与 Python 运行时放在同级目录 **`../extensions/`**（独立 Git 仓库），发布前用 `node tools/sync-extensions.mjs` 同步到 `dist/plugins/`。
+主应用仓库保持极简；扩展包与 Python 运行时放在同级目录 **`../extensions/`**（独立 Git 仓库），发布前用 `node tools/sync-extensions.mjs` 同步到 `dist/plugins/` 与 `dist/packages/`。
 
 ![首屏（演示模式）](screenshots/home.png)
 
@@ -24,6 +24,7 @@
 ### 对话与搜索
 
 - **联网搜索**：设置里选提供商并填 Key / 地址后，打开输入区地球图标即强制检索；搜索结果以标题 + 链接 + 摘要注入当前轮，要求模型带引用回答。
+- **配置组**：联网搜索与文档解析各自支持保存 / 新建 / 重命名 / 删除多组配置，和 LLM 供应商配置一样切换；当前组字段自动保存，Key 按组进入宿主保险库。
 - **错误可见**：搜索提供商返回 402 / 额度不足 / HTTP 错误时，回答上方会显示真实原因，不再假装「没有工具」。
 - **智能改写检索词**：可选；只负责把问题精简成检索词，不再跳过搜索。
 - **Firecrawl 用户注意**：`HTTP 402 / insufficient_credits` 表示 Firecrawl 账号额度为 0，需要充值、等额度重置，或改用 Tavily / Brave / SerpApi / SearXNG / 自定义搜索。
@@ -62,7 +63,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 - **六类内容**：智能体 / 插件 / 技能 / 工具 / 提示词 / MCP，统一走 `EXT.registry()`。
 - **原生 function calling**：Work / Agent / Soul 可把工具 schema 交给支持 function calling 的模型；结果回到既有围栏执行链。
 - **自定义工具**：声明式 HTTP，不执行任意 JS；可设置 URL / 方法 / headers / 字段。
-- **扩展市场**：读取 `ext/plugins` 分支的 `index.json`；已安装项进入「已有」。
+- **扩展市场**：优先读取本地 `packages/index.json`（`node tools/sync-extensions.mjs` 生成，显示「本地扩展包市场」），本地缺失时回退远端 `ext/plugins` 分支；已安装项进入「已有」。
 - **Python 3.11 运行时插件**：官方 CPython 3.11 portable；不写 PATH、不改注册表。
 
 ### 连接与数据
@@ -74,7 +75,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ## Android 版
 
-`dist/SoloChat-Android-0.4.5.apk`（465,390 字节，versionCode 23；项目自有 keystore 签名）
+`dist/SoloChat-Android-0.4.6.apk`（468,954 字节，versionCode 24；项目自有 keystore 签名）
 
 - 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
 - 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
@@ -144,7 +145,7 @@ SoloChat/                    # 主应用仓库（极简）
 node tools/build.mjs          # src/ → index.html
 node tools/build.mjs --check  # 构建新鲜度
 node tools/verify.mjs         # 7 项静态闸门：语法/字节/行数/重复 id/版本/非空/新鲜度
-node tools/sync-extensions.mjs # ../extensions/plugins → dist/plugins
+node tools/sync-extensions.mjs # ../extensions/plugins → dist/plugins；packages → dist/packages + 本地市场索引
 node tools/build-android.mjs  # 注入 Android assets
 ```
 
@@ -152,21 +153,21 @@ node tools/build-android.mjs  # 注入 Android assets
 
 ## 版本与发布
 
-- 当前版本 **v0.4.5**；桌面 `APP_VER` / FileVersion **0.4.5.0**；Android `versionCode 23`。
+- 当前版本 **v0.4.6**；桌面 `APP_VER` / FileVersion **0.4.6.0**；Android `versionCode 24`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
-- 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/`。
+- 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/` 与 `dist/packages/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
-- GitHub Releases：[`v0.4.0` 历史归档](https://github.com/tsgqjxhn/SoloChat/releases/tag/v0.4.0)；最新代码/tag 为 `v0.4.5`。
+- GitHub Releases：[`v0.4.0` 历史归档](https://github.com/tsgqjxhn/SoloChat/releases/tag/v0.4.0)；最新代码/tag 以仓库当前 `main` 为准。
 
 ## 体积与资源
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,472,896 字节**（v0.4.5，FileVersion 0.4.5.0），单文件 |
-| 主产物 | `index.html` **1,289,862 字节 / 22,121 行** |
-| 源码 | `src/` **19 个文件 / 1,289,934 字节** |
-| 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
-| Android APK | `dist/SoloChat-Android-0.4.5.apk` **465,390 字节**（versionCode 23） |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,486,208 字节**（v0.4.6，FileVersion 0.4.6.0），单文件 |
+| 主产物 | `index.html` **1,303,403 字节 / 22,436 行** |
+| 源码 | `src/` **19 个文件 / 1,303,475 字节** |
+| 宿主源码 | `host/Program.cs` **205,250 字节 / 3,854 行** |
+| Android APK | `dist/SoloChat-Android-0.4.6.apk` **468,954 字节**（versionCode 24） |
 
 ## 数据存储
 

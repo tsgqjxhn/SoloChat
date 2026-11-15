@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.5';
+var APP_VER = 'v0.4.6';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -167,6 +167,9 @@ var DEF_CFG = {
   dual: false, dualA: '', dualB: '', // v1.4：Chat 双开（左右两个模型同时回答）
   research: false,               // v1.8：深度研究（原 Chat 子模式，现为「+」里的开关）
   agentMode: 'auto',             // v1.10：Agent 行为 auto（智能体协作）/ read（只读）/ write（直接写）              // v0.6.0：按输入自动选模式
+  /* v0.4.6：在线搜索 / 文档解析配置组（与 LLM presets 同级；扁平字段 = 当前组镜像） */
+  searchProfiles: [], activeSearchProfile: '',
+  parseProfiles: [],  activeParseProfile: '',
   searchProvider: 'none',       // none | serper | serpapi | brave | tavily | firecrawl | bocha | jina | exa | searxng | custom
   searchBase: '',               // SearXNG 根地址（无需 Key）
   searchCustom: {},             // 自定义搜索：{ url, path, fTitle, fUrl, fText, method, headers }
@@ -452,6 +455,8 @@ function loadCfg(){
   /* v1.1.24：连接/首字/空闲超时全部取消；旧配置里的 60/30 也不再生效 */
   cfg.timeout = { connect: 0, first: 0, idle: 0 };
   cfg.ocr = Object.assign({}, DEF_CFG.ocr, c.ocr || {});
+  /* v0.4.6：搜索/解析配置组初始化（旧扁平配置迁移成默认组；已有多组则只补缺省） */
+  try { SVC.init(cfg); } catch (e) {}
   /* v0.4.2：Soul 人格嵌套字段深合并（旧配置缺字段补默认，未知字段保留） */
   cfg.soulProfile = mergeCfgDeep(DEF_CFG.soulProfile, c.soulProfile || {});
   if (!cfg.soulProfile.voice || typeof cfg.soulProfile.voice !== 'object') cfg.soulProfile.voice = mergeCfgDeep(DEF_CFG.soulProfile.voice, {});
@@ -520,7 +525,10 @@ function loadCfg(){
   /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
   try { if (!cfg.defaultModel) cfg.defaultModel = cfg.currentModel || ''; } catch (e) {}
 }
+var OCR_KEYS = ['mistralKey', 'azureKey', 'baiduKey', 'baiduSecret', 'gwKey']; // v0.4.6：OCR / 解析组共用
 var saveCfg = debounce(function(){
+  /* v0.4.6：持久化前把扁平字段回写当前搜索/解析组；切组应用过程中跳过，防止旧值覆盖新组 */
+  try { if (typeof SVC !== 'undefined' && SVC.syncAll) SVC.syncAll(); } catch (e) {}
   try {
     if (Vault.avail){
       if (Vault.hydrated) Vault.persist(S.cfg); // Issue 14: 仅在密钥已回读(hydrated)后才写回保险库，防止启动早期的空覆盖把库中密钥清空
@@ -529,6 +537,11 @@ var saveCfg = debounce(function(){
       copy.videoKey = ''; // v0.4.2：视频 Key 只进保险库
       if (copy.ocr){ copy.ocr.mistralKey = ''; copy.ocr.azureKey = ''; copy.ocr.baiduKey = ''; copy.ocr.baiduSecret = ''; copy.ocr.gwKey = ''; } // v1.5：OCR Key 同样只进保险库
       if (copy.presets) copy.presets.forEach(function(p){ p.apiKey = ''; });
+      /* v0.4.6：各组自己的 Key 同样只进保险库，localStorage 不留明文 */
+      if (copy.searchProfiles) copy.searchProfiles.forEach(function(p){ p.searchKey = ''; });
+      if (copy.parseProfiles) copy.parseProfiles.forEach(function(p){
+        if (p.ocr) OCR_KEYS.forEach(function(k){ p.ocr[k] = ''; });
+      });
       localStorage.setItem(LS_CFG, JSON.stringify(copy));
     } else {
       var copy2 = JSON.parse(JSON.stringify(S.cfg));
@@ -554,14 +567,30 @@ var Vault = {
     jobs.push(NET.bridge.vault('set', 'searchKey', (cfg.searchKey || '')));
     jobs.push(NET.bridge.vault('set', 'videoKey', (cfg.videoKey || ''))); // v0.4.2：视频 Key 不落 localStorage
     var oc = cfg.ocr || {};
-    ['mistralKey', 'azureKey', 'baiduKey', 'baiduSecret', 'gwKey'].forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k, oc[k] || '')); }); // v1.5：OCR Key 走 DPAPI
+    OCR_KEYS.forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k, oc[k] || '')); }); // v1.5：OCR Key 走 DPAPI
     (cfg.presets || []).forEach(function(p){ jobs.push(NET.bridge.vault('set', 'apiKey:' + p.id, p.apiKey || '')); });
+    /* v0.4.6：每个搜索/解析组各有一套 Key（按组 id 命名，互不覆盖） */
+    (cfg.searchProfiles || []).forEach(function(p){
+      jobs.push(NET.bridge.vault('set', 'searchKey:' + p.id, p.searchKey || ''));
+    });
+    (cfg.parseProfiles || []).forEach(function(p){
+      var o = p.ocr || {};
+      OCR_KEYS.forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k + ':' + p.id, o[k] || '')); });
+    });
     Promise.all(jobs).catch(function(){});
   },
   // Issue 14: 删除预置时调用，清除该预置留在保险库中的密钥（宿主 set 空值即删）
   clearPreset: function(id){
     if (!this.avail) return Promise.resolve();
     return NET.bridge.vault('set', 'apiKey:' + id, '').catch(function(){});
+  },
+  /* v0.4.6：删除搜索/解析配置组时清掉该组的密钥（宿主 set 空值即删） */
+  clearSvcProfile: function(kind, id){
+    if (!this.avail || !id) return Promise.resolve();
+    var jobs = [];
+    if (kind === 'search') jobs.push(NET.bridge.vault('set', 'searchKey:' + id, ''));
+    else if (kind === 'parse') OCR_KEYS.forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k + ':' + id, '')); });
+    return Promise.all(jobs).catch(function(){});
   },
   hydrate: function(cfg){
     var self = this;
@@ -572,8 +601,18 @@ var Vault = {
     jobs.push(NET.bridge.vault('get', 'searchKey').then(function(v){ if (v != null) cfg.searchKey = v; }));
     jobs.push(NET.bridge.vault('get', 'videoKey').then(function(v){ if (v != null) cfg.videoKey = v; }));
     cfg.ocr = cfg.ocr || Object.assign({}, DEF_CFG.ocr);
-    ['mistralKey', 'azureKey', 'baiduKey', 'baiduSecret', 'gwKey'].forEach(function(k){ // v1.5：OCR Key 回读
+    OCR_KEYS.forEach(function(k){ // v1.5：OCR Key 回读
       jobs.push(NET.bridge.vault('get', 'ocr.' + k).then(function(v){ if (v != null) cfg.ocr[k] = v; }));
+    });
+    /* v0.4.6：按组回读搜索 Key / OCR Key */
+    (cfg.searchProfiles || []).forEach(function(p){
+      jobs.push(NET.bridge.vault('get', 'searchKey:' + p.id).then(function(v){ if (v != null) p.searchKey = v; }));
+    });
+    (cfg.parseProfiles || []).forEach(function(p){
+      var o = p.ocr || (p.ocr = {});
+      OCR_KEYS.forEach(function(k){
+        jobs.push(NET.bridge.vault('get', 'ocr.' + k + ':' + p.id).then(function(v){ if (v != null) o[k] = v; }));
+      });
     });
     return Promise.all(jobs).then(function(){
       var act = null;
@@ -583,6 +622,197 @@ var Vault = {
     }).catch(function(e){ self.hydrated = false; try { console.warn('保险库回读失败，本次不写回密钥', e); } catch (e2) {} }); // v0.3.11：失败时不能再置 true，否则 saveCfg 会用空 key 覆盖保险库
   }
 };
+/* v0.4.6：搜索 / 文档解析配置组（SVC）
+   - 在 DEF_CFG 外单独维护组结构，扁平字段始终镜像当前组；
+   - 组内 id 空间与 LLM presets 分开：搜索 s*，解析 d*；
+   - 所有读写都走原生对象，无依赖。 */
+var SVC_FIELDS = {
+  search: {
+    key: 'searchProfiles', activeKey: 'activeSearchProfile', idPrefix: 's',
+    fields: ['searchProvider', 'searchKey', 'searchBase', 'searchCustom', 'searchModel',
+      'searchCount', 'searchRewrite', 'searchFetch', 'searchFetchCount'],
+    deep: { searchCustom: 1 }
+  },
+  parse: {
+    key: 'parseProfiles', activeKey: 'activeParseProfile', idPrefix: 'd',
+    fields: ['docParse', 'docToModel', 'maxDocMB', 'maxImgMB', 'ocr'],
+    deep: { ocr: 1 }
+  }
+};
+function svcClone(v){
+  if (v == null || typeof v !== 'object') return v;
+  try { return JSON.parse(JSON.stringify(v)); } catch (e){ return Array.isArray(v) ? v.slice() : Object.assign({}, v); }
+}
+function svcFindIn(c, kind, id){
+  var d = SVC_FIELDS[kind];
+  if (!d || !c || !Array.isArray(c[d.key])) return null;
+  for (var i = 0; i < c[d.key].length; i++) if (c[d.key][i] && c[d.key][i].id === id) return c[d.key][i];
+  return null;
+}
+/* 补齐组里缺的字段（只补缺省，不覆盖已有值）；OCR / searchCustom 保证是独立对象 */
+function svcNormalize(c, kind, p){
+  var d = SVC_FIELDS[kind];
+  if (!d || !p || typeof p !== 'object') return p;
+  for (var i = 0; i < d.fields.length; i++){
+    var k = d.fields[i];
+    if (!Object.prototype.hasOwnProperty.call(p, k) || p[k] == null)
+      p[k] = d.deep[k] ? svcClone(c[k]) : c[k];
+  }
+  if (kind === 'parse'){
+    if (!p.ocr || typeof p.ocr !== 'object' || Array.isArray(p.ocr)) p.ocr = svcClone(c.ocr || DEF_CFG.ocr);
+    else p.ocr = Object.assign({}, DEF_CFG.ocr, p.ocr);
+  }
+  if (kind === 'search'){
+    if (!p.searchCustom || typeof p.searchCustom !== 'object' || Array.isArray(p.searchCustom)) p.searchCustom = svcClone(c.searchCustom || {});
+    else p.searchCustom = Object.assign({}, p.searchCustom);
+  }
+  return p;
+}
+/* 从扁平字段抓一份组快照（嵌套对象深拷贝，避免组与扁平互相引用） */
+function svcCaptureFrom(c, kind){
+  var d = SVC_FIELDS[kind], out = {};
+  if (!d) return out;
+  for (var i = 0; i < d.fields.length; i++){
+    var k = d.fields[i];
+    out[k] = d.deep[k] ? svcClone(c[k]) : c[k];
+  }
+  return out;
+}
+/* 把某个组应用到扁平字段 */
+function svcApplyTo(c, kind, id){
+  var d = SVC_FIELDS[kind];
+  if (!d) return false;
+  var p = svcFindIn(c, kind, id);
+  if (!p) return false;
+  svcNormalize(c, kind, p);
+  c[d.activeKey] = p.id;
+  for (var i = 0; i < d.fields.length; i++){
+    var k = d.fields[i];
+    c[k] = d.deep[k] ? svcClone(p[k]) : p[k];
+  }
+  return true;
+}
+function svcNextId(c, kind){
+  var d = SVC_FIELDS[kind], base = d.idPrefix + Date.now().toString(36), id = base, n = 1;
+  var arr = (c && c[d.key]) || [];
+  function taken(x){
+    for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === x) return true;
+    return false;
+  }
+  while (taken(id)) id = base + (++n);
+  return id;
+}
+var SVC = {
+  /* 载入时迁移：没有组就把当前扁平配置变成「默认」组；已有组只补缺省字段 */
+  init: function(c){
+    c = c || S.cfg || {};
+    ['search', 'parse'].forEach(function(kind){
+      var d = SVC_FIELDS[kind];
+      var arr = Array.isArray(c[d.key]) ? c[d.key].filter(function(p){ return p && typeof p === 'object' && p.id; }) : [];
+      if (!arr.length){
+        var p = { id: d.idPrefix + '1', name: '默认' };
+        var snap = svcCaptureFrom(c, kind);
+        for (var k in snap) p[k] = snap[k];
+        arr = [p];
+      }
+      for (var i = 0; i < arr.length; i++) svcNormalize(c, kind, arr[i]);
+      c[d.key] = arr;
+      if (!svcFindIn(c, kind, c[d.activeKey])) c[d.activeKey] = arr[0].id;
+      svcApplyTo(c, kind, c[d.activeKey]); // 扁平字段 = 当前组镜像
+    });
+    return c;
+  },
+  list: function(kind){
+    var d = SVC_FIELDS[kind];
+    if (!d) return [];
+    var c = S.cfg || {};
+    if (!Array.isArray(c[d.key])) c[d.key] = [];
+    return c[d.key];
+  },
+  active: function(kind){
+    var d = SVC_FIELDS[kind];
+    if (!d) return null;
+    var c = S.cfg || {}, p = svcFindIn(c, kind, c[d.activeKey]);
+    if (!p){
+      var arr = this.list(kind);
+      p = arr[0] || null;
+      if (p) c[d.activeKey] = p.id;
+    }
+    return p;
+  },
+  capture: function(kind){
+    return svcCaptureFrom(S.cfg || {}, kind);
+  },
+  fieldKeys: function(kind){
+    var d = SVC_FIELDS[kind];
+    return d ? d.fields.slice() : [];
+  },
+  /* 扁平字段 → 当前组（saveCfg 持久化前调用；切组过程中跳过） */
+  syncAll: function(){
+    if (!S || !S.cfg || S._svcApplying) return;
+    var c = S.cfg;
+    ['search', 'parse'].forEach(function(kind){
+      var d = SVC_FIELDS[kind];
+      if (!d) return;
+      var p = svcFindIn(c, kind, c[d.activeKey]);
+      if (!p) return;
+      var snap = svcCaptureFrom(c, kind);
+      for (var k in snap) p[k] = snap[k];
+    });
+  },
+  /* 切组：先把当前扁平写回当前组，再应用目标组，最后刷新设置界面 */
+  apply: function(kind, id){
+    var d = SVC_FIELDS[kind];
+    if (!d || !S.cfg) return false;
+    this.syncAll();
+    S._svcApplying = true;
+    var ok = false;
+    try { ok = svcApplyTo(S.cfg, kind, id); } finally { S._svcApplying = false; }
+    if (!ok) return false;
+    saveCfg();
+    try { if (typeof UI !== 'undefined' && UI.openSettings) UI.openSettings(); } catch (e) {}
+    return true;
+  },
+  /* 新建组：复制当前组全部字段（含 Key），用户改名后继续改即可 */
+  newProfile: function(kind, name){
+    var d = SVC_FIELDS[kind];
+    if (!d || !S.cfg) return null;
+    this.syncAll();
+    var snap = svcCaptureFrom(S.cfg, kind);
+    var p = { id: svcNextId(S.cfg, kind), name: name || ('配置' + (this.list(kind).length + 1)) };
+    for (var k in snap) p[k] = snap[k];
+    S.cfg[d.key] = this.list(kind).concat([p]);
+    S.cfg[d.activeKey] = p.id;
+    saveCfg();
+    return p;
+  },
+  rename: function(kind, name){
+    var p = this.active(kind);
+    if (!p || !name) return false;
+    p.name = String(name);
+    saveCfg();
+    return true;
+  },
+  /* 删除组：至少保留一组；删的是当前组就切到剩余第一组，并清掉保险库里的组密钥 */
+  del: function(kind, id){
+    var d = SVC_FIELDS[kind];
+    if (!d || !S.cfg) return false;
+    var arr = this.list(kind);
+    if (arr.length <= 1) return false;
+    var gone = svcFindIn(S.cfg, kind, id);
+    if (!gone) return false;
+    this.syncAll();
+    S.cfg[d.key] = arr.filter(function(x){ return x.id !== id; });
+    if (!svcFindIn(S.cfg, kind, S.cfg[d.activeKey])){
+      S._svcApplying = true;
+      try { svcApplyTo(S.cfg, kind, S.cfg[d.key][0].id); } finally { S._svcApplying = false; }
+    }
+    try { Vault.clearSvcProfile(kind, id); } catch (e) {}
+    saveCfg();
+    return true;
+  }
+};
+
 function setCfg(patch){
   var flatOnly = !!(patch && patch.__flatOnly); // v0.5.8：演示模式等只改运行时，不回灌配置组
   if (flatOnly) delete patch.__flatOnly;

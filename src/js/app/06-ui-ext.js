@@ -118,23 +118,50 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
     }
 
-    /* ===== 市场（origin/ext/plugins 分支 index.json）+ 三子页签调度 ===== */
-    var mktCache = null, mktErr = '', mktOffline = false;
+    /* ===== 市场（本地 packages/ 优先，远端 origin/ext/plugins 兜底）+ 三子页签调度 ===== */
+    var mktCache = null, mktErr = '', mktOffline = false, mktLocal = false;
     var MKT_INDEX = 'https://raw.githubusercontent.com/tsgqjxhn/SoloChat/ext/plugins/index.json';
-    function ensureMarket(){
-      if (mktCache || mktErr) return Promise.resolve();
-      var url = window.__SOLOCHAT_MKT_INDEX__ || MKT_INDEX;
+    function localMarketBase(){
+      try { return new URL('packages/', location.href).href; } catch(e){ return 'packages/'; }
+    }
+    function offlineFallback(){
+      return fetch('plugins/market.json', { cache: 'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(cat){
+        mktOffline = !!(cat && cat.plugins && cat.plugins.length);
+      }).catch(function(){});
+    }
+    function fetchRemoteMarket(url){
       return NET.raw({ url: url, method: 'GET', timeout: 15000 }).then(function(r){
         if (!r || r.status !== 200) throw new Error('HTTP ' + (r && r.status));
         var idx;
         try { idx = JSON.parse(r.text); } catch(e){ throw new Error('index.json 不是合法 JSON'); }
-        if (!idx || !idx.plugins) throw new Error('index.json 缺少 plugins');
+        if (!idx || !Array.isArray(idx.plugins)) throw new Error('index.json 缺少 plugins');
         mktCache = idx;
-      }).then(null, function(e){
-        mktErr = (e && e.message) || String(e);
-        return fetch('plugins/market.json', { cache: 'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(cat){
-          mktOffline = !!(cat && cat.plugins && cat.plugins.length);
-        }).catch(function(){});
+        mktLocal = false;
+      });
+    }
+    function ensureMarket(){
+      if (mktCache || mktErr) return Promise.resolve();
+      var override = window.__SOLOCHAT_MKT_INDEX__;
+      if (override){   /* 调试覆盖优先：显式指定远端索引 */
+        return fetchRemoteMarket(override).then(null, function(e){
+          mktErr = (e && e.message) || String(e);
+          return offlineFallback();
+        });
+      }
+      /* 本地优先：dist/packages/index.json（0 包也算成功，不回退显示远端 503） */
+      return fetch('packages/index.json', { cache: 'no-store' }).then(function(r){
+        if (!r || !r.ok) throw new Error('HTTP ' + (r && r.status));
+        return r.json();
+      }).then(function(idx){
+        if (!idx || !Array.isArray(idx.plugins)) throw new Error('本地 index.json 缺少 plugins');
+        mktCache = idx;
+        mktLocal = true;
+      }).then(null, function(){
+        /* 本地不存在/解析失败 → 远端；远端失败保留可诊断错误 */
+        return fetchRemoteMarket(MKT_INDEX).then(null, function(e2){
+          mktErr = (e2 && e2.message) || String(e2);
+          return offlineFallback();
+        });
       });
     }
     function isInstalled(name){
@@ -142,6 +169,12 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       EXT.all().forEach(function(it){ if (it.pkg === name) hit = true; });
       (S.cfg.prompts || []).forEach(function(pr){ if (pr.pkg === name) hit = true; });
       return hit;
+    }
+    function marketRawBase(idx){
+      var raw = String((idx && idx.raw) || '');
+      if (!mktLocal) return raw;
+      /* 本地：一律转成绝对地址再交给 EXT.installMarket（含中文目录逐段编码） */
+      try { return new URL(raw || 'packages/', location.href).href; } catch(e){ return localMarketBase(); }
     }
     function drawExt(kind){
       mktExtBox.textContent = '';
@@ -151,13 +184,18 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         mktExtBox.appendChild(el('div', { class: 'hint', style: 'color:var(--danger)', text: t }));
         return;
       }
-      var idx = mktCache || { plugins: [] }, raw = idx.raw || '', pkgs = idx.plugins || [];
+      var idx = mktCache || { plugins: [] }, pkgs = idx.plugins || [];
+      if (!pkgs.length){
+        mktExtBox.appendChild(el('div', { class: 'hint', text: mktLocal ? '本地扩展包市场 · 暂无扩展包' : '扩展包市场 · 暂无扩展包' }));
+        return;
+      }
+      var raw = marketRawBase(idx);
+      mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: mktLocal ? '本地扩展包市场 · packages/' : '扩展包市场 · origin/ext/plugins' }));
       var key = { agents: 'agents', skills: 'skills', tools: 'tools', prompt: 'prompts' }[kind];
       var shown = pkgs.filter(function(p){
         return kind === 'plugins' ? true : !!(p.items && p.items[key] > 0);
       }).filter(function(p){ return !isInstalled(p.name); });
       if (!shown.length){ mktExtBox.appendChild(el('div', { class: 'hint', text: '这一类没有可安装的扩展包；已安装的请到「已有」查看。' })); return; }
-      mktExtBox.appendChild(el('div', { class: 'sub', style: 'margin:0 0 6px', text: '扩展包市场 · origin/ext/plugins' }));
       shown.forEach(function(pkg){ mktExtBox.appendChild(mktCard(pkg, raw)); });
     }
     function mktCard(pkg, raw){

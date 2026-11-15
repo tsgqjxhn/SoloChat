@@ -2829,8 +2829,16 @@ namespace SoloChatHost
 
         void SyncPluginsFolder()
         {
-            string src = Path.Combine(AppContext.BaseDirectory, "plugins");
-            string dst = Path.Combine(appDir, "plugins");
+            /* v0.4.6：Release 宿主会把页面释放到私有运行时目录；扩展包市场也要跟着复制，
+               否则 https://app.local/packages/index.json 永远 404，只能回退到远端 503。 */
+            SyncAppAssetFolder("plugins");
+            SyncAppAssetFolder("packages");
+        }
+
+        void SyncAppAssetFolder(string name)
+        {
+            string src = Path.Combine(AppContext.BaseDirectory, name);
+            string dst = Path.Combine(appDir, name);
             if (!Directory.Exists(src)) return;
             string sf = Path.GetFullPath(src).TrimEnd('\\');
             string df = Path.GetFullPath(dst).TrimEnd('\\');

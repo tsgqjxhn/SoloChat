@@ -298,6 +298,51 @@ function buildSettings(){
       box.appendChild(head); box.appendChild(body);
       return box;
     }
+  /* v0.4.6：在线搜索 / 文档解析配置组（与 LLM 配置组同款交互） */
+  function svcBar(kind, label){
+    var list = SVC.list(kind);
+    var active = S.cfg[kind === 'search' ? 'activeSearchProfile' : 'activeParseProfile'];
+    var sel = el('select', { class: 'f-in' });
+    list.forEach(function(pg){
+      sel.appendChild(el('option', { value: pg.id, text: pg.name || '配置', selected: pg.id === active ? '' : null }));
+    });
+    sel.addEventListener('change', function(){
+      if (!SVC.apply(kind, sel.value)) UI.toast('配置组切换失败', true);
+    });
+    function add(){
+      var nm = window.prompt(kind === 'search' ? '新搜索配置名称' : '新解析配置名称',
+        (kind === 'search' ? '搜索配置' : '解析配置') + (SVC.list(kind).length + 1));
+      if (!nm) return;
+      SVC.newProfile(kind, nm); UI.openSettings();
+      UI.toast('已新建「' + nm + '」；当前配置已复制，可直接修改');
+    }
+    function ren(){
+      var cur = SVC.active(kind);
+      if (!cur) return;
+      var nm = window.prompt('重命名配置', cur.name || '');
+      if (!nm) return;
+      SVC.rename(kind, nm); UI.openSettings();
+    }
+    function del(){
+      var cur = SVC.active(kind);
+      if (!cur) return;
+      if (SVC.list(kind).length <= 1){ UI.toast('至少保留一个配置', true); return; }
+      UI.confirmBox({ title: '删除配置组？', text: '删除「' + (cur.name || '') + '」；该组在保险库里的 Key 也会清除。', okText: '删除', danger: true }).then(function(ok){
+        if (!ok) return;
+        SVC.del(kind, cur.id); UI.openSettings();
+        UI.toast('已删除配置组');
+      });
+    }
+    var addBtn = el('button', { class: 'btn btn-sec', type: 'button', text: '新建' });
+    var renBtn = el('button', { class: 'btn btn-sec', type: 'button', text: '重命名' });
+    var delBtn = el('button', { class: 'btn btn-danger', type: 'button', text: '删除' });
+    addBtn.addEventListener('click', add);
+    renBtn.addEventListener('click', ren);
+    delBtn.addEventListener('click', del);
+    return field(label || '配置组', el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+      sel, addBtn, renBtn, delBtn
+    ]), '每个配置组保存一套独立设置；切换时当前字段自动保存回原组，Key 由宿主保险库按组保存。');
+  }
     page('conn', '连接与模型', function(p){
       p.appendChild(acc('LLM 配置', function(b){
         var psel = el('select', { class: 'f-in', id: 'psel' });
@@ -538,6 +583,7 @@ function buildSettings(){
 
       /* —— 文档解析（v1.4；v1.5 增加 OCR 引擎；v1.5.1 由独立页并入本页） —— */
       p.appendChild(acc('文档解析', function(b){
+        b.appendChild(svcBar('parse', '解析配置组'));
         var oc = c.ocr || (c.ocr = Object.assign({}, DEF_CFG.ocr));
         var dpCk = el('input', { type: 'checkbox', 'data-cfg': 'docParse' });
         dpCk.checked = !!c.docParse;
@@ -642,6 +688,7 @@ function buildSettings(){
       }, false));
 
       p.appendChild(acc('在线搜索', function(b){
+        b.appendChild(svcBar('search', '搜索配置组'));
         var psel = el('select', { 'data-cfg': 'searchProvider', class: 'f-in' });
         [['none', '不启用'],
            ['perplexity', 'Perplexity Search'],

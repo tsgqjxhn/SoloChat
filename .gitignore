@@ -8,6 +8,8 @@ dist/*
 !dist/SoloChatHost.exe
 # 外部扩展运行时由 ../extensions 同步到这里，不重复入库
 plugins/
+# 扩展包本地市场副本（node tools/sync-extensions.mjs 生成；dist/packages 已在 dist/* 忽略范围）
+packages/
 # 发布中间目录（dotnet publish -o dist-build），不属于源码
 dist-build/
 
