@@ -6,7 +6,7 @@
 
 主应用仓库保持极简；扩展包与 Python 运行时放在同级目录 **`../extensions/`**（独立 Git 仓库），发布前用 `node tools/sync-extensions.mjs` 同步到 `dist/plugins/`。
 
-![首屏](screenshots/home.png)
+![首屏（演示模式）](screenshots/home.png)
 
 ## 四种模式
 
