@@ -6,62 +6,93 @@
 
 ![首屏](screenshots/home.png)
 
+## 四种模式
+
+| 模式 | 定位 | 适合做什么 |
+|---|---|---|
+| **Chat** | 纯对话 | 问答、写作、代码解释、公式、图片理解；不带文件/命令工具 |
+| **Work** | 沙箱工作台 | 写页面、跑脚本、生成文件、预览产物；在内存 VFS 里工作，不碰真实目录 |
+| **Agent** | 文件 Agent | 读写真实工作区、git / 命令 / Python、逐次确认后执行；适合改项目 |
+| **Soul** | 长期人格 | 本地记忆、自动沉淀、技能进化、全部扩展可用；像人一样持续成长 |
+
+模式切换条在四个模式中的中心坐标固定；切换模式、切换会话、新建会话时，Work 打开的「网页」侧边栏会自动收起，不会串到下一个会话。
+
 ## 当前能力
 
-### 对话与会话
+### 对话与搜索
 
-- **Chat / Work / Agent / Soul 四种模式**：Chat 纯对话；Work 在内存沙箱里写文件、跑脚本、预览；Agent 读写真实工作区，写入逐次确认；Soul 长期记忆 + 本地工具（`/memory` 四页签、说「记住…」写入、`/dream` 巩固、`/learn` 沉淀技能、`/cron` 定时提醒，记忆落 `%USERPROFILE%\SoloChat\memory`）。
-- **教材式公式**：`$…$` / `$$…$$` 里的 LaTeX 由内置解析器转成 MathML —— 分式分子在上、分母在下，根号罩住内容，上下标和各路括号按数学排版走；不联网、无第三方库。
-- **Work / Agent 看页面**：`browser-read` 读渲染后的标题/正文/链接，`browser-act` 点按钮/填框/滚动/等待/前进后退；Steam 合集、加载更多、无限滚动都能先读 → 点 → 再读。
-- **Agent 检索**：`grep <正则>` 逐行搜工作区回「路径:行号: 文本」，`glob **/*.cs` 按通配找文件；自动跳过依赖/构建目录。
-- **Work 结构化提取**：`extract <url|-> --items ".item" --fields "name:.title,price:.price"` 按选择器抓字段，支持 `@属性`、`--next` 分页、`--dedupe`，输出 CSV 到工作区。
-- **Work Python 沙箱**：`py` 围栏把工作区文本文件带进临时目录跑脚本，跑完把改动写回，目录即删；需安装 Python 3.11 运行时。
-- **Chat 富文本**：任务列表、表格列对齐 + 横向滚动、脚注、定义列表、最多 3 层嵌套引用；9 种语言代码高亮（js/ts/py/java/cs/go/rs/sh/sql）。
-- **Chat 生图 + 图片流**：输入区生图按钮，弹窗填提示词/尺寸/张数；支持上游 partial 帧渐进显示，完成后图片入附件库，刷新仍在，可下载/重新生成。
-- **引用角标**：正文 `[1]` 变上标，悬停看标题/域名/摘要，点击跳到来源并高亮；没有来源的编号保持原文。
-- **编辑重发可回退**：编辑用户消息并重发后，2 分钟内 `/rewind` 可恢复被截断的后续消息，并把编辑内容还原。
-- **文档画布**：回答里的「画布」或 `/canvas` 打开，按会话分文档，可编辑/保存/回退历史版本（每文档 20 版），Ctrl+S 保存。
-- **会话分组**：侧栏「+ 分组」创建一组 Chat/Work 会话，不绑定文件夹；组可设模式、模型、System Prompt、temperature、max_tokens，组内未覆盖的会话动态继承，删除分组保留会话。
+- **联网搜索**：设置里选提供商并填 Key / 地址后，打开输入区地球图标即强制检索；搜索结果以标题 + 链接 + 摘要注入当前轮，要求模型带引用回答。
+- **错误可见**：搜索提供商返回 402 / 额度不足 / HTTP 错误时，回答上方会显示真实原因，不再假装「没有工具」。
+- **智能改写检索词**：可选；只负责把问题精简成检索词，不再跳过搜索。
+- **Firecrawl 用户注意**：`HTTP 402 / insufficient_credits` 表示 Firecrawl 账号额度为 0，需要充值、等额度重置，或改用 Tavily / Brave / SerpApi / SearXNG / 自定义搜索。
+- **教材式公式**：`$…$` / `$$…$$` 由内置 LaTeX → MathML 解析器排版，不联网、无第三方库。
+- **富文本**：表格、任务列表、脚注、定义列表、9 种语言代码高亮。
+- **流式与上下文**：SSE 流式渲染、中断/重试/继续、上下文圆环、超限自动压缩。
 - **会话隔离**：模型、模式、工具/插件/技能勾选跟会话走；同一会话内保留，切走不串，新建会话清空。
-- **发送前调参**：输入区右侧 ⚙ 在第一条消息前也能打开「新会话（发送前）」，设置分组、模式、模型、提示词、温度与输出上限；请求按「会话 > 分组 > 全局」取生效模型。
-- **Chat 选工具自动切 Work**：Chat 本身不执行工具；本轮勾了工具/插件时，发送前显式切到 Work 并提示，避免工具围栏没人执行。
-- **流式与上下文**：SSE 流式渲染、中断/重试/继续、原地重新生成与多版本切换；上下文圆环实时估算，80% 自动压缩成 9 段摘要；网络瞬断自动重试一次。
-- **提示词库**：设置页管理，输入 `/` 统一搜索所有扩展；提示词点选后直接插入正文。
+
+### Soul 人格
+
+- **脸**：头像 Emoji 或上传图片。
+- **性格**：人格提示词，下一轮请求生效。
+- **声音**：浏览器 Web Speech TTS；可选语音、语速、音高。
+- **能力**：LLM、生图、生视频、联网、附件开关。
+- **记忆**：本地 `%USERPROFILE%\SoloChat\memory`，支持自动记忆、巩固、搜索与回滚。
+- **身体**：Agent 级文件/命令/浏览器能力，仍受应用原有安全确认约束。
+- **进化**：每轮沉淀记忆，定期反思并新增/更新技能；有进化日志与手动 `/evolve`。
+
+Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；这些能力统一放在 **+更多** 或人格设置里。
+
+### +更多
+
+输入区 **+更多** 统一承载：
+
+- 深度研究
+- 生成图片
+- 生成视频
+- 语音输入 STT
+- 语音合成 TTS
+
+生图不再占用输入区独立按钮。
 
 ### 扩展系统
 
 - **六类内容**：智能体 / 插件 / 技能 / 工具 / 提示词 / MCP，统一走 `EXT.registry()`。
-- **唯一 ID**：内置工具 `builtin:<name>`，用户条目 `tool:/skill:/agent:<name>`，提示词 `prompt:<name>`，插件 `plugin:<pkg>`，MCP `mcp:<name>`；同屏去重，旧内置工具选择自动迁移。
-- **「/」统一搜索**：输入 `/` 保留符号并弹出面板，继续输入字母/中文按名称、类型、说明实时过滤全部扩展；内置工具带「内置工具」标签。选中后清空查询、收起面板，直接写问题。
-- **扩展市场**：读 `ext/plugins` 分支的 `index.json`，按类型过滤并可整包安装；已安装的扩展/运行时不再出现在市场，统一进「已有」。
-- **Python 3.11 运行时插件**：官方 CPython 3.11.9 portable + uv，安装到 `%LOCALAPPDATA%\OpenPage\runtimes`，不写 PATH、不改注册表；Agent 的 `python` 工具与需要前置的扩展使用它。当前是便携隔离，不是 OS 级安全沙箱。
-- **本地导入/导出**：文件、文件夹、拖放、JSON；导出统一弹文件夹选择器，按类导出本地条目。
+- **原生 function calling**：Work / Agent / Soul 可把工具 schema 交给支持 function calling 的模型；结果回到既有围栏执行链。
+- **自定义工具**：声明式 HTTP，不执行任意 JS；可设置 URL / 方法 / headers / 字段。
+- **扩展市场**：读取 `ext/plugins` 分支的 `index.json`；已安装项进入「已有」。
+- **Python 3.11 运行时插件**：官方 CPython 3.11 portable；不写 PATH、不改注册表。
 
-### 连接与工具
+### 连接与数据
 
-- **供应商目录**：223 家预设，点选自动填 Base URL、鉴权、wire 协议与字段怪癖。
-- **四种 wire 协议**：`openai-chat` / `openai-responses` / `anthropic-messages` / `gemini`，与供应商正交。
-- **原生 function calling**：Work / Agent 把 `tool_calls` 转成既有围栏执行链，工具白名单与开关照旧生效。
-- **内置工具**：web / search / crawl / get / browser / python / 文件读写 / 沙箱 run 等；扩展工具只接受声明式 HTTP，不执行任意 JS。
-- **联网搜索**：查询改写 → 13 个搜索源 → 前 N 条正文抓取 → 带引用注入。
-- **文档与 OCR**：docx / xlsx / pptx / rtf 与带文本层 PDF 本地提取；扫描版可接 Mistral / Azure / Google / Amazon / Adobe / ABBYY / 百度 / 阿里 / 腾讯 OCR。
-- **代理与安全**：默认直连，可填 HTTP 代理；密钥走宿主 DPAPI 保险库，日志不落消息原文。
+- **供应商**：内置供应商目录；支持 `openai-chat` / `openai-responses` / `anthropic-messages` / `gemini` 四种 wire 协议。
+- **密钥**：宿主模式走 DPAPI 保险库；浏览器模式回退 localStorage（明文，启动时提示）。
+- **数据**：会话 / 消息 / 扩展在 IndexedDB；配置在 `sc.cfg.v1`；截图问答只传文本，不写相册。
+- **手机 ↔ 电脑配对**：桌面开启配对后，手机用 6 位码 + token 同步配置（含 API Key）与记忆文件；同一局域网明文传输。
+
+## Android 版
+
+`dist/SoloChat-Android-0.4.5.apk`（465,390 字节，versionCode 23；项目自有 keystore 签名）
+
+- 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
+- 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
+- 设置页、会话参数、配对同步、分享接收、WebDAV 自动同步、AES-GCM 加密。
+- 构建、签名与限制见 `android/README.md`。
 
 ## 快速开始
 
-### 浏览器直接用
+### 浏览器直接打开
 
 双击 `index.html`，在 **设置 → 连接与模型** 填任意 OpenAI 兼容接口：
 
 | 字段 | 说明 |
 |---|---|
-| Base URL | 例 `https://api.deepseek.com/v1`；已含 `/v1`、`/v3` 原样用，否则自动补全；填 `mock` 进离线演示 |
+| Base URL | 例 `https://api.deepseek.com/v1`；已含版本段则原样使用 |
 | API Key | 仅存本机，不上传 |
-| 模型 | 手动填或「获取列表」拉取 |
+| 模型 | 手动填写或「获取列表」 |
 
-浏览器直连可能受 CORS 限制；受阻时用宿主方式。
+浏览器直连可能受 CORS 限制；受阻时使用宿主方式。
 
-### 单文件宿主（Windows，推荐）
+### Windows 单文件宿主
 
 需要 .NET SDK：
 
@@ -69,7 +100,63 @@
 dotnet publish host/SoloChatHost.csproj -c Release -o dist
 ```
 
-产出单个 `dist/SoloChatHost.exe`（托管 DLL + WebView2Loader + index.html 全嵌入）。双击运行，获得 Alt+Space 全局呼出、文件 Agent、受限网络下的请求桥与运行时安装。
+产出 `dist/SoloChatHost.exe`（托管 DLL + WebView2Loader + index.html 全嵌入）。双击运行，获得全局呼出、文件 Agent、请求桥与运行时安装。
+
+### Android
+
+```bash
+cd android
+gradle --offline --no-daemon assembleRelease
+```
+
+APK 输出到 `android/app/build/outputs/apk/release/app-release.apk`。
+
+## 项目结构
+
+```text
+SoloChat/
+├── src/                    # 源码：index.template.html + css/svg/js 分段
+├── index.html              # 构建产物（单文件运行时；不手改）
+├── host/                   # WebView2 宿主（Program.cs / csproj / app.ico）
+├── android/                # 原生 Android 壳（WebView + 悬浮截图 + 分享 + WebDAV）
+├── tools/                  # build.mjs / verify.mjs / build-android.mjs
+├── plugins/                # Python 3.11 运行时与市场清单
+├── examples/               # 示例扩展包
+├── screenshots/            # README 截图
+├── docs/                   # 工程规范、扩展规范、变更记录、历史设计
+├── dist/                   # 发布产物：exe + 当前 APK
+└── LICENSE                 # MIT
+```
+
+扩展市场源码在 `ext/plugins` 分支；分类分支为 `ext/agents`、`ext/plugins`、`ext/skills`、`ext/tools`、`ext/prompts`。
+
+## 构建与验证
+
+```bash
+node tools/build.mjs          # src/ → index.html
+node tools/build.mjs --check  # 构建新鲜度
+node tools/verify.mjs         # 7 项静态闸门：语法/字节/行数/重复 id/版本/非空/新鲜度
+node tools/build-android.mjs  # 注入 Android assets
+```
+
+发布前要求：构建通过、`verify 7/7`、宿主发布、exe 重启、Android APK 版本核对。
+
+## 版本与发布
+
+- 当前版本 **v0.4.5**；桌面 `APP_VER` / FileVersion **0.4.5.0**；Android `versionCode 23`。
+- 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
+- GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
+- GitHub Releases：[`v0.4.0` 历史归档](https://github.com/tsgqjxhn/SoloChat/releases/tag/v0.4.0)；最新代码/tag 为 `v0.4.5`。
+
+## 体积与资源
+
+| 项目 | 当前值 |
+|---|---|
+| 桌面 exe | `dist/SoloChatHost.exe` **3,472,896 字节**（v0.4.5，FileVersion 0.4.5.0），单文件 |
+| 主产物 | `index.html` **1,289,862 字节 / 22,121 行** |
+| 源码 | `src/` **19 个文件 / 1,289,934 字节** |
+| 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
+| Android APK | `dist/SoloChat-Android-0.4.5.apk` **465,390 字节**（versionCode 23） |
 
 ## 数据存储
 
@@ -77,94 +164,25 @@ dotnet publish host/SoloChatHost.csproj -c Release -o dist
 |---|---|
 | 会话 / 消息 / 提示词 / 扩展 | IndexedDB（库名 `ai-chat`） |
 | 配置（Base URL / 模型 / 分组 / 主题等） | localStorage（键 `sc.cfg.v1`） |
-| API Key / 搜索 Key / OCR Key | 宿主模式走 DPAPI 保险库；浏览器模式回退 localStorage（明文，启动时警告） |
+| API Key / 搜索 Key / OCR Key | 宿主模式走 DPAPI 保险库；浏览器模式回退 localStorage |
+| Soul 记忆 | `%USERPROFILE%\SoloChat\memory\{USER,MEMORY,DREAMS}.md` |
 
-数据按页面来源隔离；换浏览器、清数据或改路径会看不到旧数据。长期使用请在 **设置 → 关于 → 数据与维护 → 导出** 备份。
-
-## 体积与资源
-
-| 项目 | 当前值 |
-|---|---|
-| 发布产物 | `dist/SoloChatHost.exe` **3,472,896 字节**（v0.4.5，FileVersion 0.4.5.0），单文件，无散落 dll |
-| 主产物 | `index.html` **1,289,862 字节 / 22,121 行**（CSS / JS / SVG 全内联，由 `src/` 构建） |
-| 源码 | `src/` **19 个文件 / 1,289,934 字节**（模板 + css/svg/js 分段） |
-| 宿主源码 | `host/Program.cs` **202,337 字节 / 3,796 行** |
-| 依赖 | Windows 10/11 自带的 .NET Framework 4.8 + WebView2 Runtime |
-
-## Android 版（v0.4.5，搜索错误可诊断 / 0.4.4 全量修复）
-
-`dist/SoloChat-Android-0.4.5.apk`（**465,390 字节**，另有桌面副本，项目自有 keystore 签名，versionCode 23）
-
-- **联网搜索错误可诊断**：Firecrawl 的 HTTP 402 / insufficient_credits 现在会出现在 toast、回答上方和设置说明里，不再只显示「未返回结果」。
-- **联网搜索**：打开开关后强制搜索（智能改写仅精简检索词，不再跳过）；未配置提供商/Key 时保持关闭并明确提示；搜索失败会在回答上方标注。
-- **侧栏隔离**：Work 打开的「网页」侧边栏在切换模式、切换会话、新建会话时自动收起（含宿主原生 WebView2）；「工作区」标签不受影响。
-- **模式切换条**：四个模式下中心坐标固定（浏览器实测误差 0px），不再随空态内容跳动。
-- **Work 长任务**：去掉所有「短任务」限制文案，协议明确允许长任务和多步工具连续执行；`WORK_MAX_TURNS=0`。
-- **Soul 极简 + 人格**：Soul 输入区隐藏附件/联网/生图；人格设置含脸（头像）、性格、声音 TTS、能力（LLM/生图/生视频/搜索/附件）、记忆、身体，修改即保存、下一轮生效。
-- **+更多统一入口**：深度研究、生成图片、生成视频、语音输入 STT、语音合成 TTS 全部从 +更多 开关/进入。
-- **TTS/STT**：浏览器 Web Speech API；不支持时明确提示。
-- **生成视频**：可配置 `/videos/generations` 兼容端点，支持同步 URL 与 60×3s 轮询，只显示 https / 相对地址结果。
-
-- **截图弹窗模型独立配置**：设置 → 连接与模型 → 模型页新增「截图弹窗模型」，可单独选视觉模型，留空跟随当前聊天模型；原生 `Prefs.POPUP_MODEL` 与主应用自动同步。
-- **截图超时修复**：`ImageReader` 改为常驻监听，空闲时持续丢帧，避免队列积满；截图等待延至 5 秒，第二次及后续截图不再频繁超时。
-- **回答 null 修复**：兼容 `content:null`、数组 content、`reasoning_content` 与 `choices[].text` 兜底；仍为空时提示「模型返回空内容」，不再显示 null。
-- **回答页锁按钮**：回答弹窗底部中间的锁按钮加浅灰圆角底和蓝色图标，明确可见；点击切分屏，可滑动底层题目。
-- **ResizeObserver 报错**：全局错误处理忽略 `ResizeObserver loop` 布局警告，不再弹“looplimitexceed”toast。
-- **Markdown 回答**：`Md` 渲染标题、粗体、斜体、行内代码、代码块、列表、引用、链接、删除线；图片只显示 alt，不联网。
-- **截图问答记录 / 继续对话**：Q/A 只存文本到原生历史和主应用「截图问答」会话，截图只在内存、不写相册；关闭不删记录，再次截图才新建会话。回答弹窗底部为「继续对话 / 锁 / 关闭」，继续保留同一会话历史；顶部不显示「回答/关闭」，弹窗最高半屏，正文 35% 屏高内增长/滚动；透明背景不暗化题目。
-- **锁 / 取消**：未锁时点弹窗外关闭并返回原应用；锁定后弹窗固定，可滑动/操作底层题目。
-- **发送**：主应用的 Base/Key/模型自动同步给原生截图问答，解决“配置在聊天里、截图弹窗没 Key 发不出去”；缺 Key 时直接提示并打开连接设置。
-- **滚动**：手机端设置页/会话参数等模态统一 `max-height:90vh + overflow-y:auto`，设置页补全 `min-height:0` 链路，长页面可以滑到底。
-- **配置同步**：设置 → 关于 → 配对同步（上次地址自动带出，端口默认 8788）；配对后直接传配置（含 API Key）和记忆文件，不再用导出/导入。
-- **分享接收 / WebDAV 自动同步 / AES-GCM 加密 / JobScheduler 通知** 保持可用。
-- 构建、签名、限制见 `android/README.md`。
-
-内存占用未在本版重新实测；历史机器数据已不再写入 README，避免把旧版本数字当当前结论。
-
-## 项目结构
-
-```
-SoloChat/
-├── src/                              # 源码：index.template.html + css/svg/js 分段
-├── index.html                        # 构建产物（单文件运行时；不手改）
-├── host/
-│   ├── Program.cs                    # WebView2 宿主（托盘 / 热键 / 桥 / 文件 / 运行时）
-│   ├── SoloChatHost.csproj           # 单文件发布配置
-│   └── app.ico
-├── docs/                             # 工程规范、审计、对标、扩展规范、变更记录
-├── tools/build.mjs                   # src/ → index.html 零依赖内联构建（--check）
-├── tools/verify.mjs                  # 零依赖静态闸门（7 项）
-├── plugins/                          # 本机运行时市场清单 + Python zip
-├── dist/SoloChatHost.exe             # 发布产物
-├── screenshots/                      # README 截图
-├── LICENSE                           # MIT
-└── .gitignore
-```
-
-扩展市场源码在 `ext/plugins` 分支（`index.json` + 扩展包 + `runtimes/python-311/`）；分类分支为 `ext/agents`、`ext/plugins`、`ext/skills`、`ext/tools`、`ext/prompts`。
-
-## 开发与版本
-
-- 主应用仍是单文件产物：`index.html` ≤ **10,485,760 字节**（1.5 MiB 起预警）/ ≤ 30,000 行，零外部依赖，ES5 / IIFE；源码在 `src/`，用 `node tools/build.mjs` 生成。
-- 当前闸门：`node tools/build.mjs --check` + `node tools/verify.mjs`（语法、字节、行数、重复 id、版本一致、脚本非空、构建新鲜度）；发布前必须 7/7。
-- **版本策略**：每次发布在末位 **+0.0.1**（例如 0.4.2 → 0.4.3）；**0.1 级版本未经用户允许不得变动**。
-- 每次改完：`build` → `verify` → `dotnet build` → 重发布 `dist/SoloChatHost.exe` → **重启 exe**，确认新进程/窗口后再汇报。
-- 扩展包不受单文件限制；写作与区分规范见 [docs/扩展书写规范.md](docs/扩展书写规范.md)。
+换浏览器、清数据或改路径会看不到旧数据；长期使用请在 **设置 → 关于 → 数据与维护 → 导出** 备份。
 
 ## 安全
 
-已做安全加固：日志不落消息原文与密钥（DEBUG 才输出且脱敏、1MB 滚动）；Release 无调试端口、无 PDB 泄露源路径；API Key 走 DPAPI 加密保险库；导出可选脱敏分享；扩展工具只允许声明式 HTTP，市场安装只取文本、不执行代码。
+- Release 宿主无调试端口、无 PDB 源路径。
+- API Key / 搜索 Key / OCR Key 走 DPAPI 保险库；日志不落密钥。
+- 扩展工具只允许声明式 HTTP，市场安装只取文本，不执行代码。
+- 扩展、技能、提示词不会覆盖内置安全校验；危险命令仍需确认。
+
+## 文档
+
+- [工程规范](docs/工程规范.md)
+- [扩展书写规范](docs/扩展书写规范.md)
+- [变更记录](docs/变更记录.md)
+- [移动端与悬浮截图评估](docs/移动端与悬浮截图-评估.md)
 
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。
-
-## 文档
-
-- [docs/工程规范.md](docs/工程规范.md)
-- [docs/扩展书写规范.md](docs/扩展书写规范.md)
-- [docs/审计-v0.4.md](docs/审计-v0.4.md)
-- [docs/对标记录.md](docs/对标记录.md)
-- [docs/扩展路线图.md](docs/扩展路线图.md)
-- [docs/变更记录.md](docs/变更记录.md)
-- [docs/对标与改进-v0.5.md](docs/对标与改进-v0.5.md)
