@@ -2183,6 +2183,8 @@ var Vault = {
       (cfg.presets || []).forEach(function(p){ if (p.id === cfg.activePreset) act = p; });
       if (act) cfg.apiKey = act.apiKey || ''; // 顶层 apiKey 镜像活跃预置
       self.hydrated = true; // Issue 14: 密钥回读完成，此后允许 persist
+      /* v0.4.6：搜索/解析组 Key 回读后，把活跃组重新镜像到扁平字段（启动时 active 组才是真源） */
+      try { if (typeof SVC !== 'undefined' && SVC.reapplyActive) SVC.reapplyActive(); } catch (e) {}
     }).catch(function(e){ self.hydrated = false; try { console.warn('保险库回读失败，本次不写回密钥', e); } catch (e2) {} }); // v0.3.11：失败时不能再置 true，否则 saveCfg 会用空 key 覆盖保险库
   }
 };
@@ -2303,6 +2305,14 @@ var SVC = {
       if (p) c[d.activeKey] = p.id;
     }
     return p;
+  },
+  reapplyActive: function(){
+    /* 保险库回读后调用：不重新保存，只把活跃组字段镜像回扁平配置 */
+    var self = this;
+    ['search', 'parse'].forEach(function(kind){
+      var p = self.active(kind);
+      if (p) svcApplyTo(S.cfg, kind, p.id);
+    });
   },
   capture: function(kind){
     return svcCaptureFrom(S.cfg || {}, kind);

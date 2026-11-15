@@ -163,11 +163,11 @@ node tools/build-android.mjs  # 注入 Android assets
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,486,208 字节**（v0.4.6，FileVersion 0.4.6.0），单文件 |
-| 主产物 | `index.html` **1,303,403 字节 / 22,436 行** |
-| 源码 | `src/` **19 个文件 / 1,303,475 字节** |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,486,720 字节**（v0.4.6，FileVersion 0.4.6.0），单文件 |
+| 主产物 | `index.html` **1,303,922 字节 / 22,446 行** |
+| 源码 | `src/` **19 个文件 / 1,303,994 字节** |
 | 宿主源码 | `host/Program.cs` **205,250 字节 / 3,854 行** |
-| Android APK | `dist/SoloChat-Android-0.4.6.apk` **468,954 字节**（versionCode 24） |
+| Android APK | `dist/SoloChat-Android-0.4.6.apk` **469,090 字节**（versionCode 24） |
 
 ## 数据存储
 
