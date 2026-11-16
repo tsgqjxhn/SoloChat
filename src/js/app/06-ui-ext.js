@@ -989,6 +989,13 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var fGroup = mark(groupSelect(d.groupId || ''), 'groupId');
     var fMode = mark(modeSelect(d.mode || '', isDraft), 'mode');
     var fModel = mark(modelSelect(d.model || '', '跟随分组 / 全局'), 'model');
+    var fPerm = mark((function(){
+      var ps = el('select', { class: 'f-in' });
+      [['plan', 'Plan · 只读规划'], ['write', 'Write · 命令确认'], ['yolo', 'Yolo · 全部免确认']].forEach(function(o){
+        ps.appendChild(el('option', { value: o[0], text: o[1], selected: (normPerm(d.perm || S.cfg.permMode) === o[0]) ? '' : null }));
+      });
+      return ps;
+    })(), 'perm');
     var fTemp = mark(el('input', { class: 'f-in', type: 'number', step: '0.1',
       value: pp.temperature != null ? pp.temperature : '', placeholder: '跟随全局' }), 'temperature');
     var fMax = mark(el('input', { class: 'f-in', type: 'number',
@@ -999,6 +1006,9 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       el('div', { class: 'f-grid' }, [
         field('所属分组', fGroup), field('模式', fMode),
         field('模型', fModel, '空=跟随分组 / 全局；会话值优先')
+      ]),
+      el('div', { class: 'f-grid' }, [
+        field('执行权限', fPerm, 'Plan 只读 / Write 命令确认 / Yolo 全免确认')
       ]),
       el('div', { class: 'f-grid' }, [
         field('temperature', fTemp, '0~2；留空=跟随'),
@@ -1023,7 +1033,16 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       wrap.appendChild(el('button', { id: 'load-earlier', class: 'btn btn-sec', 'data-act': 'earlier',
         text: '加载更早（还有 ' + start + ' 条）' }));
     var frag = document.createDocumentFragment();
-    for (var i = start; i < total; i++) if (!S.msgs[i].hidden) frag.appendChild(msgNode(S.msgs[i]));
+    for (var i = start; i < total; i++){
+      if (S.msgs[i].hidden) continue;
+      var _m = S.msgs[i];
+      if (_m.role === 'user'){ frag.appendChild(msgNode(_m)); continue; }
+      /* v0.4.7：同一轮的工具结果/中间助手合并成一个「执行记录」，最终正文单独显示 */
+      var _grp = [], _j = i;
+      while (_j < total && S.msgs[_j].role !== 'user'){ if (!S.msgs[_j].hidden) _grp.push(S.msgs[_j]); _j++; }
+      i = _j - 1;
+      frag.appendChild(turnNode(_grp));
+    }
     wrap.appendChild(frag);
     updateEmpty();
     FS.hydrateAll(); // 重建后重新填充写卡片差异（v1.1）
@@ -1043,6 +1062,10 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
   /* v2.4：追加单条消息节点（不改动其它已渲染节点，避免图片重载与滚动抖动） */
   function appendMsgNode(m){
     $('#msg-list').appendChild(msgNode(m));
+    /* v0.4.7：一次工具结果落库后重排成「执行记录」，避免每步都单独占一块 */
+    if (m && (m.role === 'tool' || /^\[(run|fs)-result\]/.test(String(m.content || '').trim()))){
+      try { if (S.sid === m.sid) setTimeout(function(){ try { if (S.sid === m.sid) renderMsgs(); } catch (e) {} }, 0); } catch (e) {}
+    }
     updateEmpty();
   }
   /* v0.2.1：工具卡片 —— 「运行 js / 写入 x.mjs / 抓取 URL / 搜索 q」一行一条，点开才看原始输出 */
@@ -1209,6 +1232,106 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       });
     } catch (e) {}
   }
+  /* v0.4.7：整轮执行记录 —— 把思考、工具、编辑合并成一个默认收起的块，正文只留最终答复。 */
+  var TRACE_OP_RE = /```(fs-(?:read|list|write|edit|done|rej)|grep|glob|cmd|git|python|sub|suball|agent|browser|browser-read|browser-act|web|crawl|search|get|vfs-(?:write|list|read)|run|patch|preview|play|download|extract|py|shot|time|calc|json|http|skill)(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g;
+  function traceFirstLine(s){
+    var a = String(s || '').replace(/\r/g, '').trim().split('\n');
+    return (a[0] || '').slice(0, 120);
+  }
+  function traceRowsOf(txt){
+    var rows = [], stripped = String(txt || ''), m, re = new RegExp(TRACE_OP_RE.source, 'g');
+    while ((m = re.exec(String(txt || '')))){
+      var op = m[1], body = m[2] || '';
+      var line = traceFirstLine(body);
+      rows.push({ op: op, brief: line, raw: body });
+    }
+    if (rows.length) stripped = String(txt || '').replace(TRACE_OP_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+    return { rows: rows, stripped: stripped };
+  }
+  function traceRowLabel(op){
+    return ({
+      'fs-read': '读取', 'fs-list': '列目录', 'fs-write': '写入', 'fs-edit': '编辑', 'patch': '编辑',
+      'grep': '搜索文件', 'glob': '匹配文件', 'cmd': '运行命令', 'git': '运行 Git', 'python': '运行 Python',
+      'browser': '打开网页', 'browser-read': '读取网页', 'browser-act': '操作网页',
+      'web': '抓取网页', 'crawl': '批量抓取', 'search': '搜索', 'get': '下载', 'run': '运行沙箱',
+      'vfs-write': '写入文件', 'vfs-read': '读取文件', 'vfs-list': '列工作区',
+      'preview': '预览', 'play': '播放', 'download': '下载', 'extract': '提取', 'py': 'Python',
+      'shot': '截图', 'agent': '智能体', 'sub': '子智能体', 'suball': '并行智能体', 'skill': '技能'
+    })[op] || op;
+  }
+  function turnNode(group){
+    group = group || [];
+    if (!group.length) return el('div');
+    var meaningful = group.some(function(m){ return m.reasoning || m.role === 'tool' || /^\[(run|fs)-result\]/.test(String(m.content || '').trim()) || traceRowsOf(m.content).rows.length; });
+    if (!meaningful && group.length === 1) return msgNode(group[0]);
+    var finalMsg = null, finalText = '';
+    for (var fi = group.length - 1; fi >= 0; fi--){
+      var gm = group[fi];
+      if (gm.role !== 'assistant') continue;
+      var st = traceRowsOf(gm.content).stripped;
+      if (st && st.trim()){ finalMsg = gm; finalText = st; break; }
+      if (!finalMsg) finalMsg = gm;
+    }
+    if (!finalMsg && group.length) finalMsg = group[group.length - 1];
+    var traceRows = [], think = [], rawParts = [];
+    group.forEach(function(m){
+      if (m.reasoning) think.push({ text: String(m.reasoning), ts: m.ts });
+      if (m.role === 'tool' || /^\[(run|fs)-result\]/.test(String(m.content || '').trim())){
+        var evs = toolEvents(m);
+        if (!evs.length) evs = [{ op: 'tool', ok: !/失败|错误|Error|Exception/i.test(String(m.content || '').slice(0, 200)), brief: traceFirstLine(String(m.content || '').replace(/^\[(run|fs)-result\]\s*/, '')) }];
+        evs.forEach(function(ev){ traceRows.push({ label: traceRowLabel(ev.op), brief: ev.path || ev.url || ev.q || ev.brief || '', ok: ev.ok !== false, ms: ev.ms }); });
+        rawParts.push(String(m.content || ''));
+      } else if (m.role === 'assistant'){
+        var tr = traceRowsOf(m.content);
+        tr.rows.forEach(function(r){ traceRows.push({ label: traceRowLabel(r.op), brief: r.brief, ok: true }); });
+        if (tr.rows.length) rawParts.push(m.content);
+        else if (tr.stripped && m !== finalMsg) traceRows.push({ label: '说明', brief: traceFirstLine(tr.stripped), ok: true });
+      }
+    });
+    var box = el('article', { class: 'msg trace-msg', 'data-trace': '1' });
+    var det = el('details', { class: 'trace' });
+    var counts = [];
+    if (think.length) counts.push(think.length + ' 次思考');
+    if (traceRows.length) counts.push(traceRows.length + ' 个动作');
+    det.appendChild(el('summary', { class: 'trace-sum' }, [
+      el('span', { class: 'trace-title', text: '执行记录' }),
+      el('span', { class: 'trace-meta', text: counts.join(' · ') || '查看过程' })
+    ]));
+    var tb = el('div', { class: 'trace-body' });
+    if (think.length){
+      think.forEach(function(t, idx){
+        tb.appendChild(el('details', { class: 'trace-think' }, [
+          el('summary', { text: '已思考' + (think.length > 1 ? ' ' + (idx + 1) : '') }),
+          el('div', { class: 'trace-think-body', text: t.text })
+        ]));
+      });
+    }
+    traceRows.forEach(function(r){
+      tb.appendChild(el('div', { class: 'trace-row' }, [
+        el('span', { class: 'trace-ico' + (r.ok ? '' : ' bad'), text: r.ok ? '✓' : '×' }),
+        el('span', { class: 'trace-op', text: r.label }),
+        el('span', { class: 'trace-brief', text: r.brief || '', title: r.brief || '' }),
+        r.ms != null ? el('span', { class: 'trace-ms', text: r.ms + 'ms' }) : ''
+      ]));
+    });
+    if (rawParts.length){
+      var raw = rawParts.join('\n\n');
+      tb.appendChild(el('details', { class: 'trace-raw' }, [
+        el('summary', { text: '原始输出（' + raw.length + ' 字）' }),
+        el('pre', { text: raw })
+      ]));
+    }
+    det.appendChild(tb);
+    box.appendChild(det);
+    if (finalMsg){
+      var display = {};
+      for (var k in finalMsg) display[k] = finalMsg[k];
+      display.reasoning = '';
+      display.content = finalText || ('执行完成' + (traceRows.length ? '：本轮 ' + traceRows.length + ' 个动作，详见上方执行记录。' : '。'));
+      box.appendChild(msgNode(display));
+    }
+    return box;
+  }
   function msgNode(m){
     /* v0.2.1：工具结果不再以「你」的身份出现 —— 新消息 role=tool，旧数据按 [fs-result]/[run-result] 前缀识别 */
     var workTool = m.role === 'tool' || /^\[run-result\]/.test((m.content || '').trim()); // Work 工具结果 → 紧凑卡片
@@ -1249,6 +1372,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     } else if (workTool){
       body.appendChild(renderToolBody(m)); // v0.2.1：Work 工具结果 → 紧凑卡片（一行一个工具），原始输出折叠
     } else if (m.role === 'assistant' || fsres){      body.innerHTML = MD.render(cleanAssistant(m.content)); // MD 产物是唯一允许的 innerHTML 来源；v0.2.1：历史里的 <tool_call> 也在渲染时剥掉
+      if (!String(m.content || '').trim()){ body.textContent = '（本轮没有返回正文内容）'; body.className = 'msg-body'; } // v0.4.7：历史空回复不再显示空白块
 
     } else {
       body.textContent = m.content;
@@ -1559,6 +1683,12 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     touchSession(null, sid);
     notifyBusy(); // v2.2：登记出清后重新计算「忙」状态
     if (shown && !((S.pend || 0) > 0)) setSending(false);
+    /* v0.4.7：工具轮结束后重排一次，把本轮所有执行记录合并到最终正文上方 */
+    try {
+      if (shown && status === 'ok' && (S.msgs || []).some(function(x){ return x.role === 'tool' || /^\[(run|fs)-result\]/.test(String(x.content || '').trim()); })){
+        setTimeout(function(){ try { if (S.sid === sid) renderMsgs(); } catch (e) {} }, 0);
+      }
+    } catch (e) {}
     if (qa && msg.sid === qa.sid){ // 快速提问终态：错误给简短原因，其余给全文
       if (NET.bridge.ok) NET.bridge.send({ t: 'quick.answer', text: quickText(msg.errMsg || msg.content || ''), done: true });
       qa = null;
@@ -1582,6 +1712,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       model: dc.model || '',                         // 空=跟随分组/全局，不复制全局模型
       systemPrompt: dc.systemPrompt || '',           // 空=跟随分组/全局
       params: dc.params || {},                       // 仅存显式覆盖项，空=跟随
+      perm: dc.perm || S.cfg.permMode || 'write',    // v0.4.7：会话级执行权限
       picks: JSON.parse(JSON.stringify(S.cfg.picks || {})), // 工具/插件/技能勾选随会话建立
       workspace: S.pendWs || '', msgCount: 0, temp: tmp
     };
@@ -1703,6 +1834,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     try {
       S.cfg.picks = (s.picks && typeof s.picks === 'object') ? JSON.parse(JSON.stringify(s.picks)) : {};
       S.cfg.currentModel = sessModel(s) || S.cfg.defaultModel || S.cfg.currentModel;
+      S.cfg.permMode = s.perm || S.cfg.permMode || 'write'; // v0.4.7：权限跟随会话
       syncPickBadges();
     } catch (e) {}
     DB.msgsBySid(sid).then(function(list){

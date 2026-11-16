@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.6 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.7 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -18,6 +18,28 @@
 | **Soul** | 长期人格 | 本地记忆、自动沉淀、技能进化、全部扩展可用；像人一样持续成长 |
 
 模式切换条在四个模式中的中心坐标固定；切换模式、切换会话、新建会话时，Work 打开的「网页」侧边栏会自动收起，不会串到下一个会话。
+
+### Plan / Write / Yolo
+
+Work、Agent、Soul 顶栏都有执行权限选择，权限随会话保存：
+
+- **Plan**：只读规划，只允许读文件/列目录/搜索/浏览器读取与智能体等扩展；写文件、补丁、cmd/git/python、crawl/download 会被拦截，并明确显示“未运行”。
+- **Write**：全部扩展可用；普通文件写入直接应用，`cmd`、`git`、Python 每次执行前弹确认（可点击「运行」或按 Enter；Esc 取消）。
+- **Yolo**：全部扩展与命令免确认，直接用；仍会报告退出码、失败和未验证项。
+
+旧配置 `ask / auto / readonly` 会自动迁移到 `Write / Yolo / Plan`，不需要手动改。
+
+### 会话执行记录
+
+同一轮的「思考 / 运行 / 编辑」会合并成一个默认收起的「执行记录」；工具结果按行缩略，原始输出再折叠，最终正文单独显示。历史空回复会显示「本轮没有返回正文内容」，不会再留空白块。
+
+### 链接与浏览器
+
+Chat 收到 URL 会自动切到 Work；Work/Agent/Soul 会自动打开上下文里的链接，并把最近 40 条用户消息中的链接和内置浏览器当前页交给模型；`browser-read` 不传 URL 读当前页，不需要用户重发链接。
+
+### 沙箱容量
+
+Work VFS 文件数上限 **5000**、总量 **200MB**；crawl 单次页数上限 **2000**。长篇小说、批量章节不会再卡在 200 个文件。
 
 ## 当前能力
 
@@ -75,7 +97,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ## Android 版
 
-`dist/SoloChat-Android-0.4.6.apk`（468,954 字节，versionCode 24；项目自有 keystore 签名）
+`dist/SoloChat-Android-0.4.7.apk`（474,822 字节，versionCode 25；项目自有 keystore 签名）
 
 - 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
 - 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
@@ -153,7 +175,7 @@ node tools/build-android.mjs  # 注入 Android assets
 
 ## 版本与发布
 
-- 当前版本 **v0.4.6**；桌面 `APP_VER` / FileVersion **0.4.6.0**；Android `versionCode 24`。
+- 当前版本 **v0.4.7**；桌面 `APP_VER` / FileVersion **0.4.7.0**；Android `versionCode 25`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
 - 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/` 与 `dist/packages/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
@@ -163,11 +185,11 @@ node tools/build-android.mjs  # 注入 Android assets
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,486,720 字节**（v0.4.6，FileVersion 0.4.6.0），单文件 |
-| 主产物 | `index.html` **1,303,922 字节 / 22,446 行** |
-| 源码 | `src/` **19 个文件 / 1,303,994 字节** |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,505,152 字节**（v0.4.7，FileVersion 0.4.7.0），单文件 |
+| 主产物 | `index.html` **1,322,364 字节 / 22,731 行** |
+| 源码 | `src/` **19 个文件 / 1,322,436 字节** |
 | 宿主源码 | `host/Program.cs` **205,250 字节 / 3,854 行** |
-| Android APK | `dist/SoloChat-Android-0.4.6.apk` **469,090 字节**（versionCode 24） |
+| Android APK | `dist/SoloChat-Android-0.4.7.apk` **474,822 字节**（versionCode 25） |
 
 ## 数据存储
 

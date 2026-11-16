@@ -28,8 +28,8 @@ var LIMITS = {
   WORK_RESULT_CHARS: 64 * 1024, // Work：回灌模型的单条结果上限（v1.1.24 放宽）
   WORK_WEB_CHARS: 64 * 1024,    // Work：单次网页抓取 / vfs-read 回灌上限（v1.1.24 放宽）
   VFS_FILE_MAX: 1024 * 1024,    // VFS：单文件上限 1MB
-  VFS_TOTAL_MAX: 20 * 1024 * 1024, // VFS：单会话总量上限 20MB
-  VFS_FILES_MAX: 200            // VFS：单会话文件数上限
+  VFS_TOTAL_MAX: 200 * 1024 * 1024, // VFS：单会话总量上限 200MB（v0.4.7：原 20MB 对长篇小说/批量章节不够）
+  VFS_FILES_MAX: 5000           // VFS：单会话文件数上限（v0.4.7：原 200 会卡住批量章节）
 };
 /* v2.3：媒体语法提示（每次请求附注）。回答里可直接内嵌 https 图片/视频直链。 */
 /* v1.29.3：反问协议 —— 该问就问，别猜着做 */
@@ -41,7 +41,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.6';
+var APP_VER = 'v0.4.7';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -160,7 +160,7 @@ var DEF_CFG = {
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
   planGate: true,     // v1.29.0：本会话第一次写入先手动确认一次（之后自动写入）
-  permMode: 'ask',    // v0.3.6：ask 每次确认 / auto 自动应用 / readonly 只读（不写入、不执行命令）
+  permMode: 'write',  // v0.4.7：plan 只读规划 / write 全部工具、命令需确认 / yolo 全部工具且免确认
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -521,6 +521,11 @@ function loadCfg(){
     cfg.picksBuiltinMig = 1;
   }
   S.cfg = cfg;
+  try {
+    var _oldPerm = cfg.permMode;
+    cfg.permMode = normPerm(cfg.permMode);
+    if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'yolo'; // 旧版 planGate=false 等同意免确认
+  } catch (e) {}
   if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
   /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
   try { if (!cfg.defaultModel) cfg.defaultModel = cfg.currentModel || ''; } catch (e) {}
@@ -875,7 +880,7 @@ function sortSessions(){
 /* ===== session groups v0.4.2：分组查找 + 继承（会话 > 分组 > 全局） =====
    新建会话不复制组模型/提示词，留空让它们动态继承；组设置变化后未覆盖会话自动跟随。 */
 function mkDraftCfg(groupId){
-  return { groupId: groupId || '', mode: '', model: '', systemPrompt: '', params: {} };
+  return { groupId: groupId || '', mode: '', model: '', systemPrompt: '', params: {}, perm: '' };
 }
 function groupById(id){
   if (!id) return null;
@@ -895,6 +900,31 @@ function sessSystemPrompt(s){
 function sessMode(s){
   var g = groupOfSession(s);
   return (s && s.mode) || (g && g.mode) || (S.cfg && S.cfg.mode) || 'chat';
+}
+/* v0.4.7：执行权限 —— plan 只读 / write 全部工具但命令确认 / yolo 全部免确认。
+   旧值 ask→write、auto→yolo、readonly→plan；旧配置不会把权限重置。 */
+function normPerm(v){
+  v = String(v || '').toLowerCase();
+  if (v === 'plan' || v === 'readonly' || v === 'read') return 'plan';
+  if (v === 'yolo' || v === 'auto' || v === 'full') return 'yolo';
+  return 'write';
+}
+function sessPerm(s){
+  var g = groupOfSession(s);
+  var v = (s && s.perm) || (g && g.perm) || (S.cfg && S.cfg.permMode) || 'write';
+  return normPerm(v);
+}
+function permNow(){ return sessPerm(curSession()); }
+function permForSid(sid){
+  try { return sessPerm(sid ? sessionById(sid) : curSession()); } catch (e) { return permNow(); }
+}
+function setPerm(v){
+  v = normPerm(v);
+  var s = curSession();
+  if (s){ s.perm = v; try { DB.putSession(s); } catch (e) {} }
+  if (S.cfg) S.cfg.permMode = v;
+  try { saveCfg(); } catch (e) {}
+  try { if (typeof renderComposerCtl === 'function') renderComposerCtl(); } catch (e) {}
 }
 
 /*  */
@@ -1888,6 +1918,7 @@ var NET = (function(){
   function toolSchemas(){
     if (typeof EXT === 'undefined' || !EXT.all) return [];
     var soul = (S.cfg.mode === 'soul');
+    var planDeny = permNow() === 'plan';
     var soulSkip = { nav: 1, chart: 1 }; /* 只由渲染器出图，没有工具循环执行入口 */
     var out = [], seen = {};
     EXT.all().forEach(function(e){
@@ -1897,6 +1928,7 @@ var NET = (function(){
       if (e.on === false) return;                                       // 扩展里已关闭
       if (EXT.isKnownBuiltin(e.id) && !EXT.isOn(e.id)) return;          // 内置工具被关掉
       if (soul && soulSkip[e.id]) return;                               // Soul 不暴露无执行入口的项
+      if (planDeny && ['fs-write','fs-edit','patch','cmd','git','python','vfs-write','run','crawl','download','extract'].indexOf(e.id) >= 0) return; // Plan 只读
       if (soul && (e.kind === 'skill' || e.kind === 'agent')) return;   // 技能/角色走 skill 与 agent 围栏，不能当独立工具名调用
       if (!soul && e.modes && S.cfg.mode && e.modes.indexOf(S.cfg.mode) < 0) return;  // 按模式过滤（Soul 不过滤）
       if (!soul && typeof PICK !== 'undefined' && PICK && PICK.deny(e.id)) return;    // 本轮未勾选（Soul 不受勾选限制）
@@ -2393,16 +2425,21 @@ var NET = (function(){
       + refs.slice(-24).join('\n');
   }
   function buildBody(session, msgs, attsData, attsText, searchBlock){
-  /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜，猜中才切（顶栏会跟着变，不会偷偷改） */
-  if (S.cfg.autoRoute && !((S.cfg.picks && S.cfg.picks.agent) || []).length && !S.cfg.modePin && msgs && msgs.length){
-    var lastU = '';
-    for (var li = msgs.length - 1; li >= 0; li--){ if (msgs[li].role === 'user'){ lastU = String(msgs[li].content || ''); break; } }
-    if (lastU){
-      var wantMode = MODE.route(lastU);
+  /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜；v0.4.7：Chat 收到 URL 也主动切到 Work，
+     不再等用户再补一句「打开链接」。 */
+  var _lastUForRoute = '';
+  if (msgs && msgs.length){
+    for (var _lri = msgs.length - 1; _lri >= 0; _lri--){ if (msgs[_lri].role === 'user'){ _lastUForRoute = String(msgs[_lri].content || ''); break; } }
+  }
+  var _urlInRoute = /https?:\/\/[^\s<>"']+/i.test(_lastUForRoute);
+  if ((S.cfg.autoRoute || (_urlInRoute && (S.cfg.mode || 'chat') === 'chat')) && !((S.cfg.picks && S.cfg.picks.agent) || []).length && (!S.cfg.modePin || (_urlInRoute && (S.cfg.mode || 'chat') === 'chat')) && msgs && msgs.length){
+    if (_lastUForRoute){
+      var wantMode = MODE.route(_lastUForRoute);
       if (wantMode !== S.cfg.mode){
         /* v1.28.4：自动路由不再静默 —— 切完立刻在输入框上方明示，并给一键切回 */
         var fromMode = S.cfg.mode;
         setCfg({ mode: wantMode, persona: '' });
+        try { MODE.mountUI(); UI.renderComposerCtl(); UI.updateEmpty(); } catch (e) {} // URL 自动路由时顶栏/空态同步切换
         try { if (UI.routeHint) UI.routeHint(fromMode, wantMode); } catch (e) {}
       }
     }
@@ -2415,6 +2452,41 @@ var NET = (function(){
     if ((S.cfg.mode === 'agent' || S.cfg.mode === 'soul') && (isMock() || (cs && cs.workspace))) sys += '\n\n' + FS.protocol; // 文件工具协议附注（Agent/Soul 模式且有工作区/mock 时）
     if (S.cfg.mode === 'chat') sys += '\n\n' + CHAT_ID;               // v0.3.0：Chat 只留身份
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
+    var _pm = permForSid(session && session.id);
+    if (S.cfg.mode !== 'chat'){
+      sys += '\n\n【执行权限：' + (_pm === 'plan' ? 'Plan 只读规划' : (_pm === 'yolo' ? 'Yolo 免确认' : 'Write 命令确认')) + '】';
+      if (_pm === 'plan') sys += ' 只能使用只读工具（搜索/网页读取/文件读取/列目录/智能体与扩展的只读能力）；禁止写文件、补丁、cmd/git/python、vfs-write、run、crawl、download。先给出可执行计划，等用户切到 Write 或 Yolo 再落地。';
+      else if (_pm === 'yolo') sys += ' 所有工具与命令都允许直接执行，不再弹用户确认；仍要如实报告退出码、失败与未验证项，禁止把没做的事写成完成。';
+      else sys += ' 所有扩展工具都可用；cmd、git、python 每次执行前会弹确认，用户拒绝就停下换方案，不要原样重试；写文件在工作区内可直接应用。';
+    }
+    /* v0.4.7：把用户上下文里的链接和内置浏览器当前页交给模型；不要求用户重复发链接 */
+    var _ctxLinks = [], _seenLink = {};
+    for (var _li = msgs.length - 1; _li >= 0 && msgs.length - _li <= 40; _li--){
+      if (msgs[_li].role !== 'user') continue;
+      var _lm = String(msgs[_li].content || '').match(/https?:\/\/[^\s<>"'）)]+/g) || [];
+      for (var _lk = 0; _lk < _lm.length; _lk++){
+        var _lu = _lm[_lk].replace(/[.,;，。；]+$/, '');
+        if (!_seenLink[_lu]){ _seenLink[_lu] = 1; _ctxLinks.push(_lu); }
+      }
+    }
+    if (S.cfg.mode !== 'chat' && _ctxLinks.length){
+      sys += '\n\n【用户上下文中的链接】' + _ctxLinks.slice(0, 8).join('、') +
+        '\n用户已经把链接发给你，不要要求用户重发，也不要只凭记忆回答。需要读网页时必须用 ```browser-read <url> ```；要操作页面用 ```browser-act ... ```；先读再回答。';
+      var _latestLink = _ctxLinks[0];
+      try {
+        if (typeof RUNNER !== 'undefined' && RUNNER.openWeb && S._lastAutoLink !== _latestLink){
+          S._lastAutoLink = _latestLink;
+          RUNNER.openWeb(_latestLink);
+        }
+      } catch (e) {}
+    }
+    try {
+      if (S.cfg.mode !== 'chat' && typeof BROWSER_TOOL !== 'undefined' && BROWSER_TOOL.state){
+        var _bs = BROWSER_TOOL.state();
+        if (_bs && _bs.url) sys += '\n\n【内置浏览器当前页】' + (_bs.title || '（无标题）') + ' / ' + _bs.url +
+          '\n用户问当前页面时，直接 ```browser-read ```（不带 URL）读取；不要回答没有浏览器。';
+      }
+    } catch (e) {}
 sys += '\n\n' + RULES_CORE;      // v1.29.4：通用纪律
 sys += '\n\n' + ASK_PROTOCOL;   // v1.29.3：反问协议（各模式通用）
     var extPrompt = EXT.prompt(S.cfg.mode); if (extPrompt) sys += '\n\n' + extPrompt; // v0.4.0：扩展工具/技能

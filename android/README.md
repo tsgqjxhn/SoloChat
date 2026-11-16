@@ -4,10 +4,14 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.6**（versionCode 24，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.7**（versionCode 25，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **Plan / Write / Yolo**：与电脑版一致；权限按会话保存，Plan 拦截写入/命令，Write 命令确认，Yolo 免确认。
+- **执行记录**：思考、运行、编辑合并为一个折叠块，最终正文单独显示；历史空回复不再留空白块。
+- **链接上下文 / 内置浏览器**：上下文链接自动注入并打开，`browser-read` 可读当前页；Chat 收到 URL 自动切 Work。
+- **大沙箱**：VFS 5000 文件 / 200MB；crawl 单次 2000 页，长篇/批量章节不再卡 200。
 - **搜索 / 解析配置组**：文档解析与联网搜索各自支持保存、新建、重命名、删除多组配置；切换即加载对应字段，编辑自动写回当前组；Key 按组进入宿主保险库。
 - **本地扩展市场**：宿主启动时把 `dist/packages/` 复制到运行时目录，市场优先读取本地 `packages/index.json`，不再因远端 HTTP 503 显示「市场暂不可用」。
 - **联网搜索错误可诊断**：Firecrawl `HTTP 402 / insufficient_credits` 会出现在提示里；不再只显示「未返回结果」。
@@ -73,7 +77,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.6.apk`（469,090 字节，证书 `CN=SoloChat`）
+仓库已放一份：`dist/SoloChat-Android-0.4.7.apk`（474,822 字节，证书 `CN=SoloChat`）
 
 ## 使用
 

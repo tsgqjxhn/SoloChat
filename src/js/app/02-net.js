@@ -697,7 +697,7 @@ function fetchStream(opt){
   /* v0.7.0：批量抓取 —— 给起点 URL，沿 #next_url 连续抓 N 页；走宿主桥，失败记录原因不中断 */
   function crawl(startUrl, opts){
     opts = opts || {};
-    var maxPages = Math.min(200, Math.max(1, parseInt(opts.max, 10) || 20));
+    var maxPages = Math.min(2000, Math.max(1, parseInt(opts.max, 10) || 20));
     var followNext = opts.next !== false;
     var delay = Math.max(0, parseInt(opts.delay, 10) || 250);
     var out = [], fails = [], seen = {}, url = safeUrl(startUrl);

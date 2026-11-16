@@ -1504,6 +1504,7 @@ var UI = (function(){
     document.body.classList.add('modal-open');
   }
   function closeModal(){
+  if (S._confirmKey){ try { document.removeEventListener('keydown', S._confirmKey); } catch (e) {} S._confirmKey = null; } // v0.4.7：确认框键盘监听清理
   try { if (S) { S.recKey = null; S.recBtn = null; } } catch (e) {} // v0.3.65：关弹层就退出快捷键录制，否则下一次按键会被静默写成快捷键
   $modal.classList.remove('show'); $panel.textContent = '';
   document.body.classList.remove('modal-open');
@@ -1523,6 +1524,13 @@ var UI = (function(){
         ])
       ]);
       S._confirmRes = res;
+      /* v0.4.7：命令确认支持回车执行、Esc 取消 */
+      var onKey = function(e){
+        if (e.key === 'Escape'){ e.preventDefault(); try { var _r0 = S._confirmRes; S._confirmRes = null; closeModal(); if (_r0) _r0(false); } catch (x) {} }
+        else if (e.key === 'Enter'){ e.preventDefault(); try { S._confirmRes = null; closeModal(); res(true); } catch (x) {} }
+      };
+      S._confirmKey = onKey;
+      setTimeout(function(){ try { document.addEventListener('keydown', onKey); } catch (e) {} }, 0);
       openModal(box, false, true); // Issue 20: 确认框用 narrow 宽度
     });
   }

@@ -483,6 +483,8 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:13px;
 }
 .sel-think{width:96px}
+.sel-perm{width:78px}
+@media (max-width: 900px){ .sel-perm{width:70px;font-size:12px} }
 .icon-btn:disabled{opacity:.35;cursor:not-allowed}
 #ws-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* v2.9：工作区选择按钮（Agent 主页内，顶栏不再放） */
@@ -588,6 +590,7 @@ body.empty-open #msg-scroll{overflow:hidden}
   font-family:var(--font-display);font-size:28px;font-weight:600;color:var(--ink);
   letter-spacing:var(--tracking-display);
 }
+#empty .e-mode-desc{color:var(--muted);font-size:13px;line-height:1.7;max-width:520px;text-align:center;margin-top:-2px}
 #empty p{color:var(--muted);max-width:420px}
 #empty .row{display:flex;gap:10px}
 .e-sugs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:600px}
@@ -932,6 +935,28 @@ body:not(.nowrap-code) .md pre code{white-space:pre-wrap;word-break:break-word}
 .tool-card>.tb pre{margin:0;border:0;border-radius:0}
 .tool-card.collapsed>.tb{display:none}
 .tool-card.run{background:color-mix(in srgb, var(--primary) 6%, var(--soft))}
+/* v0.4.7：执行记录 —— 整轮思考/运行/编辑默认收起，正文只留总结 */
+.trace-msg{margin:8px 0}
+.trace{border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--soft);overflow:hidden}
+.trace-sum{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;list-style:none;color:var(--muted);font-size:12px}
+.trace-sum::-webkit-details-marker{display:none}
+.trace-sum::before{content:'▸';color:var(--faint);transition:transform .15s}
+.trace[open]>.trace-sum::before{transform:rotate(90deg)}
+.trace-title{color:var(--body);font-weight:600}
+.trace-meta{color:var(--faint);font-size:11px}
+.trace-body{padding:0 10px 8px;border-top:1px solid var(--hairline)}
+.trace-think,.trace-raw{margin:5px 0}
+.trace-think>summary,.trace-raw>summary{cursor:pointer;color:var(--muted);font-size:12px;padding:3px 0}
+.trace-think-body{white-space:pre-wrap;color:var(--body);font-size:12px;line-height:1.65;max-height:220px;overflow:auto;padding:4px 8px;background:var(--canvas);border-radius:var(--r-sm)}
+.trace-row{display:flex;align-items:center;gap:7px;min-height:24px;font-size:12px;color:var(--body);border-bottom:1px dashed color-mix(in srgb,var(--hairline) 70%,transparent)}
+.trace-row:last-child{border-bottom:0}
+.trace-ico{width:12px;text-align:center;color:var(--ok,#2f8f5b);font-size:11px}
+.trace-ico.bad{color:var(--danger)}
+.trace-op{flex:none;color:var(--muted)}
+.trace-brief{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--body);min-width:0}
+.trace-ms{margin-left:auto;flex:none;color:var(--faint);font-family:var(--mono);font-size:10px}
+.trace-raw pre{max-height:260px;overflow:auto;margin:4px 0 0;padding:8px;border-radius:var(--r-sm);background:var(--canvas);font-size:11px}
+.trace-msg>.msg{border:0;background:transparent;padding:4px 0}
 
 /* #11 工作区文件树 */
 .tree-grp{margin:2px 0}
@@ -1257,6 +1282,8 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 }
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}
+  body.m-phone #empty .e-mode-desc{font-size:12px;line-height:1.6;padding:0 10px}
+  body.m-phone #sel-perm{max-width:92px;font-size:11px}
   body.m-phone #empty .e-modes .seg button{padding:6px 10px;font-size:12px}
   body.m-phone #tb-mode{display:none}
   body.m-phone #sel-model{max-width:92px}

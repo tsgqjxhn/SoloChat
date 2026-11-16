@@ -3,6 +3,13 @@ var FS = (function(){
   /* v2.2：工具循环状态按会话隔离（切走后仍在后台推进，互不干扰） */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false }); }
+  /* v0.4.7：Plan / Write / Yolo 的共用操作白名单与确认策略 */
+  var PLAN_DENY = ['fs-write','fs-edit','patch','cmd','git','python','vfs-write','run','crawl','download','extract'];
+  function planDenied(op, sid){ return permForSid(sid) === 'plan' && PLAN_DENY.indexOf(op) >= 0; }
+  function askRun(title, text, okText, sid){
+    if (permForSid(sid) === 'yolo') return Promise.resolve(true); // Yolo：连命令确认也跳过
+    return UI.confirmBox({ title: title, text: text, okText: okText || '运行', danger: true });
+  }
   /* v1.29.4 重写：目标 → 工具 → 循环 → 边界 → 输出，去掉重复与口头禅 */
   var PROTOCOL = 'Agent 协议（本地工作区）：读懂现有文件 → 做最小必要修改 → 说清改了什么。\n' +
     '工具（围栏首行是参数）：\n' +
@@ -97,38 +104,34 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       return '';
     }
     S._riskyWrites = {};
-    /* v1.29.0：计划门禁 —— 本会话还没确认过写入时，先把这一批留在卡上等用户点一次「应用写入」 */
-    var permMode = S.cfg.permMode || (S.cfg.planGate === false ? 'auto' : 'ask');
-  if (permMode === 'readonly'){
-    /* v0.3.6：只读模式 —— 不写文件、不执行 cmd/git，只保留读类工具 */
-    reads = reads.filter(function(c){ return c.op !== 'cmd' && c.op !== 'git' && c.op !== 'fs-write' && c.op !== 'fs-edit'; }); // v0.3.42：fs-edit 也是写
-    if (writes.length){
-      try {
-        msg.content = String(msg.content || '') + '\n\n> 🔒 只读模式：本轮 ' + writes.length + ' 处写入未执行（设置 → 通用设置 → 权限）';
-        DB.putMessage(msg); UI.repaintMsg(msg.id);
-      } catch (e) {}
-      UI.toast('只读模式：' + writes.length + ' 处写入已跳过', true);
-      writes = [];
+    /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Yolo 全部免确认 */
+    var permMode = permForSid(msg.sid);
+    if (permMode === 'plan'){
+      var _blocked = [];
+      reads = reads.filter(function(c){
+        if (PLAN_DENY.indexOf(c.op) >= 0){ _blocked.push(c.op); return false; }
+        return true;
+      });
+      if (writes.length || _blocked.length){
+        var _planN = writes.length + _blocked.length;
+        var _planMsg = '> 📋 Plan 只读：本轮 ' + _planN + ' 个写入/执行操作未运行' +
+          (_blocked.length ? '（' + _blocked.slice(0, 6).join('、') + '）' : '') + '。先给出计划，切到 Write / Yolo 再落地。';
+        try { msg.content = String(msg.content || '') + '\n\n' + _planMsg; DB.putMessage(msg); UI.repaintMsg(msg.id); } catch (e) {}
+        writes = [];
+        UI.toast('Plan 只读：已拦截 ' + _planN + ' 个操作', true);
+      }
     }
-  }
-  /* v0.3.47：fs-edit 也在计划门禁之内（它同样是写盘） */
-  if (permMode === 'ask' && !s0.planOk){
-    var _edits = reads.filter(function(c){ return c.op === 'fs-edit'; });
-    if (_edits.length){
-      reads = reads.filter(function(c){ return c.op !== 'fs-edit'; });
-      try { msg.content = String(msg.content || '') + '\n\n> ⏸ 计划门禁：本轮 ' + _edits.length + ' 处编辑未执行（先确认一次写入解锁本会话）'; DB.putMessage(msg); UI.repaintMsg(msg.id); } catch (e) {}
-      UI.toast('计划门禁：' + _edits.length + ' 处编辑已跳过，先确认一次写入', true);
-    }
-  }
-  var gated = (permMode === 'ask') && (S.cfg.fsAutoWrite !== false) && !s0.planOk && writes.length > 0;
-    if (S.cfg.fsAutoWrite !== false && !gated)
+    /* v0.3.47：fs-edit 也在计划门禁之内（它同样是写盘）；v0.4.7 Write 不再拦截普通写入 */
+  var gated = false;
+  if (permMode === 'write' && S.cfg.fsAutoWrite === false) gated = writes.length > 0;
+    if ((S.cfg.fsAutoWrite !== false || permMode === 'yolo') && !gated)
       for (i = 0; i < writes.length; i++){
-        if (isOutside(writes[i].path)) continue;
+        if (isOutside(writes[i].path) && permMode !== 'yolo') continue;
         var why = riskyWrite(writes[i].path);
-        if (why){ S._riskyWrites[writes[i].path] = why; continue; }
+        if (why && permMode !== 'yolo'){ S._riskyWrites[writes[i].path] = why; continue; }
         auto.push(writes[i]);
       }
-    if (Object.keys(S._riskyWrites).length)
+    if (Object.keys(S._riskyWrites).length && permMode !== 'yolo')
       UI.toast('有 ' + Object.keys(S._riskyWrites).length + ' 个写入需要确认（' + Object.keys(S._riskyWrites).map(function(k){ return S._riskyWrites[k]; })[0] + '）');
       if (gated){
         try { D('gated'); } catch (e) {}
@@ -191,6 +194,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         return;
       }
       var c = reads[done++];
+      if (planDenied(c.op, sid0)){
+        parts.push('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先把方案写清楚，切到 Write / Yolo 再执行。');
+        next(); return;
+      }
       if (c.op === 'skill'){
         var skn = String(c.path || '').trim().split(/\s+/)[0];
         var skb = EXT.skillText(skn);
@@ -216,7 +223,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         if (!pyCode.trim()){ parts.push('[python] 代码为空'); next(); return; }
         var pyWs = ws0;
         if (!pyWs){ parts.push('[python] 需要先绑定 Agent 工作区'); next(); return; }
-        UI.confirmBox({ title: '运行 Python 脚本？', text: '工作目录：' + pyWs + '\n\n' + pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''), okText: '运行', danger: true })
+        askRun('运行 Python 脚本？', '工作目录：' + pyWs + '\n\n' + pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''), '运行', sid0)
           .then(function(ok){
             if (!ok){ parts.push('[python] 用户拒绝了本次执行'); next(); return; }
             var pt0 = Date.now();
@@ -268,7 +275,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
         if (!raw){ parts.push('[cmd] 命令为空'); next(); return; }
         if (c.op === 'git') raw = 'git ' + raw;
         var ws = ws0; /* v0.3.5：后台会话的命令要在自己的工作区跑 */
-        UI.confirmBox({ title: '执行命令？', text: raw + (ws ? '\n工作目录：' + ws : '\n（未绑定工作区，将无法执行）'), okText: '执行', danger: true })
+        askRun('执行命令？', raw + (ws ? '\n工作目录：' + ws : '\n（未绑定工作区，将无法执行）'), '执行', sid0)
           .then(function(ok){
             if (!ok){ parts.push('[cmd] 用户拒绝了：' + raw); next(); return; }
             var sp = raw.match(/^("[^"]+"|\S+)([\s\S]*)$/);
@@ -333,7 +340,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       var au = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
       if (!au){ parts.push('[crawl] 地址无效'); next(); return; }
       var amax = 10, am = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-      if (am) amax = Math.min(200, Math.max(1, parseInt(am[1], 10)));
+      if (am) amax = Math.min(2000, Math.max(1, parseInt(am[1], 10)));
       NET.crawl(au, { max: amax }).then(function(r){
         var head = r.pages.slice(0, 3).map(function(p){
           return '### ' + (p.title || p.url) + '\n' + String(p.text || '').slice(0, 2000);
@@ -462,7 +469,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
     var ask = Promise.resolve(true);
-    if (outside){
+    if (outside && permForSid(msg.sid) !== 'yolo'){
       var lines = (String(block.body).match(/\n/g) || []).length + 1;
       ask = UI.confirmBox({
         title: '工作区外写入确认',

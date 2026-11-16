@@ -779,10 +779,10 @@ function buildSettings(){
   var pgRow = el('div', { class: 'f-row' });
   (function(){
   var pmSel = el('select', { class: 'f-in' });
-  [['ask', '每次确认（本会话第一次写入要手动确认）'], ['auto', '自动应用（工作区内直接写）'], ['readonly', '只读（不写文件、不执行命令）']].forEach(function(o){
-    pmSel.appendChild(el('option', { value: o[0], text: o[1], selected: ((S.cfg.permMode || (S.cfg.planGate === false ? 'auto' : 'ask')) === o[0]) ? '' : null }));
+  [['plan', 'Plan（只读规划：不写文件、不跑命令）'], ['write', 'Write（全部工具；cmd / git / Python 需确认）'], ['yolo', 'Yolo（全部工具与命令免确认，危险）']].forEach(function(o){
+    pmSel.appendChild(el('option', { value: o[0], text: o[1], selected: (permNow() === o[0]) ? '' : null }));
   });
-  pmSel.addEventListener('change', function(){ setCfg({ permMode: pmSel.value, planGate: pmSel.value !== 'auto' }); });
+  pmSel.addEventListener('change', function(){ setPerm(pmSel.value); });
   pgRow.appendChild(el('label', {}, ['权限模式：', pmSel]));
   })();
   p.appendChild(pgRow);

@@ -194,6 +194,8 @@ var READONLY_OPS = ['fs-write', 'fs-edit', 'patch', 'cmd', 'git'];
   text: function(key){ var o = S.cfg.sysEdits || {}; if (Object.prototype.hasOwnProperty.call(o, key)) return o[key] || ''; return MODE.texts[key] || ''; },
            /* v1.28.1：某个工具在当前模式是否可用（渲染时给「不会执行」的围栏打标） */
     toolAllowed: function(op){
+      /* v0.4.7：Plan 只读，UI 明确标记不会执行的写/命令围栏 */
+      if (permNow() === 'plan' && ['fs-write','fs-edit','patch','cmd','git','python','vfs-write','run','crawl','download','extract'].indexOf(op) >= 0) return false;
       /* v0.4.1：Soul 使用全部已启用扩展，不标「本轮不执行」 */
       if (S.cfg.mode === 'soul'){
         try { if (typeof EXT !== 'undefined' && EXT.isOn) return EXT.isOn(op); } catch (e) {}
@@ -885,7 +887,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
    宿主（host/Program.cs 的 webview op=read|act）在 WebView2 里执行只读脚本与点击/输入，
    回 webview.done（data 为 JSON 字符串）或 webview.error。 */
 var BROWSER_TOOL = (function(){
-  var seq = 0, pend = {}, hooked = false;
+  var seq = 0, pend = {}, hooked = false, last = { url: '', title: '' };
   function ready(){
     return !!(typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok && NET.bridge.engine === 'webview2');
   }
@@ -961,13 +963,20 @@ var BROWSER_TOOL = (function(){
   function read(url){
     var payload = {};
     if (url) payload.url = String(url);
-    return call('read', payload);
+    return call('read', payload).then(function(d){
+      if (d && d.url){ last.url = String(d.url); last.title = String(d.title || ''); }
+      return d;
+    });
   }
   function act(arg, body){
     var p = parseAct(arg, body);
     if (p.err) return Promise.reject(new Error(p.err));
-    return call('act', p);
+    return call('act', p).then(function(d){
+      if (d && d.url){ last.url = String(d.url); last.title = String(d.title || ''); }
+      return d;
+    });
   }
+  function state(){ return { url: last.url, title: last.title, ready: ready() }; }
   function fmtRead(d){
     d = d || {};
     if (d.error) return '[browser-read] 失败：' + d.error;
@@ -991,7 +1000,7 @@ var BROWSER_TOOL = (function(){
     if (d.ok === false) return '[browser-act] 失败：' + (d.err || '未知原因');
     return '[browser-act] ok / ' + String(d.url || '') + ' / ' + String(d.title || '');
   }
-  return { ready: ready, call: call, parseAct: parseAct, read: read, act: act, fmtRead: fmtRead, fmtAct: fmtAct };
+  return { ready: ready, call: call, parseAct: parseAct, read: read, act: act, fmtRead: fmtRead, fmtAct: fmtAct, state: state };
 })();
 
 /* P5：结构化提取 —— 从渲染后的 HTML 里按 CSS 选择器抓字段，输出 CSV。
@@ -1111,6 +1120,8 @@ var WORK = (function(){
   var stMap = {};
   /* v0.4.1：Soul 下 Work 只执行 Work 专属操作，共享操作交给 FS，避免重复执行 */
   var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
+  /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Yolo 全部免确认 */
+  var PLAN_DENY_WORK = ['vfs-write','run','patch','download','play','crawl','extract'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   /* v1.29.4 重写：目标 / 工具 / 路由 / 纪律 / 输出 五段，保留全部工具与既有约定 */
   var PROTOCOL = 'Work 协议：在页面沙箱里完成任务；长任务、多步任务都可以连续执行，不要因为任务长就要求切 Agent。沙箱不联网、不写磁盘（除 vfs）。\n' +
@@ -1132,7 +1143,7 @@ var WORK = (function(){
     '```calc 算式 —— 纯数字四则运算（+ - * / ( ) % ^），不要带变量名。\n' +
     '```json 路径 —— 体为 JSON 文本，按点路径取值（如 data.0.name）；路径留空则格式化输出。\n' +
     '```http 方法 URL —— 直接发 HTTP 请求；下面几行可写 Header: 值，再写一行 --- 后是请求体。\n' +
-    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限 200）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
+    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限 2000）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
     '```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json）；文档抽正文 4000 字回灌，图片会作为图片给你看。\n' +
     '```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\n' +
     '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件 ≤1MB）。\n' +
@@ -1235,9 +1246,9 @@ var WORK = (function(){
         total += (fs[i].binary ? 0 : (fs[i].size || 0));
         if (fs[i].path === p) old = fs[i];
       }
-      if (!old && fs.length >= LIMITS.VFS_FILES_MAX) return Promise.reject(new Error('文件数已达上限 200'));
+      if (!old && fs.length >= LIMITS.VFS_FILES_MAX) return Promise.reject(new Error('文件数已达上限 ' + LIMITS.VFS_FILES_MAX));
       if (total - (old && !old.binary ? old.size || 0 : 0) + size > LIMITS.VFS_TOTAL_MAX)
-        return Promise.reject(new Error('会话总量已达上限 20MB'));
+        return Promise.reject(new Error('会话工作区总量超过 ' + Math.round(LIMITS.VFS_TOTAL_MAX / 1024 / 1024) + 'MB'));
       /* v3.0 #15：同路径保留最近 5 个历史版本（只存文本内容，内存/磁盘代价可控） */
       var vers = (old && old.vers ? old.vers.slice() : []);
       if (old && old.content !== body){
@@ -1318,7 +1329,7 @@ var WORK = (function(){
     if (/```ask\b/.test(String(msg.content || ''))){ w0.waitAsk = true; return; }
   var soul = (S.cfg.mode === 'soul');
   if (S.cfg.mode !== 'work' && !soul && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
-    if (!soul) autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件）；Soul 不自动落盘 */
+    if (!soul && permForSid(msg.sid) !== 'plan') autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件）；Plan 只读不落盘 */
     var calls = scan(msg.content);
     if (soul) calls = calls.filter(function(c){ return SOUL_OPS.indexOf(c.op) >= 0; });
     if (!calls.length) return;
@@ -1362,6 +1373,10 @@ var WORK = (function(){
         return;
       }
       var c = calls[done++];
+      if (permForSid(sid0) === 'plan' && PLAN_DENY_WORK.indexOf(c.op) >= 0){
+        add('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先给出方案，切到 Write / Yolo 再执行。', { op: c.op, ok: false, brief: 'Plan 只读' });
+        next(); return;
+      }
       /* v0.4.0：扩展系统 —— 关闭的内置工具直接拒绝；技能懒加载；自定义工具走 EXT.runTool */
       if (EXT.isKnownBuiltin(c.op) && !EXT.isOn(c.op)){
         add('[' + c.op + '] 该工具已在「设置 → 扩展」里关闭', { op: c.op, ok: false, brief: '已关闭' });
@@ -1461,7 +1476,7 @@ var WORK = (function(){
         var cu = NET.safeUrl(String(c.arg || '').trim());
         if (!cu){ add('[crawl] 地址无效（需 http/https 绝对地址）', { op: 'crawl', ok: false, brief: '地址无效' }); next(); return; }
         var cmax = 20, cm = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-        if (cm) cmax = Math.min(200, Math.max(1, parseInt(cm[1], 10)));
+        if (cm) cmax = Math.min(2000, Math.max(1, parseInt(cm[1], 10)));
         add('[crawl] 开始：' + cu + '（最多 ' + cmax + ' 页）', { op: 'crawl', ok: true, brief: '开始抓取' });
         NET.crawl(cu, { max: cmax }).then(function(r){
           var chain = Promise.resolve(), saved = 0;

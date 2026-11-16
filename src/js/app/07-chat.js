@@ -109,6 +109,7 @@ function holdBusy(d, sid){
       core.appendChild(av);
       core.appendChild(el('h1', { text: _name + '：自主 · 长期记忆 · 持续进化' }));
       core.appendChild(el('div', { class: 'soul-heart', text: '无需勾选扩展：Soul 会自动使用全部技能、工具和智能体' }));
+      core.appendChild(el('div', { class: 'e-mode-desc', text: '把每次对话沉淀为长期记忆，用技能持续改进自己；所有扩展都由它自己判断调用。' }));
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '关联工作区文件夹（可选）：Soul 需要读文件时只能访问这里'
@@ -130,6 +131,7 @@ function holdBusy(d, sid){
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
       core.appendChild(el('h1', { text: 'Agent：真实文件工具' }));
+      core.appendChild(el('div', { class: 'e-mode-desc', text: '在授权文件夹里读写代码、运行命令 / Python / Git；按 Plan / Write / Yolo 控制执行权限。' }));
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '选择工作区文件夹：本次会话中 AI 只能读写该文件夹内的文件（开始后不可更改）'
@@ -140,6 +142,7 @@ function holdBusy(d, sid){
     if (S.cfg.mode === 'work'){ // Work 空态（v2.0，v2.7 换新图标，v2.9 去掉小字；v0.4.2 支持长任务）
       core.appendChild(bigIcon('work', false));
       core.appendChild(el('h1', { text: 'Work：虚拟沙箱' }));
+      core.appendChild(el('div', { class: 'e-mode-desc', text: '在内存工作区生成文件、网页、图表和脚本；长任务可连续执行，不碰真实磁盘。' }));
       /* v3.0 #17：一键脚手架，省掉让模型重造骨架的 token */
       extra.appendChild(el('div', { class: 'tpl-row' }, [
         ['static', '静态页模板'], ['spa', '单页应用模板'], ['chart', '图表页模板']
@@ -150,10 +153,9 @@ function holdBusy(d, sid){
       })));
       return;
     }
-    var h = new Date().getHours();
-    var greet = h < 6 ? '夜深了' : h < 12 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     core.appendChild(bigIcon('logo', true));
-    core.appendChild(el('h1', { text: greet + '，想聊点什么？' }));
+    core.appendChild(el('h1', { text: 'Chat：通用推理与写作' }));
+    core.appendChild(el('div', { class: 'e-mode-desc', text: '推理、解释、代码阅读与文本创作；不读写文件、不执行命令。需要工具时切到 Work / Agent。' }));
     var sugs = pickSugs(4); /* v2.9：每次新草稿随机 4 条，不再固定「写信」 */
     var srow = el('div', { class: 'e-sugs' });
     for (var i = 0; i < sugs.length; i++)
@@ -532,20 +534,20 @@ function sendMessage(){
       _nb.click(); UI.toast('已撤销最近一次写入');
       return;
     }
-    if (cmd === '/perm'){ /* v0.3.85：用命令切权限（对标 Cline 的逐级授权） */
+    if (cmd === '/perm'){ /* v0.4.7：Plan 只读 / Write 命令确认 / Yolo 免确认 */
       var _pv = text.slice(5).trim().toLowerCase();
       $input.value = ''; $input.style.height = ''; UI.autosize();
-      var _okv = ['ask', 'auto', 'readonly'];
-      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm ask|auto|readonly（当前 ' + (S.cfg.permMode || 'ask') + '）', true); return; }
-      setCfg({ permMode: _pv });
-      UI.toast('权限已设为 ' + ({ ask: '每次确认', auto: '自动执行', readonly: '只读' })[_pv]);
+      var _okv = ['plan', 'write', 'yolo', 'ask', 'auto', 'readonly'];
+      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm plan|write|yolo（当前 ' + permNow() + '）', true); return; }
+      setPerm(_pv); renderComposerCtl();
+      UI.toast('执行权限已设为 ' + ({ plan: 'Plan 只读', write: 'Write 命令确认', yolo: 'Yolo 免确认' })[normPerm(_pv)]);
       return;
     }
     if (cmd === '/status'){ /* v0.3.84：当前会话/工作区/权限状态（对标 Devin 的会话状态栏） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _cs9 = curSession();
       var _ws9 = (_cs9 && _cs9.workspace) || '未绑定';
-      UI.toast('模式 ' + (S.cfg.mode || 'chat') + ' · 权限 ' + (S.cfg.permMode || 'ask') + ' · 工作区 ' + _ws9 + ' · ' + ((S.msgs || []).length) + ' 条消息 · ' + (S.cfg.currentModel || '未选模型'));
+      UI.toast('模式 ' + (S.cfg.mode || 'chat') + ' · 权限 ' + permNow() + ' · 工作区 ' + _ws9 + ' · ' + ((S.msgs || []).length) + ' 条消息 · ' + (S.cfg.currentModel || '未选模型'));
       return;
     }
     if (cmd === '/tree'){ /* v0.3.83：产物清单带体积（对标 Airtable 的文件视图） */
@@ -1126,8 +1128,8 @@ function sendMessage(){
     return DB.workfsBySid(sid).then(function(fs){
       var old = null;
       for (var i = 0; i < fs.length; i++) if (fs[i].path === path) old = fs[i];
-      if (!old && fs.length >= LIMITS.VFS_FILES_MAX) throw new Error('文件数已达上限 200');
-      /* 二进制原文件只在 VFS 存 attachmentId 引用，字节仍在 attachments 表，不占 20MB VFS 配额 */
+      if (!old && fs.length >= LIMITS.VFS_FILES_MAX) throw new Error('文件数已达上限 ' + LIMITS.VFS_FILES_MAX);
+      /* 二进制原文件只在 VFS 存 attachmentId 引用，字节仍在 attachments 表，不占 VFS 配额 */
       return DB.workfsPut({
         id: sid + '|' + path, sid: sid, path: path, content: '', size: r.size || 0, ts: Date.now(),
         vers: (old && old.vers ? old.vers.slice() : []),
@@ -1726,6 +1728,12 @@ function sendMessage(){
   }
   var _cmodeBtn = $('#btn-cmode');
   if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
+  var _permSel0 = $('#sel-perm');
+  if (_permSel0) _permSel0.addEventListener('change', function(){
+    setPerm(_permSel0.value);
+    try { renderComposerCtl(); } catch (e) {}
+    UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', yolo: 'Yolo · 全部免确认' }[_permSel0.value] || _permSel0.value));
+  });
 
   document.addEventListener('click', function(e){
     if (e.target.closest && (e.target.closest('#sub-pop') || e.target.closest('#btn-cmode'))) closeModePop();
@@ -1760,6 +1768,12 @@ function sendMessage(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
+    var _permSel = $('#sel-perm');
+    if (_permSel){
+      _permSel.value = permNow();
+      _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
+      _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', yolo: 'Yolo 全部工具、免确认' }[permNow()] || '');
+    }
     document.body.classList.toggle('m-chat', (S.cfg.mode || 'chat') === 'chat');
     document.body.classList.toggle('m-soul', _isSoul);
     applyVoiceClasses();
@@ -4006,6 +4020,11 @@ $('#sidebar').addEventListener('click', function(e){
       if (s){ s.mode = val || 'chat'; if (s.id === S.sid) setCfg({ mode: s.mode }); }
       else draft.mode = val || '';
     } else if (sk === 'model'){ if (s) s.model = val || ''; else draft.model = val || ''; }
+    else if (sk === 'perm'){
+      var _pv = normPerm(val);
+      if (s) s.perm = _pv; else draft.perm = _pv;
+      if (s && s.id === S.sid) S.cfg.permMode = _pv;
+    }
     else {
       var pp = s ? (s.params = s.params || {}) : (draft.params = draft.params || {});
       if (sk === 'maxTokens'){

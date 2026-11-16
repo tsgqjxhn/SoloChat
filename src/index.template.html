@@ -54,6 +54,11 @@
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
         <div id="tb-mode"><span id="tb-mode-name">Chat</span></div>
+        <select id="sel-perm" class="sel-mini sel-perm" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Yolo 全部免确认">
+          <option value="plan">Plan</option>
+          <option value="write">Write</option>
+          <option value="yolo">Yolo</option>
+        </select>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
