@@ -559,14 +559,15 @@ function fetchStream(opt){
   /* 非流式 chat 补全（查询改写用）：双通道，任何失败返回 null */
   function chatOnce(messages, opt){
     opt = opt || {};
-    if (!normBase(S.cfg.baseURL) || !S.cfg.currentModel) return Promise.resolve(null);
-    var headers = authHeaders();
-    var body = { model: S.cfg.currentModel, messages: messages, stream: false,
+    var base = opt.baseURL || S.cfg.baseURL, model = opt.model || S.cfg.currentModel;
+    if (!normBase(base) || !model) return Promise.resolve(null);
+    var headers = authHeaders(opt.apiKey);
+    var body = { model: model, messages: messages, stream: false,
       temperature: opt.temperature == null ? 0.2 : opt.temperature, max_tokens: opt.maxTokens || 160 };
     applyQuirks(body);
     /* v1.1.24：timeout=0 表示不设超时；未传才用 15s 默认 */
     var ms = (opt.timeout == null ? 15000 : opt.timeout);
-    var url = endpoint('chat', false);
+    var url = endpoint('chat', false, opt.baseURL, model);
     if (bridge.ok && S.cfg.useBridge){
       return new Promise(function(resolve){
         var id = 'q' + (++bridge.seq), acc = '', fin = false;

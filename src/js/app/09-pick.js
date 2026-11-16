@@ -45,7 +45,7 @@ var PICK = (function(){
       if (r.agents.length) L.push('- 子智能体：' + r.agents.join('、') + '；派其它角色会被拒绝。');
     }
     for (var i = 0; i < r.prompts.length; i++)
-      L.push('- 本轮提示词「' + r.prompts[i].name + '」：\n' + String(r.prompts[i].body || '').slice(0, 1500));
+      L.push('- 本轮提示词「' + r.prompts[i].name + '」：\n' + String((typeof EXT.resolve === 'function' ? EXT.resolve(r.prompts[i].body || '', r.prompts[i]) : (r.prompts[i].body || ''))).slice(0, 1500));
     if (mode !== 'chat' && r.mcp.length) L.push('- MCP（已登记）：' + r.mcp.map(function(m){ return m.name + (m.url ? ' ' + m.url : ''); }).join('；'));
     return L.join('\n');
   }
@@ -729,6 +729,11 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
 
       var sysEd = (S.cfg.sysEdits || {})['sub:' + (p.id || p.name)];
     var sys = (sysEd != null && sysEd !== '') ? sysEd : (p.body || p.prompt || ('你是子智能体「' + p.name + '」。独立完成任务，只回结论。'));
+      try { sys = EXT.resolve(sys, p); } catch (e) {}
+      var amodel = '', abase = '', akey = '';
+      try { amodel = EXT.resolve(p.model || '', p); } catch (e) {}
+      try { abase = EXT.valueByKey(p, 'baseURL'); } catch (e) {}
+      try { akey = EXT.valueByKey(p, 'apiKey'); } catch (e) {}
       if (acl.length){
         sys += '\n可用围栏（首行参数，体为内容）：' + acl.map(function(n){ return '```' + n; }).join('、') + '。';
       } else {
@@ -741,7 +746,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
       if (!ws) sys += '\n（当前会话没有绑定工作区，fs-list/fs-read 会失败。）';
 
       var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
-      var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, MAX_TURNS_HARD));
+      var turns = 0, max = Math.max(1, Math.min(parseInt(EXT.resolve(String(p.maxTurns || 3), p), 10) || 3, MAX_TURNS_HARD));
       var staged = [], stagedBytes = 0, intercepts = 0;
 
       function stageOne(c){
@@ -821,7 +826,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
       /* v1.17：空回复自动重试一次（免费模型常被瞬时限流，直接判死会让流水线断在中间） */
       (function ask(n){
         /* v1.17：推理型模型会把预算全花在 reasoning 上（finish=length、content=null），每次重试翻倍 */
-        return NET.chatOnce(msgs, { maxTokens: (p.maxTokens || 2400) * (n + 1), timeout: 0, temperature: 0.2 })
+        return NET.chatOnce(msgs, { maxTokens: (p.maxTokens || 2400) * (n + 1), timeout: 0, temperature: 0.2, model: amodel || undefined, baseURL: abase || undefined, apiKey: akey || undefined })
           .then(function(r){
             var c0 = String((r && r.content) || '').trim();
             if (c0 || n >= 2) return r;

@@ -41,9 +41,13 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         if ((m.tools || []).length) card.appendChild(el('pre', { text: (m.tools || []).join('\n') }));
         var probe = el('button', { class: 'btn btn-sec rn-mini', text: '探测' });
         probe.addEventListener('click', function(){
+          var miss = EXT.missing(m);
+          if (miss.length){ UI.toast('MCP 缺少配置：' + miss.join('、'), true); return; }
+          var murl = EXT.resolve(m.url, m), mheaders = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' };
+          if (m.headers && typeof m.headers === 'object') for (var hk in m.headers) if (Object.prototype.hasOwnProperty.call(m.headers, hk)) mheaders[hk] = EXT.resolve(m.headers[hk], m);
           probe.disabled = true; probe.textContent = '探测中…';
-          NET.httpJSON({ url: m.url, method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+          NET.httpJSON({ url: murl, method: 'POST',
+            headers: mheaders,
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize',
               params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'SoloChat', version: 'v1.16' } } }),
             parse: function(j){ return j; } }).then(function(j){
@@ -61,7 +65,20 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         });
         var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
         del.addEventListener('click', function(){ var a2 = arr.slice(); a2.splice(idx, 1); saveMcp(a2); renderMcp(); });
-        card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [probe, del]));
+        var macts = [probe, del];
+        var mhost = null;
+        if (EXT.schemaOf(m).length){
+          mhost = el('div', { class: 'tool-cfg-host', hidden: '' });
+          var mg = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: 'MCP 配置' }, [icon('gear')]);
+          mg.addEventListener('click', function(e){
+            e.stopPropagation();
+            var open = !!mhost.hidden; mhost.hidden = !open; mg.classList.toggle('on', open);
+            if (open) openToolSettings(m, mhost, mg);
+          });
+          macts.unshift(mg);
+        }
+        card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, macts));
+        if (mhost) card.appendChild(mhost);
         mcpBox.appendChild(card);
       });
       var form = el('div', { class: 'sub-card' });
@@ -112,15 +129,52 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     }
     function openToolSettings(it, host, btn){
       host.textContent = '';
+      var schema = (typeof EXT.schemaOf === 'function') ? EXT.schemaOf(it) : [];
       var fields = toolCfgFields(it.id);
-      host.appendChild(el('div', { class: 'hint', text: fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。' }));
-      fields.forEach(function(f){
-        var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
-        var cur = S.cfg, a = f.path.split('.');
-        for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
-        inp.value = (cur == null ? '' : cur);
-        host.appendChild(field(f.label, inp, f.hint));
-      });
+      var hint = schema.length
+        ? '这里显示扩展清单声明的配置；' + (EXT.missing(it).length ? '必填项还缺：' + EXT.missing(it).join('、') : '改完立即生效。')
+        : (fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。');
+      host.appendChild(el('div', { class: 'hint', text: hint }));
+      /* v0.4.13：清单里的 config schema 优先；旧内置工具仍走 toolCfg 映射 */
+      if (schema.length){
+        schema.forEach(function(f){
+          var v = EXT.valueOf(it, f), inp;
+          if (f.type === 'boolean'){
+            inp = el('input', { type: 'checkbox' });
+            inp.checked = !!(v === true || v === 'true' || v === 1 || v === '1');
+          } else if (f.type === 'select'){
+            inp = el('select', { class: 'f-in' });
+            (f.options || []).forEach(function(o){
+              inp.appendChild(el('option', { value: o.value, text: o.label, selected: String(o.value) === String(v) ? '' : null }));
+            });
+          } else if (f.type === 'textarea'){
+            inp = el('textarea', { class: 'f-in', rows: '3', placeholder: f.placeholder });
+            inp.value = v == null ? '' : String(v);
+          } else {
+            inp = el('input', { class: 'f-in', type: f.type === 'number' ? 'number' : (f.secret ? 'password' : (f.type === 'url' ? 'url' : 'text')), placeholder: f.placeholder });
+            if (f.type === 'number'){ if (f.min != null) inp.setAttribute('min', f.min); if (f.max != null) inp.setAttribute('max', f.max); if (f.step != null) inp.setAttribute('step', f.step); }
+            if (f.secret){
+              inp.value = '';
+              inp.placeholder = v ? '已保存（宿主保险库）' : (f.placeholder || '请输入密钥');
+              inp.autocomplete = 'new-password';
+            } else inp.value = v == null ? '' : String(v);
+          }
+          inp.addEventListener('change', function(){
+            var val = f.type === 'boolean' ? !!inp.checked : inp.value;
+            EXT.setValue(it, f, val);
+            if (f.secret && Vault.avail && val) inp.value = '', inp.placeholder = '已保存（宿主保险库）';
+          });
+          host.appendChild(field((f.required ? '* ' : '') + f.label, inp, f.hint || (f.type === 'model' ? '模型 ID，例如 deepseek-chat；会按 {{' + f.key + '}} 注入。' : '')));
+        });
+      } else {
+        fields.forEach(function(f){
+          var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
+          var cur = S.cfg, a = f.path.split('.');
+          for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
+          inp.value = (cur == null ? '' : cur);
+          host.appendChild(field(f.label, inp, f.hint));
+        });
+      }
       var close = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '收起' });
       close.addEventListener('click', function(){
         host.hidden = true;

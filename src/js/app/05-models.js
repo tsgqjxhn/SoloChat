@@ -1058,16 +1058,28 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       if (!ps.length) box.appendChild(el('div', { class: 'hint', text: '还没有提示词。点上方新建，对话输入 /名称 插入。' }));
       for (var i = 0; i < ps.length; i++){
         (function(pr, idx){
-          box.appendChild(el('div', { class: 'p-card' }, [
-            el('div', { class: 'p-name', text: '/' + pr.name }),
-            el('div', { class: 'p-text', text: pr.text }),
-            el('div', { class: 'f-actions', style: 'margin:0' }, [
-              el('button', { class: 'btn btn-sec', 'data-m': 'p-view', 'data-i': idx, text: '查看' }),
-          el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
-          el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
-              el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
-            ])
-          ]));
+          var card = el('div', { class: 'p-card' });
+          var acts = el('div', { class: 'f-actions', style: 'margin:0' }, [
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-view', 'data-i': idx, text: '查看' }),
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
+            el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
+          ]);
+          if (EXT.schemaOf(pr).length){
+            var sh = el('div', { class: 'tool-cfg-host', hidden: '' });
+            var gb = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '提示词变量' }, [icon('gear')]);
+            gb.addEventListener('click', function(e){
+              e.stopPropagation();
+              var open = !!sh.hidden; sh.hidden = !open; gb.classList.toggle('on', open);
+              if (open) openToolSettings(pr, sh, gb);
+            });
+            acts.insertBefore(gb, acts.firstChild);
+          }
+          card.appendChild(el('div', { class: 'p-name', text: '/' + pr.name }));
+          card.appendChild(el('div', { class: 'p-text', text: pr.text }));
+          card.appendChild(acts);
+          if (EXT.schemaOf(pr).length) card.appendChild(sh);
+          box.appendChild(card);
         })(ps[i], i);
       }
     }
@@ -1255,22 +1267,35 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         ]};
     });
     if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
-      else {
-        var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
-        exA.addEventListener('click', function(){
-          try { savePkg(EXT.exportOne(r.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
-        });
-        head.appendChild(exA);
-        var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-        del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
-        head.appendChild(del);
-      }
+    else {
+      var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
+      exA.addEventListener('click', function(){
+        try { savePkg(EXT.exportOne(r.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+      });
+      head.appendChild(exA);
+      var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+      del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
+      head.appendChild(del);
+    }
     head.appendChild(vA);   /* v1.29.2：展开箭头放右端 */
-      card.appendChild(head);
-      card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
-      card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
-      card.appendChild(ahost);
-      return card;
+    card.appendChild(head);
+    card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
+    card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
+    if (!builtin && EXT.schemaOf(r).length){
+      var shost = el('div', { class: 'tool-cfg-host', hidden: '' });
+      var cfgB = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '智能体配置' }, [icon('gear')]);
+      cfgB.addEventListener('click', function(e){
+        e.stopPropagation();
+        var open = !!shost.hidden;
+        shost.hidden = !open;
+        cfgB.classList.toggle('on', open);
+        if (open) openToolSettings(r, shost, cfgB);
+      });
+      head.insertBefore(cfgB, vA);
+      card.appendChild(shost);
+    }
+    card.appendChild(ahost);
+    return card;
     }
     var TOOL_POOL = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill', 'web', 'search', 'get', 'agent', 'cmd', 'python'];
     function agentComposer(){
@@ -1472,6 +1497,18 @@ function renderPkgs(){
     var card = el('div', { class: 'sub-card' });
     var nameRow = el('div', { class: 'sc-h' }, [el('span', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') })]);
     var prThis = prAll.filter(function(x){ return x.pkg === p; });
+    var pkgSchema = EXT.pkgSchema ? EXT.pkgSchema(p) : [];
+    var pkgHost = null;
+    if (pkgSchema.length){
+      pkgHost = el('div', { class: 'tool-cfg-host', hidden: '' });
+      var pg = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '扩展包配置' }, [icon('gear')]);
+      pg.addEventListener('click', function(e){
+        e.stopPropagation();
+        var open = !!pkgHost.hidden; pkgHost.hidden = !open; pg.classList.toggle('on', open);
+        if (open) openToolSettings({ kind: 'plugin', pkg: p, name: p, title: p, configSchema: pkgSchema }, pkgHost, pg);
+      });
+      nameRow.appendChild(pg);
+    }
     card.appendChild(el('div', { class: 'sub', text:
       items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); })
         .concat(prThis.map(function(x){ return '提示词·' + x.name; })).join('、') }));
@@ -1499,6 +1536,7 @@ function renderPkgs(){
     });
     nameRow.appendChild(pv);
     card.appendChild(nameRow);
+    if (pkgHost) card.appendChild(pkgHost);
     card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [ex, rm]));
     card.appendChild(phost);
     pkgsBox.appendChild(card);

@@ -1667,7 +1667,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.12';
+var APP_VER = 'v0.4.13';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1779,6 +1779,9 @@ var DEF_CFG = {
   ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, url|body, modes, on}]（v1.0.0 工具只接受声明式 http）
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   extHidden: [],                // v0.4.12：扩展页里「删除」的内置项 id（隐藏 + 停止注入；可恢复）
+  extCfg: {},                   // v0.4.13：扩展配置值 {scope:{key:value}}；secret 字段不落这里（宿主保险库）
+  extSecretKeys: [],            // v0.4.13：需要从宿主保险库读写的扩展密钥键（ext:<scope>:<key>）
+  extPackages: {},              // v0.4.13：扩展包元数据 {name:{version,configSchema}}
   sysEdits: {},                 // v1.28：系统提示词各段改写（空串也算改过）
   picks: {},                    // v0.4.0c：本轮勾选的扩展 id（'tool:fs-read' 这种，按类型分组）
   mcp: [],                      // MCP 服务器登记 [{name, url, tools:[]}]
@@ -2248,6 +2251,7 @@ var saveCfg = debounce(function(){
 
 /* F4：密钥保险库——apiKey/searchKey 由宿主 DPAPI 加密存放，localStorage 不落明文。
    宿主模式(avail)：读写走桥；浏览器模式：回退明文并提示风险。 */
+var EXT_SECRETS = {};   // v0.4.13：扩展 secret 字段的内存缓存（键 ext:<scope>:<key>），只由保险库/表单写
 var Vault = {
   avail: false,
   hydrated: false, // Issue 14: hydrate 完成前为 false，禁止 persist（避免早期空覆盖清空已存密钥）
@@ -2266,6 +2270,10 @@ var Vault = {
     (cfg.parseProfiles || []).forEach(function(p){
       var o = p.ocr || {};
       OCR_KEYS.forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k + ':' + p.id, o[k] || '')); });
+    });
+    /* v0.4.13：扩展 secret 字段（extCfg schema 里 secret:true） */
+    (cfg.extSecretKeys || []).forEach(function(k){
+      jobs.push(NET.bridge.vault('set', k, EXT_SECRETS[k] || ''));
     });
     Promise.all(jobs).catch(function(){});
   },
@@ -2303,6 +2311,10 @@ var Vault = {
       OCR_KEYS.forEach(function(k){
         jobs.push(NET.bridge.vault('get', 'ocr.' + k + ':' + p.id).then(function(v){ if (v != null) o[k] = v; }));
       });
+    });
+    /* v0.4.13：扩展 secret 字段回读（只进内存，不写 localStorage） */
+    (cfg.extSecretKeys || []).forEach(function(k){
+      jobs.push(NET.bridge.vault('get', k).then(function(v){ if (v != null) EXT_SECRETS[k] = v; }));
     });
     return Promise.all(jobs).then(function(){
       var act = null;
@@ -3452,9 +3464,9 @@ var NET = (function(){
     var cat = provEntry(S.cfg.provId || '');
     return S.cfg.authType || (cat && cat.auth) || 'bearer';
   }
-  function authHeaders(){
+  function authHeaders(keyOverride){
     var h = { 'Content-Type': 'application/json' };
-    var t = authType(), key = S.cfg.apiKey || '', proto = protocolNow();
+    var t = authType(), key = (keyOverride != null && keyOverride !== '') ? keyOverride : (S.cfg.apiKey || ''), proto = protocolNow();
     if (proto === 'anthropic-messages'){
       if (key) h['x-api-key'] = key;
       h['anthropic-version'] = S.cfg.anthropicVersion || '2023-06-01';
@@ -3472,8 +3484,8 @@ var NET = (function(){
     return h;
   }
   /* 统一端点：按协议拼 URL（chatPath / modelsPath / api-version / gemini 特殊路径） */
-  function endpoint(kind, isStream){
-    var base = normBase(S.cfg.baseURL);
+  function endpoint(kind, isStream, baseOverride, modelOverride){
+    var base = normBase(baseOverride || S.cfg.baseURL);
     if (!base) return '';
     var q = quirksNow(), proto = protocolNow();
     /* v0.4.x：Azure 没有通用 /models，别拼出 .../deployments/x/models 这种错 URL（P1-6） */
@@ -3486,7 +3498,7 @@ var NET = (function(){
         if (key) mu += (mu.indexOf('?') >= 0 ? '&' : '?') + 'key=' + encodeURIComponent(key);
         return mu;
       }
-      var m = encodeURIComponent(S.cfg.currentModel || '');
+      var m = encodeURIComponent(modelOverride || S.cfg.currentModel || '');
       var st = isStream !== false;
       var url = base + '/models/' + m + (st ? ':streamGenerateContent' : ':generateContent');
       var qs = [];
@@ -4897,14 +4909,15 @@ function fetchStream(opt){
   /* 非流式 chat 补全（查询改写用）：双通道，任何失败返回 null */
   function chatOnce(messages, opt){
     opt = opt || {};
-    if (!normBase(S.cfg.baseURL) || !S.cfg.currentModel) return Promise.resolve(null);
-    var headers = authHeaders();
-    var body = { model: S.cfg.currentModel, messages: messages, stream: false,
+    var base = opt.baseURL || S.cfg.baseURL, model = opt.model || S.cfg.currentModel;
+    if (!normBase(base) || !model) return Promise.resolve(null);
+    var headers = authHeaders(opt.apiKey);
+    var body = { model: model, messages: messages, stream: false,
       temperature: opt.temperature == null ? 0.2 : opt.temperature, max_tokens: opt.maxTokens || 160 };
     applyQuirks(body);
     /* v1.1.24：timeout=0 表示不设超时；未传才用 15s 默认 */
     var ms = (opt.timeout == null ? 15000 : opt.timeout);
-    var url = endpoint('chat', false);
+    var url = endpoint('chat', false, opt.baseURL, model);
     if (bridge.ok && S.cfg.useBridge){
       return new Promise(function(resolve){
         var id = 'q' + (++bridge.seq), acc = '', fin = false;
@@ -10775,16 +10788,28 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       if (!ps.length) box.appendChild(el('div', { class: 'hint', text: '还没有提示词。点上方新建，对话输入 /名称 插入。' }));
       for (var i = 0; i < ps.length; i++){
         (function(pr, idx){
-          box.appendChild(el('div', { class: 'p-card' }, [
-            el('div', { class: 'p-name', text: '/' + pr.name }),
-            el('div', { class: 'p-text', text: pr.text }),
-            el('div', { class: 'f-actions', style: 'margin:0' }, [
-              el('button', { class: 'btn btn-sec', 'data-m': 'p-view', 'data-i': idx, text: '查看' }),
-          el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
-          el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
-              el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
-            ])
-          ]));
+          var card = el('div', { class: 'p-card' });
+          var acts = el('div', { class: 'f-actions', style: 'margin:0' }, [
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-view', 'data-i': idx, text: '查看' }),
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-export', 'data-i': idx, text: '导出' }),
+            el('button', { class: 'btn btn-sec', 'data-m': 'p-ed-open', 'data-i': idx, text: '编辑' }),
+            el('button', { class: 'btn btn-danger', 'data-m': 'p-del', 'data-i': idx, text: '删除' })
+          ]);
+          if (EXT.schemaOf(pr).length){
+            var sh = el('div', { class: 'tool-cfg-host', hidden: '' });
+            var gb = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '提示词变量' }, [icon('gear')]);
+            gb.addEventListener('click', function(e){
+              e.stopPropagation();
+              var open = !!sh.hidden; sh.hidden = !open; gb.classList.toggle('on', open);
+              if (open) openToolSettings(pr, sh, gb);
+            });
+            acts.insertBefore(gb, acts.firstChild);
+          }
+          card.appendChild(el('div', { class: 'p-name', text: '/' + pr.name }));
+          card.appendChild(el('div', { class: 'p-text', text: pr.text }));
+          card.appendChild(acts);
+          if (EXT.schemaOf(pr).length) card.appendChild(sh);
+          box.appendChild(card);
         })(ps[i], i);
       }
     }
@@ -10972,22 +10997,35 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         ]};
     });
     if (builtin) head.appendChild(el('span', { class: 'sc-chip', text: '内置' }));
-      else {
-        var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
-        exA.addEventListener('click', function(){
-          try { savePkg(EXT.exportOne(r.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
-        });
-        head.appendChild(exA);
-        var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-        del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
-        head.appendChild(del);
-      }
+    else {
+      var exA = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
+      exA.addEventListener('click', function(){
+        try { savePkg(EXT.exportOne(r.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+      });
+      head.appendChild(exA);
+      var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
+      del.addEventListener('click', function(){ EXT.del(r.id); renderAgents(); renderModeBox(); });
+      head.appendChild(del);
+    }
     head.appendChild(vA);   /* v1.29.2：展开箭头放右端 */
-      card.appendChild(head);
-      card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
-      card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
-      card.appendChild(ahost);
-      return card;
+    card.appendChild(head);
+    card.appendChild(el('div', { class: 'sc-desc', text: r.desc || '' }));
+    card.appendChild(el('div', { class: 'sc-desc', style: 'font-size:11.5px;color:var(--muted);margin:0', text: '可用工具：' + (acl.length ? acl.join(' / ') : '无（纯推理）') }));
+    if (!builtin && EXT.schemaOf(r).length){
+      var shost = el('div', { class: 'tool-cfg-host', hidden: '' });
+      var cfgB = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '智能体配置' }, [icon('gear')]);
+      cfgB.addEventListener('click', function(e){
+        e.stopPropagation();
+        var open = !!shost.hidden;
+        shost.hidden = !open;
+        cfgB.classList.toggle('on', open);
+        if (open) openToolSettings(r, shost, cfgB);
+      });
+      head.insertBefore(cfgB, vA);
+      card.appendChild(shost);
+    }
+    card.appendChild(ahost);
+    return card;
     }
     var TOOL_POOL = ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'patch', 'skill', 'web', 'search', 'get', 'agent', 'cmd', 'python'];
     function agentComposer(){
@@ -11189,6 +11227,18 @@ function renderPkgs(){
     var card = el('div', { class: 'sub-card' });
     var nameRow = el('div', { class: 'sc-h' }, [el('span', { class: 'sc-name', text: p + (items[0].pkgVer ? '（' + items[0].pkgVer + '）' : '') })]);
     var prThis = prAll.filter(function(x){ return x.pkg === p; });
+    var pkgSchema = EXT.pkgSchema ? EXT.pkgSchema(p) : [];
+    var pkgHost = null;
+    if (pkgSchema.length){
+      pkgHost = el('div', { class: 'tool-cfg-host', hidden: '' });
+      var pg = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '扩展包配置' }, [icon('gear')]);
+      pg.addEventListener('click', function(e){
+        e.stopPropagation();
+        var open = !!pkgHost.hidden; pkgHost.hidden = !open; pg.classList.toggle('on', open);
+        if (open) openToolSettings({ kind: 'plugin', pkg: p, name: p, title: p, configSchema: pkgSchema }, pkgHost, pg);
+      });
+      nameRow.appendChild(pg);
+    }
     card.appendChild(el('div', { class: 'sub', text:
       items.map(function(x){ return (x.kind === 'skill' ? '技能·' : x.kind === 'agent' ? '智能体·' : '工具·') + (x.title || x.name); })
         .concat(prThis.map(function(x){ return '提示词·' + x.name; })).join('、') }));
@@ -11216,6 +11266,7 @@ function renderPkgs(){
     });
     nameRow.appendChild(pv);
     card.appendChild(nameRow);
+    if (pkgHost) card.appendChild(pkgHost);
     card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [ex, rm]));
     card.appendChild(phost);
     pkgsBox.appendChild(card);
@@ -11267,9 +11318,13 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         if ((m.tools || []).length) card.appendChild(el('pre', { text: (m.tools || []).join('\n') }));
         var probe = el('button', { class: 'btn btn-sec rn-mini', text: '探测' });
         probe.addEventListener('click', function(){
+          var miss = EXT.missing(m);
+          if (miss.length){ UI.toast('MCP 缺少配置：' + miss.join('、'), true); return; }
+          var murl = EXT.resolve(m.url, m), mheaders = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' };
+          if (m.headers && typeof m.headers === 'object') for (var hk in m.headers) if (Object.prototype.hasOwnProperty.call(m.headers, hk)) mheaders[hk] = EXT.resolve(m.headers[hk], m);
           probe.disabled = true; probe.textContent = '探测中…';
-          NET.httpJSON({ url: m.url, method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+          NET.httpJSON({ url: murl, method: 'POST',
+            headers: mheaders,
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize',
               params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'SoloChat', version: 'v1.16' } } }),
             parse: function(j){ return j; } }).then(function(j){
@@ -11287,7 +11342,20 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         });
         var del = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
         del.addEventListener('click', function(){ var a2 = arr.slice(); a2.splice(idx, 1); saveMcp(a2); renderMcp(); });
-        card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, [probe, del]));
+        var macts = [probe, del];
+        var mhost = null;
+        if (EXT.schemaOf(m).length){
+          mhost = el('div', { class: 'tool-cfg-host', hidden: '' });
+          var mg = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: 'MCP 配置' }, [icon('gear')]);
+          mg.addEventListener('click', function(e){
+            e.stopPropagation();
+            var open = !!mhost.hidden; mhost.hidden = !open; mg.classList.toggle('on', open);
+            if (open) openToolSettings(m, mhost, mg);
+          });
+          macts.unshift(mg);
+        }
+        card.appendChild(el('div', { class: 'f-actions', style: 'margin:0;justify-content:flex-start' }, macts));
+        if (mhost) card.appendChild(mhost);
         mcpBox.appendChild(card);
       });
       var form = el('div', { class: 'sub-card' });
@@ -11338,15 +11406,52 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     }
     function openToolSettings(it, host, btn){
       host.textContent = '';
+      var schema = (typeof EXT.schemaOf === 'function') ? EXT.schemaOf(it) : [];
       var fields = toolCfgFields(it.id);
-      host.appendChild(el('div', { class: 'hint', text: fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。' }));
-      fields.forEach(function(f){
-        var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
-        var cur = S.cfg, a = f.path.split('.');
-        for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
-        inp.value = (cur == null ? '' : cur);
-        host.appendChild(field(f.label, inp, f.hint));
-      });
+      var hint = schema.length
+        ? '这里显示扩展清单声明的配置；' + (EXT.missing(it).length ? '必填项还缺：' + EXT.missing(it).join('、') : '改完立即生效。')
+        : (fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。');
+      host.appendChild(el('div', { class: 'hint', text: hint }));
+      /* v0.4.13：清单里的 config schema 优先；旧内置工具仍走 toolCfg 映射 */
+      if (schema.length){
+        schema.forEach(function(f){
+          var v = EXT.valueOf(it, f), inp;
+          if (f.type === 'boolean'){
+            inp = el('input', { type: 'checkbox' });
+            inp.checked = !!(v === true || v === 'true' || v === 1 || v === '1');
+          } else if (f.type === 'select'){
+            inp = el('select', { class: 'f-in' });
+            (f.options || []).forEach(function(o){
+              inp.appendChild(el('option', { value: o.value, text: o.label, selected: String(o.value) === String(v) ? '' : null }));
+            });
+          } else if (f.type === 'textarea'){
+            inp = el('textarea', { class: 'f-in', rows: '3', placeholder: f.placeholder });
+            inp.value = v == null ? '' : String(v);
+          } else {
+            inp = el('input', { class: 'f-in', type: f.type === 'number' ? 'number' : (f.secret ? 'password' : (f.type === 'url' ? 'url' : 'text')), placeholder: f.placeholder });
+            if (f.type === 'number'){ if (f.min != null) inp.setAttribute('min', f.min); if (f.max != null) inp.setAttribute('max', f.max); if (f.step != null) inp.setAttribute('step', f.step); }
+            if (f.secret){
+              inp.value = '';
+              inp.placeholder = v ? '已保存（宿主保险库）' : (f.placeholder || '请输入密钥');
+              inp.autocomplete = 'new-password';
+            } else inp.value = v == null ? '' : String(v);
+          }
+          inp.addEventListener('change', function(){
+            var val = f.type === 'boolean' ? !!inp.checked : inp.value;
+            EXT.setValue(it, f, val);
+            if (f.secret && Vault.avail && val) inp.value = '', inp.placeholder = '已保存（宿主保险库）';
+          });
+          host.appendChild(field((f.required ? '* ' : '') + f.label, inp, f.hint || (f.type === 'model' ? '模型 ID，例如 deepseek-chat；会按 {{' + f.key + '}} 注入。' : '')));
+        });
+      } else {
+        fields.forEach(function(f){
+          var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
+          var cur = S.cfg, a = f.path.split('.');
+          for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
+          inp.value = (cur == null ? '' : cur);
+          host.appendChild(field(f.label, inp, f.hint));
+        });
+      }
       var close = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '收起' });
       close.addEventListener('click', function(){
         host.hidden = true;
@@ -15902,7 +16007,7 @@ function sendMessage(){
         var pr = S.cfg.prompts[p];
         arr.push({ pin: '提示词', t: pr.name, k: '', run: (function(txt){
           return function(){ $input.value = txt; autosize(); $input.focus(); };
-        })(pr.text) });
+        })(typeof EXT.resolve === 'function' ? EXT.resolve(pr.text, pr) : pr.text) });
       }
       var groups = ['连接与模型', '通用设置', '数据与维护', '快捷键', '提示词', '关于'];
       for (var g = 0; g < groups.length; g++)
@@ -18311,6 +18416,113 @@ var EXT = (function(){
   function hiddenList(){ var l = S.cfg.extHidden; return Array.isArray(l) ? l : []; }
   function isHidden(id){ return hiddenList().indexOf(id) >= 0; }
   function save(){ saveCfg(); }
+  /* v0.4.13：扩展配置 schema / 值 / 模板解析（六种形式共用） */
+  function normSchema(arr){
+    var out = [];
+    (Array.isArray(arr) ? arr : []).forEach(function(f){
+      if (!f || typeof f !== 'object') return;
+      var key = String(f.key || '').trim();
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) return;
+      var typ = String(f.type || 'text').toLowerCase();
+      if (['text','password','url','model','number','select','boolean','textarea'].indexOf(typ) < 0) typ = 'text';
+      out.push({
+        key: key, label: String(f.label || key), type: typ,
+        required: !!f.required, secret: !!(f.secret || typ === 'password'),
+        scope: f.scope === 'package' ? 'package' : 'item',
+        def: f.default != null ? f.default : (f.def != null ? f.def : ''),
+        placeholder: String(f.placeholder || ''), hint: String(f.hint || ''),
+        options: Array.isArray(f.options) ? f.options.map(function(o){
+          return (typeof o === 'string') ? { value: o, label: o } : { value: String(o && o.value != null ? o.value : ''), label: String((o && o.label) || (o && o.value) || '') };
+        }) : [],
+        min: f.min == null ? null : Number(f.min), max: f.max == null ? null : Number(f.max),
+        step: f.step == null ? null : Number(f.step)
+      });
+    });
+    return out;
+  }
+  function itemScope(it){
+    if (!it) return 'item:unknown';
+    if (it.kind === 'plugin') return 'pkg:' + String(it.pkg || it.name || '');
+    var k = it.kind || ((it.url && Array.isArray(it.tools)) ? 'mcp' : 'tool');
+    return 'item:' + String(k) + ':' + String(it.name || it.id || '');
+  }
+  function pkgScope(it){ return it && it.pkg ? ('pkg:' + String(it.pkg)) : ''; }
+  function scopeFor(it, f){ return (f.scope === 'package' && pkgScope(it)) ? pkgScope(it) : itemScope(it); }
+  function cfgStore(){ if (!S.cfg.extCfg || typeof S.cfg.extCfg !== 'object') S.cfg.extCfg = {}; return S.cfg.extCfg; }
+  function secretKey(it, f){ return 'ext:' + scopeFor(it, f) + ':' + f.key; }
+  function schemaOf(it){ return it && Array.isArray(it.configSchema) ? normSchema(it.configSchema) : []; }
+  function rememberSecretSk(it){
+    schemaOf(it).forEach(function(f){
+      if (!f.secret) return;
+      var k = secretKey(it, f), list = Array.isArray(S.cfg.extSecretKeys) ? S.cfg.extSecretKeys.slice() : [];
+      if (list.indexOf(k) < 0){ list.push(k); setCfg({ extSecretKeys: list }); }
+    });
+  }
+  function valueOf(it, f){
+    var store = cfgStore(), scopes = [];
+    scopes.push(scopeFor(it, f));
+    if (pkgScope(it) && scopes.indexOf(pkgScope(it)) < 0) scopes.push(pkgScope(it));
+    for (var i = 0; i < scopes.length; i++){
+      var bucket = store[scopes[i]] || {};
+      if (f.secret){
+        var sk = 'ext:' + scopes[i] + ':' + f.key;
+        if (EXT_SECRETS[sk] != null && EXT_SECRETS[sk] !== '') return EXT_SECRETS[sk];
+      }
+      if (bucket[f.key] != null && bucket[f.key] !== '') return bucket[f.key];
+    }
+    return f.def == null ? '' : f.def;
+  }
+  function setValue(it, f, val){
+    var store = cfgStore(), sc = scopeFor(it, f);
+    store[sc] = store[sc] || {};
+    if (f.secret && typeof Vault !== 'undefined' && Vault.avail){
+      var sk = 'ext:' + sc + ':' + f.key;
+      EXT_SECRETS[sk] = String(val == null ? '' : val);
+      store[sc][f.key] = '';
+      var list = Array.isArray(S.cfg.extSecretKeys) ? S.cfg.extSecretKeys.slice() : [];
+      if (list.indexOf(sk) < 0){ list.push(sk); setCfg({ extSecretKeys: list }); }
+      try { NET.bridge.vault('set', sk, EXT_SECRETS[sk]).catch(function(){}); } catch (e) {}
+    } else {
+      store[sc][f.key] = val;
+    }
+    setCfg({ extCfg: store });
+  }
+  function missing(it){
+    var out = [], schema = schemaOf(it);
+    for (var i = 0; i < schema.length; i++){
+      var f = schema[i];
+      if (!f.required) continue;
+      var v = valueOf(it, f);
+      if (v == null || String(v).trim() === '') out.push(f.label || f.key);
+    }
+    return out;
+  }
+  function resolve(tpl, it){
+    var s = String(tpl == null ? '' : tpl), schema = schemaOf(it);
+    if (!s || !schema.length) return s;
+    schema.forEach(function(f){
+      var re = new RegExp('\\{\\{\\s*' + f.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\}\\}', 'g');
+      s = s.replace(re, String(valueOf(it, f)));
+    });
+    return s;
+  }
+  function pkgSchema(p){
+    var meta = (S.cfg.extPackages || {})[p];
+    if (meta && Array.isArray(meta.configSchema) && meta.configSchema.length) return schemaOf({ kind: 'plugin', pkg: p, name: p, configSchema: meta.configSchema });
+    var u = userItems();
+    for (var i = 0; i < u.length; i++){
+      if (u[i].pkg === p && Array.isArray(u[i].configSchema)){
+        var only = u[i].configSchema.filter(function(f){ return f && (f.scope === 'package'); });
+        if (only.length) return schemaOf({ kind: 'plugin', pkg: p, name: p, configSchema: only });
+      }
+    }
+    return [];
+  }
+  function valueByKey(it, key){
+    var schema = schemaOf(it);
+    for (var i = 0; i < schema.length; i++) if (schema[i].key === key) return valueOf(it, schema[i]);
+    return '';
+  }
   /* B1-1：find() 返回的是 BUILTIN 原始对象（kind='tool'，没有 'builtin'），
      所以不能用 it.kind 判断内置。内置项一律先按 isKnownBuiltin 分流，
      开关只落在 cfg.extOff（会持久化），刷新后才不会丢。 */
@@ -18349,14 +18561,17 @@ var EXT = (function(){
     }
     var u = userItems().slice();
     var kk = ['skill', 'agent'].indexOf(item.kind) >= 0 ? item.kind : 'tool';
-    u.push({ id: item.name, name: item.name, kind: kk,
+    var itemObj = { id: item.name, name: item.name, kind: kk,
       title: item.title || item.name, desc: item.desc || '', code: '', body: item.body || item.prompt || '',
       url: item.url || '', method: item.method || 'GET', headers: item.headers || null, bodyTpl: item.body || '',
       tools: Array.isArray(item.tools) ? item.tools : [],
       writes: !!item.writes,
+      configSchema: normSchema(item.configSchema || item.config || []),
       maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
-      modes: item.modes || ['work'], on: item.on !== false, pkg: item.pkg || '', pkgVer: item.pkgVer || '', model: item.model || '' });
+      modes: item.modes || ['work'], on: item.on !== false, pkg: item.pkg || '', pkgVer: item.pkgVer || '', model: item.model || '' };
+    u.push(itemObj);
     setCfg({ ext: u }); save();
+    try { rememberSecretSk(itemObj); } catch (e) {}
     return item.name;
   }
   /* v0.4.1：技能 upsert（只处理用户 skill，不碰内置工具/包元数据） */
@@ -18463,6 +18678,9 @@ function parseFront(txt){
     var mm = l.match(/^([A-Za-z_-]+)\s*:\s*(.*)$/);
     if (!mm) return;
     var k = mm[1].toLowerCase(), v = mm[2].trim().replace(/^['"]|['"]$/g, '');
+    if (k === 'config'){
+      try { var cf = JSON.parse(v); if (Array.isArray(cf)){ o.m[k] = cf; return; } } catch (e) {}
+    }
     if (v === 'true') v = true; else if (v === 'false') v = false;
     else if (/^\[[\s\S]*\]$/.test(v)) v = v.slice(1, -1).split(',').map(function(s){ return s.trim().replace(/^['"]|['"]$/g, ''); }).filter(Boolean);
     o.m[k] = v;
@@ -18642,21 +18860,32 @@ function freeName(base){
   }
   return base.slice(0, 14) + '-' + Date.now().toString(36).slice(-4);
 }
-function addPromptItem(name, text, pkg, ver){
+function addPromptItem(name, text, pkg, ver, configSchema){
   var ps = (S.cfg.prompts || []).slice();
   var nm = String(name || '提示词').trim().slice(0, 40) || '提示词';
   var base = nm, i = 2;
   while (ps.some(function(x){ return x.name === nm; })){ nm = base + ' ' + i; i++; }
-  ps.push({ name: nm, text: String(text || ''), pkg: pkg || '', pkgVer: ver || '' });
+  ps.push({ name: nm, text: String(text || ''), pkg: pkg || '', pkgVer: ver || '',
+    configSchema: Array.isArray(configSchema) ? configSchema : [] });
   setCfg({ prompts: ps });
+  try { if (typeof EXT !== 'undefined' && EXT.rememberSecretSk) EXT.rememberSecretSk(ps[ps.length - 1]); } catch (e) {}
   return nm;
 }
 /* 单个条目：按 kind 落到 cfg.ext 或 cfg.prompts；失败只记录、不中断整包 */
-function importOne(j, pkg, ver, rep){
+function importOne(j, pkg, ver, rep, pkgCfg){
   return readText(j.file).then(function(txt){
     var fm = parseFront(txt), m = fm.m || {}, meta = j.meta || {};
     var kind = m.kind || j.kind || 'tool';
     var base = baseName(j.path);
+    function itemSchema(extra){
+      var a = (Array.isArray(pkgCfg) ? pkgCfg : []).map(function(f){ return Object.assign({}, f, { scope: 'package' }); });
+      var b = Array.isArray(extra) ? extra : (Array.isArray(meta.config) ? meta.config : []);
+      if (!b.length && Array.isArray(m.config)) b = m.config;
+      if (!b.length && typeof m.config === 'string'){
+        try { var z = JSON.parse(m.config); if (Array.isArray(z)) b = z; } catch (e) {}
+      }
+      return a.concat(b);
+    }
     if (kind === 'tool'){
       var obj;
       try { obj = JSON.parse(txt); } catch(e){ throw new Error('不是合法 JSON'); }
@@ -18665,7 +18894,7 @@ function importOne(j, pkg, ver, rep){
       var nm = freeName(pkgName(obj.name || base, 'tool-' + Date.now().toString(36)));
       add({ kind: 'tool', name: nm, title: obj.title || obj.name || base, desc: obj.desc || '',
         url: url, method: obj.method || 'GET', headers: obj.headers || null, body: obj.body || null,
-        modes: obj.modes || ['work'], pkg: pkg, pkgVer: ver });
+        configSchema: itemSchema(obj.config), modes: obj.modes || ['work'], pkg: pkg, pkgVer: ver });
       rep.added++;
       return;
     }
@@ -18675,7 +18904,7 @@ function importOne(j, pkg, ver, rep){
       var nm2 = freeName(pkgName(m.name || base, 'skill-' + Date.now().toString(36)));
       add({ kind: 'skill', name: nm2, title: m.title || m.name || base,
         desc: m.desc || m.description || '', body: body,
-        modes: m.modes || ['work', 'agent'], pkg: pkg, pkgVer: ver });
+        configSchema: itemSchema(), modes: m.modes || ['work', 'agent'], pkg: pkg, pkgVer: ver });
       rep.added++;
       return;
     }
@@ -18687,7 +18916,7 @@ function importOne(j, pkg, ver, rep){
       add({ kind: 'agent', name: nm3, title: m.title || m.name || base,
         desc: m.desc || m.description || ('来自 ' + pkg), body: bod, tools: tls,
         writes: tls.indexOf('fs-write') >= 0 || tls.indexOf('patch') >= 0,
-        modes: m.modes || ['work', 'agent'], model: m.model || '',
+        configSchema: itemSchema(), modes: m.modes || ['work', 'agent'], model: m.model || '',
         maxTurns: m.maxturns || m.maxTurns || 4, maxTokens: m.maxtokens || m.maxTokens || 1600,
         pkg: pkg, pkgVer: ver });
       rep.added++;
@@ -18696,7 +18925,7 @@ function importOne(j, pkg, ver, rep){
     if (kind === 'prompt'){
       var pb = String(fm.body || '').trim() || String(m.text || '').trim();
       if (!pb) throw new Error('提示词为空');
-      addPromptItem(m.name || base, pb, pkg, ver);
+      addPromptItem(m.name || base, pb, pkg, ver, itemSchema());
       rep.prompts++;
       return;
     }
@@ -18717,6 +18946,12 @@ function importGroup(root, entries, rep){
   return manP.then(function(man){
     var pkg = String((man && (man.name || man.title)) || root || '未命名扩展包').slice(0, 40);
     var ver = String((man && man.version) || '');
+    var pkgCfg = (man && Array.isArray(man.config)) ? man.config : [];
+    if (pkgCfg.length){
+      var eps = Object.assign({}, S.cfg.extPackages || {});
+      eps[pkg] = { version: ver, configSchema: pkgCfg.map(function(f){ return Object.assign({}, f, { scope: 'package' }); }) };
+      setCfg({ extPackages: eps });
+    }
     var jobs = [];
     if (man){
       var kinds = { skills: 'skill', tools: 'tool', agents: 'agent', prompts: 'prompt' };
@@ -18732,6 +18967,18 @@ function importGroup(root, entries, rep){
         if (!it || !it.file) return;
         if (!byPath[it.file]){ rep.skipped.push(pkg + '：清单里的 ' + it.file + ' 不存在'); return; }
         jobs.push({ kind: it.kind || 'skill', path: it.file, file: byPath[it.file], meta: it });
+      });
+      /* v0.4.13：MCP 服务器可直接写在清单里 */
+      (man.mcp || []).forEach(function(m){
+        if (!m || !m.url) return;
+        var arr = (S.cfg.mcp || []).slice();
+        var name = String(m.name || m.url).slice(0, 40);
+        var cfgSchema = (Array.isArray(pkgCfg) ? pkgCfg.map(function(f){ return Object.assign({}, f, { scope: 'package' }); }) : [])
+          .concat(Array.isArray(m.config) ? m.config : []);
+        arr.push({ name: name, url: String(m.url), headers: m.headers || null, tools: [],
+          last: '未探测', pkg: pkg, pkgVer: ver, configSchema: cfgSchema });
+        setCfg({ mcp: arr });
+        try { if (typeof EXT !== 'undefined' && EXT.rememberSecretSk) EXT.rememberSecretSk(arr[arr.length - 1]); } catch (e) {}
       });
     }
     /* 清单只写了部分文件（或只写名字/版本）时，剩下的按目录结构补齐 */
@@ -18763,22 +19010,29 @@ function importGroup(root, entries, rep){
     }
     if (!jobs.length){ rep.skipped.push((pkg || '扩展包') + '：没找到 skills/ tools/ agents/ prompts/ 里的文件'); return; }
     var ch = Promise.resolve(), n0 = rep.added;
-    jobs.forEach(function(j){ ch = ch.then(function(){ return importOne(j, pkg, ver, rep); }); });
+    jobs.forEach(function(j){ ch = ch.then(function(){ return importOne(j, pkg, ver, rep, pkgCfg); }); });
     return ch.then(function(){
       rep.pkgs.push({ name: pkg, version: ver, count: rep.added - n0, total: jobs.length });
     });
   });
 }
 /* 一件扩展 → 一个包：技能/工具/智能体/提示词共用 */
+function ownConfig(it){
+  return (it && Array.isArray(it.configSchema) ? it.configSchema : []).filter(function(f){ return f && f.scope !== 'package'; });
+}
 function itemEntry(it){
+  var own = ownConfig(it);
   if (it.kind === 'skill')
     return { kindKey: 'skills', rel: 'skills/' + it.name + '.md',
       text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
-        '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' };
+        '\nmodes: [' + (it.modes || []).join(', ') + ']' +
+        (own.length ? '\nconfig: ' + JSON.stringify(own) : '') +
+        '\n---\n\n' + (it.body || '') + '\n' };
   if (it.kind === 'tool'){
     var obj = { name: it.name, title: it.title, desc: it.desc, type: 'http', method: it.method || 'GET', url: it.url };
     if (it.headers) obj.headers = it.headers;
     if (it.bodyTpl) obj.body = it.bodyTpl;
+    if (own.length) obj.config = own;
     obj.modes = it.modes || ['work'];
     return { kindKey: 'tools', rel: 'tools/' + it.name + '.json', text: JSON.stringify(obj, null, 2) + '\n' };
   }
@@ -18786,16 +19040,23 @@ function itemEntry(it){
     return { kindKey: 'agents', rel: 'agents/' + it.name + '.md',
       text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
         '\ntools: [' + (it.tools || []).join(', ') + ']\nmaxTurns: ' + (it.maxTurns || 4) + '\nmaxTokens: ' + (it.maxTokens || 1600) +
+        (it.model ? '\nmodel: ' + it.model : '') +
+        (own.length ? '\nconfig: ' + JSON.stringify(own) : '') +
         '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' };
   return null;
 }
 function promptEntry(pr, idx){
   var slug = fileSafe(pr.name, 'prompt-' + (idx + 1));
+  var own = ownConfig(pr);
   return { kindKey: 'prompts', rel: 'prompts/' + slug + '.md',
-    text: '---\nname: ' + pr.name + '\n---\n\n' + (pr.text || '') + '\n' };
+    text: '---\nname: ' + pr.name + '\n' +
+      (own.length ? 'config: ' + JSON.stringify(own) + '\n' : '') +
+      '---\n\n' + (pr.text || '') + '\n' };
 }
 function packBuild(pkg, list, prlist){
   var man = { name: pkg, version: '1.0.0', desc: '由 SoloChat 导出' }, out = [], buckets = {};
+  var pm = (S.cfg.extPackages || {})[pkg];
+  if (pm && Array.isArray(pm.configSchema) && pm.configSchema.length) man.config = pm.configSchema;
   list.forEach(function(it){
     var e = itemEntry(it); if (!e) return;
     (buckets[e.kindKey] = buckets[e.kindKey] || []).push(e.rel);
@@ -18936,12 +19197,14 @@ function importFiles(list){
     var it = hasTool(name);
     if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
     if (it.url){
+      var miss = missing(it);
+      if (miss.length) return Promise.reject(new Error('「' + name + '」缺少必填配置：' + miss.join('、') + '（扩展 → 工具 → 齿轮）'));
       var method = String(it.method || 'GET').toUpperCase();
       var headers = {}, hs = it.headers || {};
-      for (var k in hs) if (Object.prototype.hasOwnProperty.call(hs, k)) headers[k] = fillTpl(hs[k], arg);
+      for (var k in hs) if (Object.prototype.hasOwnProperty.call(hs, k)) headers[k] = fillTpl(resolve(hs[k], it), arg);
       var body = null;
-      if (method !== 'GET' && method !== 'HEAD' && it.body != null) body = fillTpl(it.body, arg);
-      return NET.raw({ url: fillTpl(it.url, arg), method: method, headers: headers, body: body, timeout: 25000 })
+      if (method !== 'GET' && method !== 'HEAD' && it.body != null) body = fillTpl(resolve(it.body, it), arg);
+      return NET.raw({ url: fillTpl(resolve(it.url, it), arg), method: method, headers: headers, body: body, timeout: 25000 })
         .then(function(r){
           var txt = String((r && r.text) || '');
           if (txt.length > 4000) txt = txt.slice(0, 4000) + '\n…（截断）';
@@ -18956,7 +19219,7 @@ function importFiles(list){
     var u = userItems(), i;
     for (i = 0; i < u.length; i++)
       if (u[i].kind === 'skill' && (u[i].name === name || u[i].id === name) && u[i].on !== false)
-        return '【技能 ' + name + '】' + (u[i].desc ? '（' + u[i].desc + '）' : '') + '\n' + (u[i].body || '（空技能）');
+        return '【技能 ' + name + '】' + (u[i].desc ? '（' + u[i].desc + '）' : '') + '\n' + resolve(u[i].body || '（空技能）', u[i]);
     return '';
   }
   function skillNames(mode){ return skillsFor(mode).map(function(x){ return x.name; }); }
@@ -19101,6 +19364,7 @@ function importFiles(list){
       var x = u[i], nm = x.name || x.id;
       var k = x.kind === 'skill' ? 'skill' : (x.kind === 'agent' ? 'agent' : 'tool');
       out.push({ id: k + ':' + nm, kind: k, name: nm, title: x.title || nm, desc: x.desc || '',
+        configSchema: Array.isArray(x.configSchema) ? x.configSchema : [],
         modes: (x.modes || ['work']).slice(), builtin: false, on: x.on !== false, pkg: x.pkg || '' });
       if (x.pkg && !seen[x.pkg]){
         seen[x.pkg] = 1;
@@ -19113,13 +19377,18 @@ function importFiles(list){
       var pn = ps[i].name || ('prompt-' + (i + 1));
       out.push({ id: 'prompt:' + pn, kind: 'prompt', name: pn, title: pn, body: ps[i].text || '',
         desc: String(ps[i].text || '').replace(/\s+/g, ' ').slice(0, 50),
+        configSchema: Array.isArray(ps[i].configSchema) ? ps[i].configSchema : [],
+        pkg: ps[i].pkg || '',
         modes: ['chat', 'work', 'agent'], builtin: false, on: true });
     }
     var ms = S.cfg.mcp || [];
     for (i = 0; i < ms.length; i++){
       var mn = ms[i].name || ms[i].url || ('mcp-' + i);
       out.push({ id: 'mcp:' + mn, kind: 'mcp', name: mn, title: mn, desc: ms[i].url || '',
-        url: ms[i].url || '', modes: ['work', 'agent'], builtin: false, on: true });
+        url: ms[i].url || '', headers: ms[i].headers || null,
+        configSchema: Array.isArray(ms[i].configSchema) ? ms[i].configSchema : [],
+        pkg: ms[i].pkg || '',
+        modes: ['work', 'agent'], builtin: false, on: true });
     }
     /* 唯一 id：内置工具已用 builtin: 前缀，与用户 tool: 不冲突；这里兜底去重，避免重复条目 */
     var dedup = {}, res = [];
@@ -19157,6 +19426,7 @@ function importFiles(list){
   }
   return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.filter(function(b){ return !isHidden(b.id); }).map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
     isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, hide: hide, restoreHidden: restoreHidden, isHidden: isHidden, hiddenList: hiddenList, importPlugin: importPlugin, find: find,
+    schemaOf: schemaOf, valueOf: valueOf, valueByKey: valueByKey, setValue: setValue, resolve: resolve, missing: missing, itemScope: itemScope, pkgScope: pkgScope, pkgSchema: pkgSchema, rememberSecretSk: rememberSecretSk,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,
@@ -19213,7 +19483,7 @@ var PICK = (function(){
       if (r.agents.length) L.push('- 子智能体：' + r.agents.join('、') + '；派其它角色会被拒绝。');
     }
     for (var i = 0; i < r.prompts.length; i++)
-      L.push('- 本轮提示词「' + r.prompts[i].name + '」：\n' + String(r.prompts[i].body || '').slice(0, 1500));
+      L.push('- 本轮提示词「' + r.prompts[i].name + '」：\n' + String((typeof EXT.resolve === 'function' ? EXT.resolve(r.prompts[i].body || '', r.prompts[i]) : (r.prompts[i].body || ''))).slice(0, 1500));
     if (mode !== 'chat' && r.mcp.length) L.push('- MCP（已登记）：' + r.mcp.map(function(m){ return m.name + (m.url ? ' ' + m.url : ''); }).join('；'));
     return L.join('\n');
   }
@@ -19897,6 +20167,11 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
 
       var sysEd = (S.cfg.sysEdits || {})['sub:' + (p.id || p.name)];
     var sys = (sysEd != null && sysEd !== '') ? sysEd : (p.body || p.prompt || ('你是子智能体「' + p.name + '」。独立完成任务，只回结论。'));
+      try { sys = EXT.resolve(sys, p); } catch (e) {}
+      var amodel = '', abase = '', akey = '';
+      try { amodel = EXT.resolve(p.model || '', p); } catch (e) {}
+      try { abase = EXT.valueByKey(p, 'baseURL'); } catch (e) {}
+      try { akey = EXT.valueByKey(p, 'apiKey'); } catch (e) {}
       if (acl.length){
         sys += '\n可用围栏（首行参数，体为内容）：' + acl.map(function(n){ return '```' + n; }).join('、') + '。';
       } else {
@@ -19909,7 +20184,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
       if (!ws) sys += '\n（当前会话没有绑定工作区，fs-list/fs-read 会失败。）';
 
       var msgs = [{ role: 'system', content: sys }, { role: 'user', content: t }];
-      var turns = 0, max = Math.max(1, Math.min(p.maxTurns || 3, MAX_TURNS_HARD));
+      var turns = 0, max = Math.max(1, Math.min(parseInt(EXT.resolve(String(p.maxTurns || 3), p), 10) || 3, MAX_TURNS_HARD));
       var staged = [], stagedBytes = 0, intercepts = 0;
 
       function stageOne(c){
@@ -19989,7 +20264,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
       /* v1.17：空回复自动重试一次（免费模型常被瞬时限流，直接判死会让流水线断在中间） */
       (function ask(n){
         /* v1.17：推理型模型会把预算全花在 reasoning 上（finish=length、content=null），每次重试翻倍 */
-        return NET.chatOnce(msgs, { maxTokens: (p.maxTokens || 2400) * (n + 1), timeout: 0, temperature: 0.2 })
+        return NET.chatOnce(msgs, { maxTokens: (p.maxTokens || 2400) * (n + 1), timeout: 0, temperature: 0.2, model: amodel || undefined, baseURL: abase || undefined, apiKey: akey || undefined })
           .then(function(r){
             var c0 = String((r && r.content) || '').trim();
             if (c0 || n >= 2) return r;

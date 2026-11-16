@@ -2630,7 +2630,7 @@ function sendMessage(){
         var pr = S.cfg.prompts[p];
         arr.push({ pin: '提示词', t: pr.name, k: '', run: (function(txt){
           return function(){ $input.value = txt; autosize(); $input.focus(); };
-        })(pr.text) });
+        })(typeof EXT.resolve === 'function' ? EXT.resolve(pr.text, pr) : pr.text) });
       }
       var groups = ['连接与模型', '通用设置', '数据与维护', '快捷键', '提示词', '关于'];
       for (var g = 0; g < groups.length; g++)

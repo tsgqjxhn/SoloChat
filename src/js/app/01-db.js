@@ -46,7 +46,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.12';
+var APP_VER = 'v0.4.13';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -158,6 +158,9 @@ var DEF_CFG = {
   ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, url|body, modes, on}]（v1.0.0 工具只接受声明式 http）
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
   extHidden: [],                // v0.4.12：扩展页里「删除」的内置项 id（隐藏 + 停止注入；可恢复）
+  extCfg: {},                   // v0.4.13：扩展配置值 {scope:{key:value}}；secret 字段不落这里（宿主保险库）
+  extSecretKeys: [],            // v0.4.13：需要从宿主保险库读写的扩展密钥键（ext:<scope>:<key>）
+  extPackages: {},              // v0.4.13：扩展包元数据 {name:{version,configSchema}}
   sysEdits: {},                 // v1.28：系统提示词各段改写（空串也算改过）
   picks: {},                    // v0.4.0c：本轮勾选的扩展 id（'tool:fs-read' 这种，按类型分组）
   mcp: [],                      // MCP 服务器登记 [{name, url, tools:[]}]
@@ -627,6 +630,7 @@ var saveCfg = debounce(function(){
 
 /* F4：密钥保险库——apiKey/searchKey 由宿主 DPAPI 加密存放，localStorage 不落明文。
    宿主模式(avail)：读写走桥；浏览器模式：回退明文并提示风险。 */
+var EXT_SECRETS = {};   // v0.4.13：扩展 secret 字段的内存缓存（键 ext:<scope>:<key>），只由保险库/表单写
 var Vault = {
   avail: false,
   hydrated: false, // Issue 14: hydrate 完成前为 false，禁止 persist（避免早期空覆盖清空已存密钥）
@@ -645,6 +649,10 @@ var Vault = {
     (cfg.parseProfiles || []).forEach(function(p){
       var o = p.ocr || {};
       OCR_KEYS.forEach(function(k){ jobs.push(NET.bridge.vault('set', 'ocr.' + k + ':' + p.id, o[k] || '')); });
+    });
+    /* v0.4.13：扩展 secret 字段（extCfg schema 里 secret:true） */
+    (cfg.extSecretKeys || []).forEach(function(k){
+      jobs.push(NET.bridge.vault('set', k, EXT_SECRETS[k] || ''));
     });
     Promise.all(jobs).catch(function(){});
   },
@@ -682,6 +690,10 @@ var Vault = {
       OCR_KEYS.forEach(function(k){
         jobs.push(NET.bridge.vault('get', 'ocr.' + k + ':' + p.id).then(function(v){ if (v != null) o[k] = v; }));
       });
+    });
+    /* v0.4.13：扩展 secret 字段回读（只进内存，不写 localStorage） */
+    (cfg.extSecretKeys || []).forEach(function(k){
+      jobs.push(NET.bridge.vault('get', k).then(function(v){ if (v != null) EXT_SECRETS[k] = v; }));
     });
     return Promise.all(jobs).then(function(){
       var act = null;
@@ -1831,9 +1843,9 @@ var NET = (function(){
     var cat = provEntry(S.cfg.provId || '');
     return S.cfg.authType || (cat && cat.auth) || 'bearer';
   }
-  function authHeaders(){
+  function authHeaders(keyOverride){
     var h = { 'Content-Type': 'application/json' };
-    var t = authType(), key = S.cfg.apiKey || '', proto = protocolNow();
+    var t = authType(), key = (keyOverride != null && keyOverride !== '') ? keyOverride : (S.cfg.apiKey || ''), proto = protocolNow();
     if (proto === 'anthropic-messages'){
       if (key) h['x-api-key'] = key;
       h['anthropic-version'] = S.cfg.anthropicVersion || '2023-06-01';
@@ -1851,8 +1863,8 @@ var NET = (function(){
     return h;
   }
   /* 统一端点：按协议拼 URL（chatPath / modelsPath / api-version / gemini 特殊路径） */
-  function endpoint(kind, isStream){
-    var base = normBase(S.cfg.baseURL);
+  function endpoint(kind, isStream, baseOverride, modelOverride){
+    var base = normBase(baseOverride || S.cfg.baseURL);
     if (!base) return '';
     var q = quirksNow(), proto = protocolNow();
     /* v0.4.x：Azure 没有通用 /models，别拼出 .../deployments/x/models 这种错 URL（P1-6） */
@@ -1865,7 +1877,7 @@ var NET = (function(){
         if (key) mu += (mu.indexOf('?') >= 0 ? '&' : '?') + 'key=' + encodeURIComponent(key);
         return mu;
       }
-      var m = encodeURIComponent(S.cfg.currentModel || '');
+      var m = encodeURIComponent(modelOverride || S.cfg.currentModel || '');
       var st = isStream !== false;
       var url = base + '/models/' + m + (st ? ':streamGenerateContent' : ':generateContent');
       var qs = [];

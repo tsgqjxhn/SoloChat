@@ -656,6 +656,113 @@ var EXT = (function(){
   function hiddenList(){ var l = S.cfg.extHidden; return Array.isArray(l) ? l : []; }
   function isHidden(id){ return hiddenList().indexOf(id) >= 0; }
   function save(){ saveCfg(); }
+  /* v0.4.13：扩展配置 schema / 值 / 模板解析（六种形式共用） */
+  function normSchema(arr){
+    var out = [];
+    (Array.isArray(arr) ? arr : []).forEach(function(f){
+      if (!f || typeof f !== 'object') return;
+      var key = String(f.key || '').trim();
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) return;
+      var typ = String(f.type || 'text').toLowerCase();
+      if (['text','password','url','model','number','select','boolean','textarea'].indexOf(typ) < 0) typ = 'text';
+      out.push({
+        key: key, label: String(f.label || key), type: typ,
+        required: !!f.required, secret: !!(f.secret || typ === 'password'),
+        scope: f.scope === 'package' ? 'package' : 'item',
+        def: f.default != null ? f.default : (f.def != null ? f.def : ''),
+        placeholder: String(f.placeholder || ''), hint: String(f.hint || ''),
+        options: Array.isArray(f.options) ? f.options.map(function(o){
+          return (typeof o === 'string') ? { value: o, label: o } : { value: String(o && o.value != null ? o.value : ''), label: String((o && o.label) || (o && o.value) || '') };
+        }) : [],
+        min: f.min == null ? null : Number(f.min), max: f.max == null ? null : Number(f.max),
+        step: f.step == null ? null : Number(f.step)
+      });
+    });
+    return out;
+  }
+  function itemScope(it){
+    if (!it) return 'item:unknown';
+    if (it.kind === 'plugin') return 'pkg:' + String(it.pkg || it.name || '');
+    var k = it.kind || ((it.url && Array.isArray(it.tools)) ? 'mcp' : 'tool');
+    return 'item:' + String(k) + ':' + String(it.name || it.id || '');
+  }
+  function pkgScope(it){ return it && it.pkg ? ('pkg:' + String(it.pkg)) : ''; }
+  function scopeFor(it, f){ return (f.scope === 'package' && pkgScope(it)) ? pkgScope(it) : itemScope(it); }
+  function cfgStore(){ if (!S.cfg.extCfg || typeof S.cfg.extCfg !== 'object') S.cfg.extCfg = {}; return S.cfg.extCfg; }
+  function secretKey(it, f){ return 'ext:' + scopeFor(it, f) + ':' + f.key; }
+  function schemaOf(it){ return it && Array.isArray(it.configSchema) ? normSchema(it.configSchema) : []; }
+  function rememberSecretSk(it){
+    schemaOf(it).forEach(function(f){
+      if (!f.secret) return;
+      var k = secretKey(it, f), list = Array.isArray(S.cfg.extSecretKeys) ? S.cfg.extSecretKeys.slice() : [];
+      if (list.indexOf(k) < 0){ list.push(k); setCfg({ extSecretKeys: list }); }
+    });
+  }
+  function valueOf(it, f){
+    var store = cfgStore(), scopes = [];
+    scopes.push(scopeFor(it, f));
+    if (pkgScope(it) && scopes.indexOf(pkgScope(it)) < 0) scopes.push(pkgScope(it));
+    for (var i = 0; i < scopes.length; i++){
+      var bucket = store[scopes[i]] || {};
+      if (f.secret){
+        var sk = 'ext:' + scopes[i] + ':' + f.key;
+        if (EXT_SECRETS[sk] != null && EXT_SECRETS[sk] !== '') return EXT_SECRETS[sk];
+      }
+      if (bucket[f.key] != null && bucket[f.key] !== '') return bucket[f.key];
+    }
+    return f.def == null ? '' : f.def;
+  }
+  function setValue(it, f, val){
+    var store = cfgStore(), sc = scopeFor(it, f);
+    store[sc] = store[sc] || {};
+    if (f.secret && typeof Vault !== 'undefined' && Vault.avail){
+      var sk = 'ext:' + sc + ':' + f.key;
+      EXT_SECRETS[sk] = String(val == null ? '' : val);
+      store[sc][f.key] = '';
+      var list = Array.isArray(S.cfg.extSecretKeys) ? S.cfg.extSecretKeys.slice() : [];
+      if (list.indexOf(sk) < 0){ list.push(sk); setCfg({ extSecretKeys: list }); }
+      try { NET.bridge.vault('set', sk, EXT_SECRETS[sk]).catch(function(){}); } catch (e) {}
+    } else {
+      store[sc][f.key] = val;
+    }
+    setCfg({ extCfg: store });
+  }
+  function missing(it){
+    var out = [], schema = schemaOf(it);
+    for (var i = 0; i < schema.length; i++){
+      var f = schema[i];
+      if (!f.required) continue;
+      var v = valueOf(it, f);
+      if (v == null || String(v).trim() === '') out.push(f.label || f.key);
+    }
+    return out;
+  }
+  function resolve(tpl, it){
+    var s = String(tpl == null ? '' : tpl), schema = schemaOf(it);
+    if (!s || !schema.length) return s;
+    schema.forEach(function(f){
+      var re = new RegExp('\\{\\{\\s*' + f.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\}\\}', 'g');
+      s = s.replace(re, String(valueOf(it, f)));
+    });
+    return s;
+  }
+  function pkgSchema(p){
+    var meta = (S.cfg.extPackages || {})[p];
+    if (meta && Array.isArray(meta.configSchema) && meta.configSchema.length) return schemaOf({ kind: 'plugin', pkg: p, name: p, configSchema: meta.configSchema });
+    var u = userItems();
+    for (var i = 0; i < u.length; i++){
+      if (u[i].pkg === p && Array.isArray(u[i].configSchema)){
+        var only = u[i].configSchema.filter(function(f){ return f && (f.scope === 'package'); });
+        if (only.length) return schemaOf({ kind: 'plugin', pkg: p, name: p, configSchema: only });
+      }
+    }
+    return [];
+  }
+  function valueByKey(it, key){
+    var schema = schemaOf(it);
+    for (var i = 0; i < schema.length; i++) if (schema[i].key === key) return valueOf(it, schema[i]);
+    return '';
+  }
   /* B1-1：find() 返回的是 BUILTIN 原始对象（kind='tool'，没有 'builtin'），
      所以不能用 it.kind 判断内置。内置项一律先按 isKnownBuiltin 分流，
      开关只落在 cfg.extOff（会持久化），刷新后才不会丢。 */
@@ -694,14 +801,17 @@ var EXT = (function(){
     }
     var u = userItems().slice();
     var kk = ['skill', 'agent'].indexOf(item.kind) >= 0 ? item.kind : 'tool';
-    u.push({ id: item.name, name: item.name, kind: kk,
+    var itemObj = { id: item.name, name: item.name, kind: kk,
       title: item.title || item.name, desc: item.desc || '', code: '', body: item.body || item.prompt || '',
       url: item.url || '', method: item.method || 'GET', headers: item.headers || null, bodyTpl: item.body || '',
       tools: Array.isArray(item.tools) ? item.tools : [],
       writes: !!item.writes,
+      configSchema: normSchema(item.configSchema || item.config || []),
       maxTurns: item.maxTurns || 3, maxTokens: item.maxTokens || 1200, timeout: item.timeout || 120000,
-      modes: item.modes || ['work'], on: item.on !== false, pkg: item.pkg || '', pkgVer: item.pkgVer || '', model: item.model || '' });
+      modes: item.modes || ['work'], on: item.on !== false, pkg: item.pkg || '', pkgVer: item.pkgVer || '', model: item.model || '' };
+    u.push(itemObj);
     setCfg({ ext: u }); save();
+    try { rememberSecretSk(itemObj); } catch (e) {}
     return item.name;
   }
   /* v0.4.1：技能 upsert（只处理用户 skill，不碰内置工具/包元数据） */
@@ -808,6 +918,9 @@ function parseFront(txt){
     var mm = l.match(/^([A-Za-z_-]+)\s*:\s*(.*)$/);
     if (!mm) return;
     var k = mm[1].toLowerCase(), v = mm[2].trim().replace(/^['"]|['"]$/g, '');
+    if (k === 'config'){
+      try { var cf = JSON.parse(v); if (Array.isArray(cf)){ o.m[k] = cf; return; } } catch (e) {}
+    }
     if (v === 'true') v = true; else if (v === 'false') v = false;
     else if (/^\[[\s\S]*\]$/.test(v)) v = v.slice(1, -1).split(',').map(function(s){ return s.trim().replace(/^['"]|['"]$/g, ''); }).filter(Boolean);
     o.m[k] = v;
@@ -987,21 +1100,32 @@ function freeName(base){
   }
   return base.slice(0, 14) + '-' + Date.now().toString(36).slice(-4);
 }
-function addPromptItem(name, text, pkg, ver){
+function addPromptItem(name, text, pkg, ver, configSchema){
   var ps = (S.cfg.prompts || []).slice();
   var nm = String(name || '提示词').trim().slice(0, 40) || '提示词';
   var base = nm, i = 2;
   while (ps.some(function(x){ return x.name === nm; })){ nm = base + ' ' + i; i++; }
-  ps.push({ name: nm, text: String(text || ''), pkg: pkg || '', pkgVer: ver || '' });
+  ps.push({ name: nm, text: String(text || ''), pkg: pkg || '', pkgVer: ver || '',
+    configSchema: Array.isArray(configSchema) ? configSchema : [] });
   setCfg({ prompts: ps });
+  try { if (typeof EXT !== 'undefined' && EXT.rememberSecretSk) EXT.rememberSecretSk(ps[ps.length - 1]); } catch (e) {}
   return nm;
 }
 /* 单个条目：按 kind 落到 cfg.ext 或 cfg.prompts；失败只记录、不中断整包 */
-function importOne(j, pkg, ver, rep){
+function importOne(j, pkg, ver, rep, pkgCfg){
   return readText(j.file).then(function(txt){
     var fm = parseFront(txt), m = fm.m || {}, meta = j.meta || {};
     var kind = m.kind || j.kind || 'tool';
     var base = baseName(j.path);
+    function itemSchema(extra){
+      var a = (Array.isArray(pkgCfg) ? pkgCfg : []).map(function(f){ return Object.assign({}, f, { scope: 'package' }); });
+      var b = Array.isArray(extra) ? extra : (Array.isArray(meta.config) ? meta.config : []);
+      if (!b.length && Array.isArray(m.config)) b = m.config;
+      if (!b.length && typeof m.config === 'string'){
+        try { var z = JSON.parse(m.config); if (Array.isArray(z)) b = z; } catch (e) {}
+      }
+      return a.concat(b);
+    }
     if (kind === 'tool'){
       var obj;
       try { obj = JSON.parse(txt); } catch(e){ throw new Error('不是合法 JSON'); }
@@ -1010,7 +1134,7 @@ function importOne(j, pkg, ver, rep){
       var nm = freeName(pkgName(obj.name || base, 'tool-' + Date.now().toString(36)));
       add({ kind: 'tool', name: nm, title: obj.title || obj.name || base, desc: obj.desc || '',
         url: url, method: obj.method || 'GET', headers: obj.headers || null, body: obj.body || null,
-        modes: obj.modes || ['work'], pkg: pkg, pkgVer: ver });
+        configSchema: itemSchema(obj.config), modes: obj.modes || ['work'], pkg: pkg, pkgVer: ver });
       rep.added++;
       return;
     }
@@ -1020,7 +1144,7 @@ function importOne(j, pkg, ver, rep){
       var nm2 = freeName(pkgName(m.name || base, 'skill-' + Date.now().toString(36)));
       add({ kind: 'skill', name: nm2, title: m.title || m.name || base,
         desc: m.desc || m.description || '', body: body,
-        modes: m.modes || ['work', 'agent'], pkg: pkg, pkgVer: ver });
+        configSchema: itemSchema(), modes: m.modes || ['work', 'agent'], pkg: pkg, pkgVer: ver });
       rep.added++;
       return;
     }
@@ -1032,7 +1156,7 @@ function importOne(j, pkg, ver, rep){
       add({ kind: 'agent', name: nm3, title: m.title || m.name || base,
         desc: m.desc || m.description || ('来自 ' + pkg), body: bod, tools: tls,
         writes: tls.indexOf('fs-write') >= 0 || tls.indexOf('patch') >= 0,
-        modes: m.modes || ['work', 'agent'], model: m.model || '',
+        configSchema: itemSchema(), modes: m.modes || ['work', 'agent'], model: m.model || '',
         maxTurns: m.maxturns || m.maxTurns || 4, maxTokens: m.maxtokens || m.maxTokens || 1600,
         pkg: pkg, pkgVer: ver });
       rep.added++;
@@ -1041,7 +1165,7 @@ function importOne(j, pkg, ver, rep){
     if (kind === 'prompt'){
       var pb = String(fm.body || '').trim() || String(m.text || '').trim();
       if (!pb) throw new Error('提示词为空');
-      addPromptItem(m.name || base, pb, pkg, ver);
+      addPromptItem(m.name || base, pb, pkg, ver, itemSchema());
       rep.prompts++;
       return;
     }
@@ -1062,6 +1186,12 @@ function importGroup(root, entries, rep){
   return manP.then(function(man){
     var pkg = String((man && (man.name || man.title)) || root || '未命名扩展包').slice(0, 40);
     var ver = String((man && man.version) || '');
+    var pkgCfg = (man && Array.isArray(man.config)) ? man.config : [];
+    if (pkgCfg.length){
+      var eps = Object.assign({}, S.cfg.extPackages || {});
+      eps[pkg] = { version: ver, configSchema: pkgCfg.map(function(f){ return Object.assign({}, f, { scope: 'package' }); }) };
+      setCfg({ extPackages: eps });
+    }
     var jobs = [];
     if (man){
       var kinds = { skills: 'skill', tools: 'tool', agents: 'agent', prompts: 'prompt' };
@@ -1077,6 +1207,18 @@ function importGroup(root, entries, rep){
         if (!it || !it.file) return;
         if (!byPath[it.file]){ rep.skipped.push(pkg + '：清单里的 ' + it.file + ' 不存在'); return; }
         jobs.push({ kind: it.kind || 'skill', path: it.file, file: byPath[it.file], meta: it });
+      });
+      /* v0.4.13：MCP 服务器可直接写在清单里 */
+      (man.mcp || []).forEach(function(m){
+        if (!m || !m.url) return;
+        var arr = (S.cfg.mcp || []).slice();
+        var name = String(m.name || m.url).slice(0, 40);
+        var cfgSchema = (Array.isArray(pkgCfg) ? pkgCfg.map(function(f){ return Object.assign({}, f, { scope: 'package' }); }) : [])
+          .concat(Array.isArray(m.config) ? m.config : []);
+        arr.push({ name: name, url: String(m.url), headers: m.headers || null, tools: [],
+          last: '未探测', pkg: pkg, pkgVer: ver, configSchema: cfgSchema });
+        setCfg({ mcp: arr });
+        try { if (typeof EXT !== 'undefined' && EXT.rememberSecretSk) EXT.rememberSecretSk(arr[arr.length - 1]); } catch (e) {}
       });
     }
     /* 清单只写了部分文件（或只写名字/版本）时，剩下的按目录结构补齐 */
@@ -1108,22 +1250,29 @@ function importGroup(root, entries, rep){
     }
     if (!jobs.length){ rep.skipped.push((pkg || '扩展包') + '：没找到 skills/ tools/ agents/ prompts/ 里的文件'); return; }
     var ch = Promise.resolve(), n0 = rep.added;
-    jobs.forEach(function(j){ ch = ch.then(function(){ return importOne(j, pkg, ver, rep); }); });
+    jobs.forEach(function(j){ ch = ch.then(function(){ return importOne(j, pkg, ver, rep, pkgCfg); }); });
     return ch.then(function(){
       rep.pkgs.push({ name: pkg, version: ver, count: rep.added - n0, total: jobs.length });
     });
   });
 }
 /* 一件扩展 → 一个包：技能/工具/智能体/提示词共用 */
+function ownConfig(it){
+  return (it && Array.isArray(it.configSchema) ? it.configSchema : []).filter(function(f){ return f && f.scope !== 'package'; });
+}
 function itemEntry(it){
+  var own = ownConfig(it);
   if (it.kind === 'skill')
     return { kindKey: 'skills', rel: 'skills/' + it.name + '.md',
       text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
-        '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' };
+        '\nmodes: [' + (it.modes || []).join(', ') + ']' +
+        (own.length ? '\nconfig: ' + JSON.stringify(own) : '') +
+        '\n---\n\n' + (it.body || '') + '\n' };
   if (it.kind === 'tool'){
     var obj = { name: it.name, title: it.title, desc: it.desc, type: 'http', method: it.method || 'GET', url: it.url };
     if (it.headers) obj.headers = it.headers;
     if (it.bodyTpl) obj.body = it.bodyTpl;
+    if (own.length) obj.config = own;
     obj.modes = it.modes || ['work'];
     return { kindKey: 'tools', rel: 'tools/' + it.name + '.json', text: JSON.stringify(obj, null, 2) + '\n' };
   }
@@ -1131,16 +1280,23 @@ function itemEntry(it){
     return { kindKey: 'agents', rel: 'agents/' + it.name + '.md',
       text: '---\nname: ' + it.name + '\ntitle: ' + (it.title || it.name) + '\ndesc: ' + (it.desc || '') +
         '\ntools: [' + (it.tools || []).join(', ') + ']\nmaxTurns: ' + (it.maxTurns || 4) + '\nmaxTokens: ' + (it.maxTokens || 1600) +
+        (it.model ? '\nmodel: ' + it.model : '') +
+        (own.length ? '\nconfig: ' + JSON.stringify(own) : '') +
         '\nmodes: [' + (it.modes || []).join(', ') + ']\n---\n\n' + (it.body || '') + '\n' };
   return null;
 }
 function promptEntry(pr, idx){
   var slug = fileSafe(pr.name, 'prompt-' + (idx + 1));
+  var own = ownConfig(pr);
   return { kindKey: 'prompts', rel: 'prompts/' + slug + '.md',
-    text: '---\nname: ' + pr.name + '\n---\n\n' + (pr.text || '') + '\n' };
+    text: '---\nname: ' + pr.name + '\n' +
+      (own.length ? 'config: ' + JSON.stringify(own) + '\n' : '') +
+      '---\n\n' + (pr.text || '') + '\n' };
 }
 function packBuild(pkg, list, prlist){
   var man = { name: pkg, version: '1.0.0', desc: '由 SoloChat 导出' }, out = [], buckets = {};
+  var pm = (S.cfg.extPackages || {})[pkg];
+  if (pm && Array.isArray(pm.configSchema) && pm.configSchema.length) man.config = pm.configSchema;
   list.forEach(function(it){
     var e = itemEntry(it); if (!e) return;
     (buckets[e.kindKey] = buckets[e.kindKey] || []).push(e.rel);
@@ -1281,12 +1437,14 @@ function importFiles(list){
     var it = hasTool(name);
     if (!it) return Promise.reject(new Error('没有这个扩展工具：' + name));
     if (it.url){
+      var miss = missing(it);
+      if (miss.length) return Promise.reject(new Error('「' + name + '」缺少必填配置：' + miss.join('、') + '（扩展 → 工具 → 齿轮）'));
       var method = String(it.method || 'GET').toUpperCase();
       var headers = {}, hs = it.headers || {};
-      for (var k in hs) if (Object.prototype.hasOwnProperty.call(hs, k)) headers[k] = fillTpl(hs[k], arg);
+      for (var k in hs) if (Object.prototype.hasOwnProperty.call(hs, k)) headers[k] = fillTpl(resolve(hs[k], it), arg);
       var body = null;
-      if (method !== 'GET' && method !== 'HEAD' && it.body != null) body = fillTpl(it.body, arg);
-      return NET.raw({ url: fillTpl(it.url, arg), method: method, headers: headers, body: body, timeout: 25000 })
+      if (method !== 'GET' && method !== 'HEAD' && it.body != null) body = fillTpl(resolve(it.body, it), arg);
+      return NET.raw({ url: fillTpl(resolve(it.url, it), arg), method: method, headers: headers, body: body, timeout: 25000 })
         .then(function(r){
           var txt = String((r && r.text) || '');
           if (txt.length > 4000) txt = txt.slice(0, 4000) + '\n…（截断）';
@@ -1301,7 +1459,7 @@ function importFiles(list){
     var u = userItems(), i;
     for (i = 0; i < u.length; i++)
       if (u[i].kind === 'skill' && (u[i].name === name || u[i].id === name) && u[i].on !== false)
-        return '【技能 ' + name + '】' + (u[i].desc ? '（' + u[i].desc + '）' : '') + '\n' + (u[i].body || '（空技能）');
+        return '【技能 ' + name + '】' + (u[i].desc ? '（' + u[i].desc + '）' : '') + '\n' + resolve(u[i].body || '（空技能）', u[i]);
     return '';
   }
   function skillNames(mode){ return skillsFor(mode).map(function(x){ return x.name; }); }
@@ -1446,6 +1604,7 @@ function importFiles(list){
       var x = u[i], nm = x.name || x.id;
       var k = x.kind === 'skill' ? 'skill' : (x.kind === 'agent' ? 'agent' : 'tool');
       out.push({ id: k + ':' + nm, kind: k, name: nm, title: x.title || nm, desc: x.desc || '',
+        configSchema: Array.isArray(x.configSchema) ? x.configSchema : [],
         modes: (x.modes || ['work']).slice(), builtin: false, on: x.on !== false, pkg: x.pkg || '' });
       if (x.pkg && !seen[x.pkg]){
         seen[x.pkg] = 1;
@@ -1458,13 +1617,18 @@ function importFiles(list){
       var pn = ps[i].name || ('prompt-' + (i + 1));
       out.push({ id: 'prompt:' + pn, kind: 'prompt', name: pn, title: pn, body: ps[i].text || '',
         desc: String(ps[i].text || '').replace(/\s+/g, ' ').slice(0, 50),
+        configSchema: Array.isArray(ps[i].configSchema) ? ps[i].configSchema : [],
+        pkg: ps[i].pkg || '',
         modes: ['chat', 'work', 'agent'], builtin: false, on: true });
     }
     var ms = S.cfg.mcp || [];
     for (i = 0; i < ms.length; i++){
       var mn = ms[i].name || ms[i].url || ('mcp-' + i);
       out.push({ id: 'mcp:' + mn, kind: 'mcp', name: mn, title: mn, desc: ms[i].url || '',
-        url: ms[i].url || '', modes: ['work', 'agent'], builtin: false, on: true });
+        url: ms[i].url || '', headers: ms[i].headers || null,
+        configSchema: Array.isArray(ms[i].configSchema) ? ms[i].configSchema : [],
+        pkg: ms[i].pkg || '',
+        modes: ['work', 'agent'], builtin: false, on: true });
     }
     /* 唯一 id：内置工具已用 builtin: 前缀，与用户 tool: 不冲突；这里兜底去重，避免重复条目 */
     var dedup = {}, res = [];
@@ -1502,6 +1666,7 @@ function importFiles(list){
   }
   return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.filter(function(b){ return !isHidden(b.id); }).map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
     isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, hide: hide, restoreHidden: restoreHidden, isHidden: isHidden, hiddenList: hiddenList, importPlugin: importPlugin, find: find,
+    schemaOf: schemaOf, valueOf: valueOf, valueByKey: valueByKey, setValue: setValue, resolve: resolve, missing: missing, itemScope: itemScope, pkgScope: pkgScope, pkgSchema: pkgSchema, rememberSecretSk: rememberSecretSk,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,
