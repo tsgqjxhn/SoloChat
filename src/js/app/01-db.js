@@ -29,7 +29,12 @@ var LIMITS = {
   WORK_WEB_CHARS: 64 * 1024,    // Work：单次网页抓取 / vfs-read 回灌上限（v1.1.24 放宽）
   VFS_FILE_MAX: 1024 * 1024,    // VFS：单文件上限 1MB
   VFS_TOTAL_MAX: 200 * 1024 * 1024, // VFS：单会话总量上限 200MB（v0.4.7：原 20MB 对长篇小说/批量章节不够）
-  VFS_FILES_MAX: 5000           // VFS：单会话文件数上限（v0.4.7：原 200 会卡住批量章节）
+  VFS_FILES_MAX: 5000,          // VFS：单会话文件数上限（v0.4.7：原 200 会卡住批量章节）
+  CRAWL_MAX_PAGES: 2000,        // 单次 crawl 页数硬上限（工具设置可改）
+  BROWSER_READ_CHARS: 12000,    // browser-read 正文回灌上限
+  GREP_MAX: 200,                // grep 最大命中数（--max 可覆盖，不能超过此值）
+  SUB_STAGE_FILES: 6,           // 子智能体暂存文件数上限
+  SUB_STAGE_BYTES: 300000       // 子智能体暂存总字节上限
 };
 /* v2.3：媒体语法提示（每次请求附注）。回答里可直接内嵌 https 图片/视频直链。 */
 /* v1.29.3：反问协议 —— 该问就问，别猜着做 */
@@ -41,7 +46,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.7';
+var APP_VER = 'v0.4.8';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -230,9 +235,64 @@ var DEF_CFG = {
   modePin: '',                  // 手动选过模式后钉住，不再被自动路由改
   migSess: 0,                   // 一次性迁移标记（旧会话参数）
   lastPkgDir: '',               // 上次扩展包导出目录
-  pkgWhere: 'desktop'           // 扩展包导出位置：desktop | downloads
+  pkgWhere: 'desktop',          // 扩展包导出位置：desktop | downloads
+  /* v0.4.8：模式 / 工具参数（新增字段必须登记，否则 loadCfg 白名单会丢） */
+  modeCfg: {
+    chat:  { ctxMsgs: 20, ctxCharsKB: 32 },
+    work:  { ctxMsgs: 20, ctxCharsKB: 32, vfsFiles: 5000, vfsTotalMB: 200, vfsFileMB: 1, maxTurns: 0 },
+    agent: { ctxMsgs: 20, ctxCharsKB: 32, maxTurns: 0 },
+    soul:  { ctxMsgs: 20, ctxCharsKB: 32, maxTurns: 0 }
+  },
+  toolCfg: {
+    crawl:   { maxPages: 2000 },
+    web:     { maxCharsKB: 64 },
+    read:    { maxCharsKB: 64 },
+    write:   { maxKB: 256 },
+    browser: { readChars: 12000 },
+    shell:   { outLines: 500, outCharsKB: 64, resultKB: 64, timeoutSec: 0 },
+    grep:    { maxHits: 200 },
+    sub:     { stageFiles: 6, stageKB: 300, maxTurns: 3 }
+  }
 };
 var DEF_PARAMS = { temperature: 0.7, maxTokens: 0 };
+/* v0.4.8：把「模式设置 / 工具设置」映射到运行时 LIMITS。
+   嵌套路径字段由设置页直接写 cfg，改完调用本函数；切换模式也重算上下文/轮次。 */
+function limitNum(v, d, lo, hi){
+  var n = parseFloat(v);
+  if (!isFinite(n)) n = d;
+  return Math.max(lo, Math.min(hi, n));
+}
+function applyLimitCfg(mode){
+  if (typeof S === 'undefined' || !S || !S.cfg) return;
+  var c = S.cfg, mc = c.modeCfg || {}, tc = c.toolCfg || {};
+  var w = mc.work || {}, a = mc.agent || {}, so = mc.soul || {}, ch = mc.chat || {};
+  var active = mode || c.mode || 'chat';
+  var ctx = (active === 'work' ? w : active === 'agent' ? a : active === 'soul' ? so : ch);
+  /* 模式级 */
+  LIMITS.CTX_MSGS = Math.round(limitNum(ctx.ctxMsgs, 20, 1, 500));
+  LIMITS.CTX_CHARS = Math.round(limitNum(ctx.ctxCharsKB, 32, 1, 8192) * 1024);
+  LIMITS.WORK_MAX_TURNS = Math.round(limitNum(w.maxTurns, 0, 0, 99999));
+  LIMITS.FS_MAX_TURNS = Math.round(limitNum(active === 'soul' ? so.maxTurns : a.maxTurns, 0, 0, 99999));
+  LIMITS.VFS_FILES_MAX = Math.round(limitNum(w.vfsFiles, 5000, 1, 200000));
+  LIMITS.VFS_TOTAL_MAX = Math.round(limitNum(w.vfsTotalMB, 200, 1, 8192) * 1024 * 1024);
+  LIMITS.VFS_FILE_MAX = Math.round(limitNum(w.vfsFileMB, 1, 1, 100) * 1024 * 1024);
+  /* 工具级 */
+  var tCrawl = tc.crawl || {}, tWeb = tc.web || {}, tRead = tc.read || {}, tWrite = tc.write || {};
+  var tBrowser = tc.browser || {}, tShell = tc.shell || {}, tGrep = tc.grep || {}, tSub = tc.sub || {};
+  LIMITS.CRAWL_MAX_PAGES = Math.round(limitNum(tCrawl.maxPages, 2000, 1, 20000));
+  LIMITS.WORK_WEB_CHARS = Math.round(limitNum(tWeb.maxCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_READ_CHARS = Math.round(limitNum(tRead.maxCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_RESULT_CHARS = Math.round(limitNum(tShell.resultKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_WRITE_MAX = Math.round(limitNum(tWrite.maxKB, 256, 1, 4096) * 1024);
+  LIMITS.BROWSER_READ_CHARS = Math.round(limitNum(tBrowser.readChars, 12000, 500, 200000));
+  LIMITS.WORK_OUT_LINES = Math.round(limitNum(tShell.outLines, 500, 10, 100000));
+  LIMITS.WORK_OUT_CHARS = Math.round(limitNum(tShell.outCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.WORK_RESULT_CHARS = Math.round(limitNum(tShell.resultKB, 64, 1, 4096) * 1024);
+  LIMITS.WORK_RUN_MS = Math.round(limitNum(tShell.timeoutSec, 0, 0, 600) * 1000);
+  LIMITS.GREP_MAX = Math.round(limitNum(tGrep.maxHits, 200, 1, 10000));
+  LIMITS.SUB_STAGE_FILES = Math.round(limitNum(tSub.stageFiles, 6, 1, 1000));
+  LIMITS.SUB_STAGE_BYTES = Math.round(limitNum(tSub.stageKB, 300, 1, 102400) * 1024);
+}
 /* v3.0 #9：代理按域名分流——命中「直连例外」的请求不走代理（目录/自检/特定 API 更稳） */
 function isDirectHost(url){
   /* v1.0.0：回环地址永远直连，不受代理设置影响 */
@@ -459,6 +519,8 @@ function loadCfg(){
   try { SVC.init(cfg); } catch (e) {}
   /* v0.4.2：Soul 人格嵌套字段深合并（旧配置缺字段补默认，未知字段保留） */
   cfg.soulProfile = mergeCfgDeep(DEF_CFG.soulProfile, c.soulProfile || {});
+  cfg.modeCfg = mergeCfgDeep(DEF_CFG.modeCfg, c.modeCfg || {}); // v0.4.8：四模式/工具参数深合并
+  cfg.toolCfg = mergeCfgDeep(DEF_CFG.toolCfg, c.toolCfg || {});
   if (!cfg.soulProfile.voice || typeof cfg.soulProfile.voice !== 'object') cfg.soulProfile.voice = mergeCfgDeep(DEF_CFG.soulProfile.voice, {});
   if (!cfg.soulProfile.abilities || typeof cfg.soulProfile.abilities !== 'object') cfg.soulProfile.abilities = mergeCfgDeep(DEF_CFG.soulProfile.abilities, {});
   if (!cfg.soulProfile.body || typeof cfg.soulProfile.body !== 'object') cfg.soulProfile.body = mergeCfgDeep(DEF_CFG.soulProfile.body, {});
@@ -525,6 +587,7 @@ function loadCfg(){
     var _oldPerm = cfg.permMode;
     cfg.permMode = normPerm(cfg.permMode);
     if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'yolo'; // 旧版 planGate=false 等同意免确认
+    applyLimitCfg(cfg.mode);
   } catch (e) {}
   if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
   /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
@@ -860,6 +923,7 @@ function setCfg(patch){
       if (_cp){ _cp.picks = JSON.parse(JSON.stringify(patch.picks)); if (DB && DB.putSession) DB.putSession(_cp); }
     } catch (e) {}
   }
+  if (patch && (patch.mode || patch.modeCfg || patch.toolCfg)) { try { applyLimitCfg(S.cfg.mode); } catch (e) {} } // v0.4.8：模式/工具参数即时生效
   saveCfg();
   emit('cfg');
 }
@@ -2425,6 +2489,7 @@ var NET = (function(){
       + refs.slice(-24).join('\n');
   }
   function buildBody(session, msgs, attsData, attsText, searchBlock){
+  try { applyLimitCfg(sessMode(session)); } catch (e) {} // v0.4.8：上下文条数/字符按当前模式
   /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜；v0.4.7：Chat 收到 URL 也主动切到 Work，
      不再等用户再补一句「打开链接」。 */
   var _lastUForRoute = '';

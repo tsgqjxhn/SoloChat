@@ -867,6 +867,89 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'hint', style: 'margin-top:10px', text: '全部数据在本机 WebView2（IndexedDB+localStorage），不上传。' }));
     });
 
+    /* —— 页③ 模式设置（v0.4.8：四模式独立参数） —— */
+    page('modes', '模式设置', function(p){
+      function cfgVal(path){
+        var o = S.cfg, a = String(path || '').split('.');
+        for (var i = 0; i < a.length; i++){ if (!o || typeof o !== 'object') return ''; o = o[a[i]]; }
+        return o == null ? '' : o;
+      }
+      function numCfg(path, label, hint, min, max, step){
+        var i = el('input', { class: 'f-in', type: 'number', min: String(min), max: String(max), step: String(step || 1), 'data-cfg': path });
+        i.value = cfgVal(path);
+        return field(label, i, hint);
+      }
+      p.appendChild(el('div', { class: 'hint', text: '模式参数按模式独立保存；VFS 只影响 Work，Agent 使用真实磁盘。命令超时、读取/写入上限等工具参数在「工具设置」里。' }));
+      p.appendChild(acc('Chat · 常规对话', function(b){
+        b.appendChild(numCfg('modeCfg.chat.ctxMsgs', '上下文消息条数', '每次请求最多带多少条历史消息；默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.chat.ctxCharsKB', '上下文字符上限（KB）', '每条历史总计字符预算；默认 32KB，超出从最旧开始丢弃。', 1, 8192, 1));
+      }, false));
+      p.appendChild(acc('Work · 虚拟沙箱', function(b){
+        b.appendChild(numCfg('modeCfg.work.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.work.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.work.vfsFiles', 'VFS 文件数上限', '单会话内存工作区最多文件数；默认 5000，批量章节/长篇小说可调高。', 1, 200000, 100));
+        b.appendChild(numCfg('modeCfg.work.vfsTotalMB', 'VFS 总量上限（MB）', '单会话全部文件总字节；默认 200MB。', 1, 8192, 10));
+        b.appendChild(numCfg('modeCfg.work.vfsFileMB', '单个文件上限（MB）', '单个 VFS 文件最大体积；默认 1MB。', 1, 100, 1));
+        b.appendChild(numCfg('modeCfg.work.maxTurns', '工具轮次上限', '0 = 不限制（默认）；大于 0 时达到轮次后停下等人工查看。', 0, 99999, 1));
+      }, true));
+      p.appendChild(acc('Agent · 真实文件工具', function(b){
+        b.appendChild(numCfg('modeCfg.agent.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.agent.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.agent.maxTurns', '工具轮次上限', '0 = 不限制（默认）；真实磁盘 Agent 循环的执行护栏。', 0, 99999, 1));
+        b.appendChild(el('div', { class: 'hint', text: 'Agent 没有 Work 的 VFS 200 文件/20MB 配额；它的单文件读写上限、结果截断、命令超时在「工具设置」里。' }));
+      }, false));
+      p.appendChild(acc('Soul · 自主人格', function(b){
+        b.appendChild(numCfg('modeCfg.soul.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.soul.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.soul.maxTurns', '工具轮次上限', '0 = 不限制（默认）；Soul 自主循环的护栏。', 0, 99999, 1));
+      }, false));
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '恢复模式默认值', 'data-m': 'limits-mode-reset' })
+      ]));
+    });
+
+    /* —— 页④ 工具设置（v0.4.8：和模式分开的工具参数） —— */
+    page('tools', '工具设置', function(p){
+      function cfgVal(path){
+        var o = S.cfg, a = String(path || '').split('.');
+        for (var i = 0; i < a.length; i++){ if (!o || typeof o !== 'object') return ''; o = o[a[i]]; }
+        return o == null ? '' : o;
+      }
+      function numCfg(path, label, hint, min, max, step){
+        var i = el('input', { class: 'f-in', type: 'number', min: String(min), max: String(max), step: String(step || 1), 'data-cfg': path });
+        i.value = cfgVal(path);
+        return field(label, i, hint);
+      }
+      p.appendChild(el('div', { class: 'hint', text: '这里改「工具本身」的参数；模式切换不改这些值。改完立即生效，不需要重启。' }));
+      p.appendChild(acc('crawl · 批量抓取', function(b){
+        b.appendChild(numCfg('toolCfg.crawl.maxPages', '单次最大页数', '一次 crawl 最多抓多少页；默认 2000。沿「下一章/下一页」链式抓取时也受此上限。', 1, 20000, 100));
+      }, true));
+      p.appendChild(acc('web / browser · 网页读取', function(b){
+        b.appendChild(numCfg('toolCfg.web.maxCharsKB', 'web 正文回灌上限（KB）', 'web / vfs-read 单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.browser.readChars', 'browser-read 正文上限（字符）', '真实浏览器读取的正文长度；默认 12000，链接最多 40 条。', 500, 200000, 500));
+      }, false));
+      p.appendChild(acc('fs-read / fs-write · 文件工具', function(b){
+        b.appendChild(numCfg('toolCfg.read.maxCharsKB', '单文件读取上限（KB）', 'fs-read 一次注入上下文的上限；默认 64KB，长文件先定位再读。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.write.maxKB', '单文件写入上限（KB）', 'fs-write / write 单次写入的最大体积；默认 256KB。', 1, 4096, 16));
+      }, false));
+      p.appendChild(acc('shell / run · 命令与沙箱', function(b){
+        b.appendChild(numCfg('toolCfg.shell.outLines', '控制台保留行数', 'Work 控制台最多保留多少行输出；默认 500。', 10, 100000, 50));
+        b.appendChild(numCfg('toolCfg.shell.outCharsKB', '控制台字符上限（KB）', '默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.shell.resultKB', '单条结果回灌上限（KB）', '工具结果回灌模型和 UI 的单条上限；默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.shell.timeoutSec', '沙箱执行超时（秒）', '0 = 不限制（默认）；只约束 Work 沙箱，不影响真实命令确认。', 0, 600, 10));
+      }, false));
+      p.appendChild(acc('grep · 全文检索', function(b){
+        b.appendChild(numCfg('toolCfg.grep.maxHits', '最大命中数', 'grep 一次最多返回多少处；默认 200，--max 不能超过它。', 1, 10000, 50));
+      }, false));
+      p.appendChild(acc('sub / agent · 子智能体暂存', function(b){
+        b.appendChild(numCfg('toolCfg.sub.stageFiles', '暂存文件数上限', '子智能体一次最多暂存多少个文件；默认 6。', 1, 1000, 1));
+        b.appendChild(numCfg('toolCfg.sub.stageKB', '暂存总量上限（KB）', '子智能体暂存内容总字节；默认 300KB。', 1, 102400, 100));
+      }, false));
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '恢复工具默认值', 'data-m': 'limits-tool-reset' })
+      ]));
+    });
+
     /* —— 页④ 数据与维护（v3.0） —— */
     page('data', '数据与维护', function(p){
       p.appendChild(el('div', { class: 'sub', text: '连接自检' }));

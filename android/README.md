@@ -4,10 +4,12 @@
 系统分享走 `ACTION_SEND`，记忆同步走 WebDAV（JobScheduler 后台任务）。
 **截图只在内存里，点「发送」才 base64 直传模型，不写相册、不经过中转服务器。**
 
-当前版本 **0.4.7**（versionCode 25，发布包已用项目自己的 keystore 签名）。
+当前版本 **0.4.8**（versionCode 26，发布包已用项目自己的 keystore 签名）。
 
 ## 功能
 
+- **模式栏下移**：Chat / Work / Agent / Soul 切换固定在输入区最左侧，手机显示图标，桌面图标+文字。
+- **模式设置 / 工具设置**：四模式上下文与轮次、Work VFS 文件数/总量/单文件；工具页集中 crawl 页数、读取/写入上限、控制台、grep、子智能体暂存。改完即时生效。
 - **Plan / Write / Yolo**：与电脑版一致；权限按会话保存，Plan 拦截写入/命令，Write 命令确认，Yolo 免确认。
 - **执行记录**：思考、运行、编辑合并为一个折叠块，最终正文单独显示；历史空回复不再留空白块。
 - **链接上下文 / 内置浏览器**：上下文链接自动注入并打开，`browser-read` 可读当前页；Chat 收到 URL 自动切 Work。
@@ -77,7 +79,7 @@ keyPassword=...
 换机器构建前把 `solochat-release.jks` 和 `keystore.properties` 一起备份；丢了就不能覆盖安装升级。
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
-仓库已放一份：`dist/SoloChat-Android-0.4.7.apk`（474,822 字节，证书 `CN=SoloChat`）
+仓库已放一份：`dist/SoloChat-Android-0.4.8.apk`（478,666 字节，证书 `CN=SoloChat`）
 
 ## 使用
 

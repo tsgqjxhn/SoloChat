@@ -750,8 +750,8 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
         var bodyTxt = String(c.body || '');
         var fm = bodyTxt.match(/^[ \t]*```[a-zA-Z0-9+#-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/);
         if (fm) bodyTxt = fm[1];
-        if (staged.length >= 6 || stagedBytes + bodyTxt.length > 300000)
-          return '（超出暂存上限 6 个文件/300KB：' + rel + '）';
+        if (staged.length >= (LIMITS.SUB_STAGE_FILES || 6) || stagedBytes + bodyTxt.length > (LIMITS.SUB_STAGE_BYTES || 300000))
+          return '（超出暂存上限 ' + (LIMITS.SUB_STAGE_FILES || 6) + ' 个文件/' + Math.round((LIMITS.SUB_STAGE_BYTES || 300000) / 1024) + 'KB：' + rel + '）';
         staged.push({ rel: rel, text: bodyTxt }); stagedBytes += bodyTxt.length;
         return '已暂存 _sub/' + p.name + '/' + rel + '（' + bodyTxt.length + ' 字符，待母智能体审阅）';
       }
@@ -770,7 +770,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
         if (op === 'patch'){
           var stamp = 'patch-' + (staged.length + 1) + '.patch';
           var body = String(c.body || c.arg || '');
-          if (staged.length >= 6 || stagedBytes + body.length > 300000) return Promise.resolve('（超出暂存上限）');
+          if (staged.length >= (LIMITS.SUB_STAGE_FILES || 6) || stagedBytes + body.length > (LIMITS.SUB_STAGE_BYTES || 300000)) return Promise.resolve('（超出暂存上限）');
           staged.push({ rel: 'patches/' + stamp, text: body }); stagedBytes += body.length;
           return Promise.resolve('补丁已暂存 _sub/' + p.name + '/patches/' + stamp + '（待母智能体审阅）');
         }
@@ -983,7 +983,8 @@ var BROWSER_TOOL = (function(){
     var title = String(d.title || '（无标题）'), url = String(d.url || '');
     var text = String(d.text || '').replace(/\r/g, '').trim();
     var total = text.length;
-    if (text.length > 12000) text = text.slice(0, 12000) + '\n…（正文已截断，共 ' + total + ' 字）';
+    var lim = LIMITS.BROWSER_READ_CHARS || 12000;
+    if (text.length > lim) text = text.slice(0, lim) + '\n…（正文已截断，共 ' + total + ' 字）';
     var links = Array.isArray(d.links) ? d.links.slice(0, 40) : [];
     var L = ['[browser-read] ' + title + ' / ' + url];
     if (d.frames) L.push('（页面含 ' + d.frames + ' 个 iframe，跨域内容未读取）');
@@ -1143,10 +1144,10 @@ var WORK = (function(){
     '```calc 算式 —— 纯数字四则运算（+ - * / ( ) % ^），不要带变量名。\n' +
     '```json 路径 —— 体为 JSON 文本，按点路径取值（如 data.0.name）；路径留空则格式化输出。\n' +
     '```http 方法 URL —— 直接发 HTTP 请求；下面几行可写 Header: 值，再写一行 --- 后是请求体。\n' +
-    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限 2000）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
+    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限见设置 → 工具设置，默认 2000）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
     '```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json）；文档抽正文 4000 字回灌，图片会作为图片给你看。\n' +
     '```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\n' +
-    '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件 ≤1MB）。\n' +
+    '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件上限见设置 → 模式设置，默认 1MB）。\n' +
     '```vfs-list —— 列工作区。\n' +
     '```vfs-read 相对路径 —— 读文本文件原文；上传附件的提取文本在 attachments/ 下（.md/.txt），超过约 6KB 截断；图片/PDF/Office 原文件只回元数据，不能按文本读。\n' +
     '```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\n' +
@@ -1329,6 +1330,7 @@ var WORK = (function(){
     if (/```ask\b/.test(String(msg.content || ''))){ w0.waitAsk = true; return; }
   var soul = (S.cfg.mode === 'soul');
   if (S.cfg.mode !== 'work' && !soul && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
+    try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (!soul && permForSid(msg.sid) !== 'plan') autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件）；Plan 只读不落盘 */
     var calls = scan(msg.content);
     if (soul) calls = calls.filter(function(c){ return SOUL_OPS.indexOf(c.op) >= 0; });
@@ -1476,7 +1478,7 @@ var WORK = (function(){
         var cu = NET.safeUrl(String(c.arg || '').trim());
         if (!cu){ add('[crawl] 地址无效（需 http/https 绝对地址）', { op: 'crawl', ok: false, brief: '地址无效' }); next(); return; }
         var cmax = 20, cm = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-        if (cm) cmax = Math.min(2000, Math.max(1, parseInt(cm[1], 10)));
+        if (cm) cmax = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(cm[1], 10)));
         add('[crawl] 开始：' + cu + '（最多 ' + cmax + ' 页）', { op: 'crawl', ok: true, brief: '开始抓取' });
         NET.crawl(cu, { max: cmax }).then(function(r){
           var chain = Promise.resolve(), saved = 0;

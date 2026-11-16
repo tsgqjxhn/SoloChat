@@ -438,7 +438,7 @@ function fetchStream(opt){
       if (op === 'rmroot') return { root: '' };
       if (op === 'write'){
         if (!key) throw new Error('路径为空');
-        if ((data || '').length > LIMITS.FS_WRITE_MAX) throw new Error('内容超过 256KB，拒绝写入');
+        if ((data || '').length > LIMITS.FS_WRITE_MAX) throw new Error('内容超过 ' + Math.round(LIMITS.FS_WRITE_MAX / 1024) + 'KB，拒绝写入');
         MOCK_FS[key] = data || '';
         return { path: p, bytes: (data || '').length };
       }
@@ -697,7 +697,7 @@ function fetchStream(opt){
   /* v0.7.0：批量抓取 —— 给起点 URL，沿 #next_url 连续抓 N 页；走宿主桥，失败记录原因不中断 */
   function crawl(startUrl, opts){
     opts = opts || {};
-    var maxPages = Math.min(2000, Math.max(1, parseInt(opts.max, 10) || 20));
+    var maxPages = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(opts.max, 10) || 20));
     var followNext = opts.next !== false;
     var delay = Math.max(0, parseInt(opts.delay, 10) || 250);
     var out = [], fails = [], seen = {}, url = safeUrl(startUrl);

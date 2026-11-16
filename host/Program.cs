@@ -2036,7 +2036,7 @@ namespace SoloChatHost
            安全模型：工作区根目录仅本文件持有（host.json），页面无法自授权；所有 IO 前必经 GuardPath；
            写操作由页面 UI 显式确认后发起，宿主再做一次路径与大小校验。 */
         static readonly Encoding FsUtf8 = new UTF8Encoding(false);
-        const int FsMaxBytes = 256 * 1024; // 单文件读写上限
+        const int FsMaxBytes = 4 * 1024 * 1024; // 单文件读写硬上限 4MB（页面侧按工具设置再收紧）
         const int FsListMax = 500;         // 目录列举条数上限
 
         static string HostCfgPath
@@ -2446,7 +2446,7 @@ namespace SoloChatHost
             string p = GuardPath(ReqRoot(req), rel);
             var fi = new FileInfo(p);
             if (!fi.Exists) { PostFs(id, "fs.error", null, "文件不存在: " + rel); return; }
-            if (fi.Length > FsMaxBytes) { PostFs(id, "fs.error", null, "文件超过 256KB，不支持读取"); return; }
+            if (fi.Length > FsMaxBytes) { PostFs(id, "fs.error", null, "文件超过 " + (FsMaxBytes / 1024) + "KB，不支持读取"); return; }
             byte[] bytes = File.ReadAllBytes(p);
             int sniff = (int)Math.Min((long)bytes.Length, 8192);
             for (int i = 0; i < sniff; i++)
@@ -2791,7 +2791,7 @@ namespace SoloChatHost
             string p = outRoot ? GuardOutPath(rel) : GuardPath(ReqRoot(req), rel);
             string data = req.TryGetProperty("data", out JsonElement dEl) ? (dEl.GetString() ?? "") : "";
             int n = FsUtf8.GetByteCount(data);
-            if (n > FsMaxBytes) { PostFs(id, "fs.error", null, "内容超过 256KB，拒绝写入"); return; }
+            if (n > FsMaxBytes) { PostFs(id, "fs.error", null, "内容超过 " + (FsMaxBytes / 1024) + "KB，拒绝写入"); return; }
             bool bom = false;
             if (File.Exists(p))
             {

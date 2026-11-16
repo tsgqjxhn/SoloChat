@@ -488,6 +488,12 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .crow{display:grid;grid-template-columns:1fr minmax(300px,var(--content-w)) 1fr;grid-template-rows:auto auto;align-items:end;gap:8px}
 .cwrap{grid-column:2;grid-row:2;display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
+#composer-mode{flex:none;display:flex;align-items:center;margin-right:2px}
+#composer-mode .seg{padding:1px;gap:1px}
+#composer-mode .seg button{padding:4px 7px;font-size:11px;height:28px;gap:4px}
+#composer-mode .seg-ic{width:12px;height:12px}
+#composer .czone.cz-l{min-width:0;overflow-x:auto;scrollbar-width:none}
+#composer .czone.cz-l::-webkit-scrollbar{display:none}
 .cz-l{grid-column:1;grid-row:2;justify-self:stretch;justify-content:flex-start}
 .cz-r2{grid-column:3;grid-row:2;justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
@@ -1240,6 +1246,9 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .crow{display:flex;flex-wrap:wrap;gap:6px}
   body.m-phone #chips{order:0;width:100%;margin:0}
   body.m-phone .czone.cz-l{order:1;width:100%;padding:0;gap:2px;overflow-x:auto;justify-content:flex-start}
+  body.m-phone #composer-mode .seg button span{display:none}
+  body.m-phone #composer-mode .seg button{height:34px;padding:0 8px}
+  body.m-phone #composer-mode .seg-ic{width:15px;height:15px}
   body.m-phone .czone.cz-l .icon-btn{flex:none;width:42px;height:42px;color:var(--ink);opacity:.72}
   body.m-phone .czone.cz-l #btn-more{margin-left:auto;opacity:.85}
   /* 手机端把六类「本轮选择」收成一个扩展按钮，点开 / 面板统一搜索/勾选，避免 10 个图标挤一排 */
@@ -1433,6 +1442,14 @@ body.voice-tts #btn-tts{display:inline-flex!important}
           <!-- v1.1.6：附件缩略图放进输入框所在的中间列，默认显示在输入框上方。 -->
           <div id="chips"></div>
           <div class="czone cz-l">
+            <div id="composer-mode" class="composer-mode">
+              <div class="seg seg-sm" id="seg-mode" title="模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格">
+                <button type="button" class="on" data-mode="chat" title="Chat：通用推理与写作"><svg class="ic seg-ic fill"><use href="#i-logo"/></svg><span>Chat</span></button>
+                <button type="button" data-mode="work" title="Work：虚拟沙箱"><svg class="ic seg-ic"><use href="#i-work"/></svg><span>Work</span></button>
+                <button type="button" data-mode="agent" title="Agent：真实文件工具"><svg class="ic seg-ic fill"><use href="#i-agent"/></svg><span>Agent</span></button>
+                <button type="button" data-mode="soul" title="Soul：长期记忆与人格"><svg class="ic seg-ic fill"><use href="#i-user"/></svg><span>Soul</span></button>
+              </div>
+            </div>
             <button id="btn-m-settings" class="icon-btn m-set-btn" data-m="settings" title="设置"><svg class="ic"><use href="#i-gear"/></svg></button>
             <button id="btn-soul-profile" class="icon-btn" type="button" title="Soul 人格设置（脸 / 性格 / 声音 / 能力 / 记忆 / 身体）"><span class="sp-face">🌙</span></button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
@@ -1608,7 +1625,12 @@ var LIMITS = {
   WORK_WEB_CHARS: 64 * 1024,    // Work：单次网页抓取 / vfs-read 回灌上限（v1.1.24 放宽）
   VFS_FILE_MAX: 1024 * 1024,    // VFS：单文件上限 1MB
   VFS_TOTAL_MAX: 200 * 1024 * 1024, // VFS：单会话总量上限 200MB（v0.4.7：原 20MB 对长篇小说/批量章节不够）
-  VFS_FILES_MAX: 5000           // VFS：单会话文件数上限（v0.4.7：原 200 会卡住批量章节）
+  VFS_FILES_MAX: 5000,          // VFS：单会话文件数上限（v0.4.7：原 200 会卡住批量章节）
+  CRAWL_MAX_PAGES: 2000,        // 单次 crawl 页数硬上限（工具设置可改）
+  BROWSER_READ_CHARS: 12000,    // browser-read 正文回灌上限
+  GREP_MAX: 200,                // grep 最大命中数（--max 可覆盖，不能超过此值）
+  SUB_STAGE_FILES: 6,           // 子智能体暂存文件数上限
+  SUB_STAGE_BYTES: 300000       // 子智能体暂存总字节上限
 };
 /* v2.3：媒体语法提示（每次请求附注）。回答里可直接内嵌 https 图片/视频直链。 */
 /* v1.29.3：反问协议 —— 该问就问，别猜着做 */
@@ -1620,7 +1642,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.7';
+var APP_VER = 'v0.4.8';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1809,9 +1831,64 @@ var DEF_CFG = {
   modePin: '',                  // 手动选过模式后钉住，不再被自动路由改
   migSess: 0,                   // 一次性迁移标记（旧会话参数）
   lastPkgDir: '',               // 上次扩展包导出目录
-  pkgWhere: 'desktop'           // 扩展包导出位置：desktop | downloads
+  pkgWhere: 'desktop',          // 扩展包导出位置：desktop | downloads
+  /* v0.4.8：模式 / 工具参数（新增字段必须登记，否则 loadCfg 白名单会丢） */
+  modeCfg: {
+    chat:  { ctxMsgs: 20, ctxCharsKB: 32 },
+    work:  { ctxMsgs: 20, ctxCharsKB: 32, vfsFiles: 5000, vfsTotalMB: 200, vfsFileMB: 1, maxTurns: 0 },
+    agent: { ctxMsgs: 20, ctxCharsKB: 32, maxTurns: 0 },
+    soul:  { ctxMsgs: 20, ctxCharsKB: 32, maxTurns: 0 }
+  },
+  toolCfg: {
+    crawl:   { maxPages: 2000 },
+    web:     { maxCharsKB: 64 },
+    read:    { maxCharsKB: 64 },
+    write:   { maxKB: 256 },
+    browser: { readChars: 12000 },
+    shell:   { outLines: 500, outCharsKB: 64, resultKB: 64, timeoutSec: 0 },
+    grep:    { maxHits: 200 },
+    sub:     { stageFiles: 6, stageKB: 300, maxTurns: 3 }
+  }
 };
 var DEF_PARAMS = { temperature: 0.7, maxTokens: 0 };
+/* v0.4.8：把「模式设置 / 工具设置」映射到运行时 LIMITS。
+   嵌套路径字段由设置页直接写 cfg，改完调用本函数；切换模式也重算上下文/轮次。 */
+function limitNum(v, d, lo, hi){
+  var n = parseFloat(v);
+  if (!isFinite(n)) n = d;
+  return Math.max(lo, Math.min(hi, n));
+}
+function applyLimitCfg(mode){
+  if (typeof S === 'undefined' || !S || !S.cfg) return;
+  var c = S.cfg, mc = c.modeCfg || {}, tc = c.toolCfg || {};
+  var w = mc.work || {}, a = mc.agent || {}, so = mc.soul || {}, ch = mc.chat || {};
+  var active = mode || c.mode || 'chat';
+  var ctx = (active === 'work' ? w : active === 'agent' ? a : active === 'soul' ? so : ch);
+  /* 模式级 */
+  LIMITS.CTX_MSGS = Math.round(limitNum(ctx.ctxMsgs, 20, 1, 500));
+  LIMITS.CTX_CHARS = Math.round(limitNum(ctx.ctxCharsKB, 32, 1, 8192) * 1024);
+  LIMITS.WORK_MAX_TURNS = Math.round(limitNum(w.maxTurns, 0, 0, 99999));
+  LIMITS.FS_MAX_TURNS = Math.round(limitNum(active === 'soul' ? so.maxTurns : a.maxTurns, 0, 0, 99999));
+  LIMITS.VFS_FILES_MAX = Math.round(limitNum(w.vfsFiles, 5000, 1, 200000));
+  LIMITS.VFS_TOTAL_MAX = Math.round(limitNum(w.vfsTotalMB, 200, 1, 8192) * 1024 * 1024);
+  LIMITS.VFS_FILE_MAX = Math.round(limitNum(w.vfsFileMB, 1, 1, 100) * 1024 * 1024);
+  /* 工具级 */
+  var tCrawl = tc.crawl || {}, tWeb = tc.web || {}, tRead = tc.read || {}, tWrite = tc.write || {};
+  var tBrowser = tc.browser || {}, tShell = tc.shell || {}, tGrep = tc.grep || {}, tSub = tc.sub || {};
+  LIMITS.CRAWL_MAX_PAGES = Math.round(limitNum(tCrawl.maxPages, 2000, 1, 20000));
+  LIMITS.WORK_WEB_CHARS = Math.round(limitNum(tWeb.maxCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_READ_CHARS = Math.round(limitNum(tRead.maxCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_RESULT_CHARS = Math.round(limitNum(tShell.resultKB, 64, 1, 4096) * 1024);
+  LIMITS.FS_WRITE_MAX = Math.round(limitNum(tWrite.maxKB, 256, 1, 4096) * 1024);
+  LIMITS.BROWSER_READ_CHARS = Math.round(limitNum(tBrowser.readChars, 12000, 500, 200000));
+  LIMITS.WORK_OUT_LINES = Math.round(limitNum(tShell.outLines, 500, 10, 100000));
+  LIMITS.WORK_OUT_CHARS = Math.round(limitNum(tShell.outCharsKB, 64, 1, 4096) * 1024);
+  LIMITS.WORK_RESULT_CHARS = Math.round(limitNum(tShell.resultKB, 64, 1, 4096) * 1024);
+  LIMITS.WORK_RUN_MS = Math.round(limitNum(tShell.timeoutSec, 0, 0, 600) * 1000);
+  LIMITS.GREP_MAX = Math.round(limitNum(tGrep.maxHits, 200, 1, 10000));
+  LIMITS.SUB_STAGE_FILES = Math.round(limitNum(tSub.stageFiles, 6, 1, 1000));
+  LIMITS.SUB_STAGE_BYTES = Math.round(limitNum(tSub.stageKB, 300, 1, 102400) * 1024);
+}
 /* v3.0 #9：代理按域名分流——命中「直连例外」的请求不走代理（目录/自检/特定 API 更稳） */
 function isDirectHost(url){
   /* v1.0.0：回环地址永远直连，不受代理设置影响 */
@@ -2038,6 +2115,8 @@ function loadCfg(){
   try { SVC.init(cfg); } catch (e) {}
   /* v0.4.2：Soul 人格嵌套字段深合并（旧配置缺字段补默认，未知字段保留） */
   cfg.soulProfile = mergeCfgDeep(DEF_CFG.soulProfile, c.soulProfile || {});
+  cfg.modeCfg = mergeCfgDeep(DEF_CFG.modeCfg, c.modeCfg || {}); // v0.4.8：四模式/工具参数深合并
+  cfg.toolCfg = mergeCfgDeep(DEF_CFG.toolCfg, c.toolCfg || {});
   if (!cfg.soulProfile.voice || typeof cfg.soulProfile.voice !== 'object') cfg.soulProfile.voice = mergeCfgDeep(DEF_CFG.soulProfile.voice, {});
   if (!cfg.soulProfile.abilities || typeof cfg.soulProfile.abilities !== 'object') cfg.soulProfile.abilities = mergeCfgDeep(DEF_CFG.soulProfile.abilities, {});
   if (!cfg.soulProfile.body || typeof cfg.soulProfile.body !== 'object') cfg.soulProfile.body = mergeCfgDeep(DEF_CFG.soulProfile.body, {});
@@ -2104,6 +2183,7 @@ function loadCfg(){
     var _oldPerm = cfg.permMode;
     cfg.permMode = normPerm(cfg.permMode);
     if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'yolo'; // 旧版 planGate=false 等同意免确认
+    applyLimitCfg(cfg.mode);
   } catch (e) {}
   if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
   /* 会话隔离：defaultModel 是「全局默认」，currentModel 只代表当前会话的运行时模型 */
@@ -2439,6 +2519,7 @@ function setCfg(patch){
       if (_cp){ _cp.picks = JSON.parse(JSON.stringify(patch.picks)); if (DB && DB.putSession) DB.putSession(_cp); }
     } catch (e) {}
   }
+  if (patch && (patch.mode || patch.modeCfg || patch.toolCfg)) { try { applyLimitCfg(S.cfg.mode); } catch (e) {} } // v0.4.8：模式/工具参数即时生效
   saveCfg();
   emit('cfg');
 }
@@ -4004,6 +4085,7 @@ var NET = (function(){
       + refs.slice(-24).join('\n');
   }
   function buildBody(session, msgs, attsData, attsText, searchBlock){
+  try { applyLimitCfg(sessMode(session)); } catch (e) {} // v0.4.8：上下文条数/字符按当前模式
   /* v0.6.0：自动选模式——只按本轮最后一条用户输入猜；v0.4.7：Chat 收到 URL 也主动切到 Work，
      不再等用户再补一句「打开链接」。 */
   var _lastUForRoute = '';
@@ -4668,7 +4750,7 @@ function fetchStream(opt){
       if (op === 'rmroot') return { root: '' };
       if (op === 'write'){
         if (!key) throw new Error('路径为空');
-        if ((data || '').length > LIMITS.FS_WRITE_MAX) throw new Error('内容超过 256KB，拒绝写入');
+        if ((data || '').length > LIMITS.FS_WRITE_MAX) throw new Error('内容超过 ' + Math.round(LIMITS.FS_WRITE_MAX / 1024) + 'KB，拒绝写入');
         MOCK_FS[key] = data || '';
         return { path: p, bytes: (data || '').length };
       }
@@ -4927,7 +5009,7 @@ function fetchStream(opt){
   /* v0.7.0：批量抓取 —— 给起点 URL，沿 #next_url 连续抓 N 页；走宿主桥，失败记录原因不中断 */
   function crawl(startUrl, opts){
     opts = opts || {};
-    var maxPages = Math.min(2000, Math.max(1, parseInt(opts.max, 10) || 20));
+    var maxPages = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(opts.max, 10) || 20));
     var followNext = opts.next !== false;
     var delay = Math.max(0, parseInt(opts.delay, 10) || 250);
     var out = [], fails = [], seen = {}, url = safeUrl(startUrl);
@@ -10476,6 +10558,89 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       p.appendChild(el('div', { class: 'hint', style: 'margin-top:10px', text: '全部数据在本机 WebView2（IndexedDB+localStorage），不上传。' }));
     });
 
+    /* —— 页③ 模式设置（v0.4.8：四模式独立参数） —— */
+    page('modes', '模式设置', function(p){
+      function cfgVal(path){
+        var o = S.cfg, a = String(path || '').split('.');
+        for (var i = 0; i < a.length; i++){ if (!o || typeof o !== 'object') return ''; o = o[a[i]]; }
+        return o == null ? '' : o;
+      }
+      function numCfg(path, label, hint, min, max, step){
+        var i = el('input', { class: 'f-in', type: 'number', min: String(min), max: String(max), step: String(step || 1), 'data-cfg': path });
+        i.value = cfgVal(path);
+        return field(label, i, hint);
+      }
+      p.appendChild(el('div', { class: 'hint', text: '模式参数按模式独立保存；VFS 只影响 Work，Agent 使用真实磁盘。命令超时、读取/写入上限等工具参数在「工具设置」里。' }));
+      p.appendChild(acc('Chat · 常规对话', function(b){
+        b.appendChild(numCfg('modeCfg.chat.ctxMsgs', '上下文消息条数', '每次请求最多带多少条历史消息；默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.chat.ctxCharsKB', '上下文字符上限（KB）', '每条历史总计字符预算；默认 32KB，超出从最旧开始丢弃。', 1, 8192, 1));
+      }, false));
+      p.appendChild(acc('Work · 虚拟沙箱', function(b){
+        b.appendChild(numCfg('modeCfg.work.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.work.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.work.vfsFiles', 'VFS 文件数上限', '单会话内存工作区最多文件数；默认 5000，批量章节/长篇小说可调高。', 1, 200000, 100));
+        b.appendChild(numCfg('modeCfg.work.vfsTotalMB', 'VFS 总量上限（MB）', '单会话全部文件总字节；默认 200MB。', 1, 8192, 10));
+        b.appendChild(numCfg('modeCfg.work.vfsFileMB', '单个文件上限（MB）', '单个 VFS 文件最大体积；默认 1MB。', 1, 100, 1));
+        b.appendChild(numCfg('modeCfg.work.maxTurns', '工具轮次上限', '0 = 不限制（默认）；大于 0 时达到轮次后停下等人工查看。', 0, 99999, 1));
+      }, true));
+      p.appendChild(acc('Agent · 真实文件工具', function(b){
+        b.appendChild(numCfg('modeCfg.agent.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.agent.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.agent.maxTurns', '工具轮次上限', '0 = 不限制（默认）；真实磁盘 Agent 循环的执行护栏。', 0, 99999, 1));
+        b.appendChild(el('div', { class: 'hint', text: 'Agent 没有 Work 的 VFS 200 文件/20MB 配额；它的单文件读写上限、结果截断、命令超时在「工具设置」里。' }));
+      }, false));
+      p.appendChild(acc('Soul · 自主人格', function(b){
+        b.appendChild(numCfg('modeCfg.soul.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
+        b.appendChild(numCfg('modeCfg.soul.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
+        b.appendChild(numCfg('modeCfg.soul.maxTurns', '工具轮次上限', '0 = 不限制（默认）；Soul 自主循环的护栏。', 0, 99999, 1));
+      }, false));
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '恢复模式默认值', 'data-m': 'limits-mode-reset' })
+      ]));
+    });
+
+    /* —— 页④ 工具设置（v0.4.8：和模式分开的工具参数） —— */
+    page('tools', '工具设置', function(p){
+      function cfgVal(path){
+        var o = S.cfg, a = String(path || '').split('.');
+        for (var i = 0; i < a.length; i++){ if (!o || typeof o !== 'object') return ''; o = o[a[i]]; }
+        return o == null ? '' : o;
+      }
+      function numCfg(path, label, hint, min, max, step){
+        var i = el('input', { class: 'f-in', type: 'number', min: String(min), max: String(max), step: String(step || 1), 'data-cfg': path });
+        i.value = cfgVal(path);
+        return field(label, i, hint);
+      }
+      p.appendChild(el('div', { class: 'hint', text: '这里改「工具本身」的参数；模式切换不改这些值。改完立即生效，不需要重启。' }));
+      p.appendChild(acc('crawl · 批量抓取', function(b){
+        b.appendChild(numCfg('toolCfg.crawl.maxPages', '单次最大页数', '一次 crawl 最多抓多少页；默认 2000。沿「下一章/下一页」链式抓取时也受此上限。', 1, 20000, 100));
+      }, true));
+      p.appendChild(acc('web / browser · 网页读取', function(b){
+        b.appendChild(numCfg('toolCfg.web.maxCharsKB', 'web 正文回灌上限（KB）', 'web / vfs-read 单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.browser.readChars', 'browser-read 正文上限（字符）', '真实浏览器读取的正文长度；默认 12000，链接最多 40 条。', 500, 200000, 500));
+      }, false));
+      p.appendChild(acc('fs-read / fs-write · 文件工具', function(b){
+        b.appendChild(numCfg('toolCfg.read.maxCharsKB', '单文件读取上限（KB）', 'fs-read 一次注入上下文的上限；默认 64KB，长文件先定位再读。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.write.maxKB', '单文件写入上限（KB）', 'fs-write / write 单次写入的最大体积；默认 256KB。', 1, 4096, 16));
+      }, false));
+      p.appendChild(acc('shell / run · 命令与沙箱', function(b){
+        b.appendChild(numCfg('toolCfg.shell.outLines', '控制台保留行数', 'Work 控制台最多保留多少行输出；默认 500。', 10, 100000, 50));
+        b.appendChild(numCfg('toolCfg.shell.outCharsKB', '控制台字符上限（KB）', '默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.shell.resultKB', '单条结果回灌上限（KB）', '工具结果回灌模型和 UI 的单条上限；默认 64KB。', 1, 4096, 8));
+        b.appendChild(numCfg('toolCfg.shell.timeoutSec', '沙箱执行超时（秒）', '0 = 不限制（默认）；只约束 Work 沙箱，不影响真实命令确认。', 0, 600, 10));
+      }, false));
+      p.appendChild(acc('grep · 全文检索', function(b){
+        b.appendChild(numCfg('toolCfg.grep.maxHits', '最大命中数', 'grep 一次最多返回多少处；默认 200，--max 不能超过它。', 1, 10000, 50));
+      }, false));
+      p.appendChild(acc('sub / agent · 子智能体暂存', function(b){
+        b.appendChild(numCfg('toolCfg.sub.stageFiles', '暂存文件数上限', '子智能体一次最多暂存多少个文件；默认 6。', 1, 1000, 1));
+        b.appendChild(numCfg('toolCfg.sub.stageKB', '暂存总量上限（KB）', '子智能体暂存内容总字节；默认 300KB。', 1, 102400, 100));
+      }, false));
+      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
+        el('button', { class: 'btn btn-sec', type: 'button', text: '恢复工具默认值', 'data-m': 'limits-tool-reset' })
+      ]));
+    });
+
     /* —— 页④ 数据与维护（v3.0） —— */
     page('data', '数据与维护', function(p){
       p.appendChild(el('div', { class: 'sub', text: '连接自检' }));
@@ -13103,20 +13268,7 @@ function holdBusy(d, sid){
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    var modes = el('div', { class: 'e-modes e-modes-fixed' });
-    /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
-    var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
-      title: '模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格' });
-    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
-      var b = el('button', { type: 'button', 'data-mode': t[0] });
-      b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
-      b.appendChild(document.createTextNode(t[1]));
-      if ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona) b.classList.add('on');
-      seg.appendChild(b);
-    });
-    modes.appendChild(seg);
-    /* v0.4.2：模式条直接挂到 #empty（不在 .e-wrap 内），四个模式坐标完全固定 */
-    $empty.appendChild(modes);
+    /* v0.4.8：模式切换移到输入框最左侧，空态不再创建/固定模式条 */
     if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
@@ -14798,6 +14950,14 @@ function sendMessage(){
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
       _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', yolo: 'Yolo 全部工具、免确认' }[permNow()] || '');
     }
+    /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
+    var _segMode = $('#seg-mode');
+    if (_segMode){
+      var _modeBtns = _segMode.querySelectorAll('[data-mode]');
+      for (var _mi = 0; _mi < _modeBtns.length; _mi++)
+        _modeBtns[_mi].classList.toggle('on', _modeBtns[_mi].getAttribute('data-mode') === _mNow && !S.cfg.persona);
+    }
+    if (typeof applyLimitCfg === 'function') applyLimitCfg(_mNow);
     document.body.classList.toggle('m-chat', (S.cfg.mode || 'chat') === 'chat');
     document.body.classList.toggle('m-soul', _isSoul);
     applyVoiceClasses();
@@ -16834,6 +16994,14 @@ $('#sidebar').addEventListener('click', function(e){
     else if (m === 'grp-save'){ if (S._grpSave) S._grpSave(); }
     else if (m === 'grp-del'){ if (S._grpDel) S._grpDel(); }
     else if (m === 'settings') UI.openSettings();
+    else if (m === 'limits-mode-reset'){
+      S.cfg.modeCfg = JSON.parse(JSON.stringify(DEF_CFG.modeCfg));
+      saveCfg(); applyLimitCfg(S.cfg.mode); UI.openSettings(); UI.toast('模式参数已恢复默认');
+    }
+    else if (m === 'limits-tool-reset'){
+      S.cfg.toolCfg = JSON.parse(JSON.stringify(DEF_CFG.toolCfg));
+      saveCfg(); applyLimitCfg(S.cfg.mode); UI.openSettings(); UI.toast('工具参数已恢复默认');
+    }
     else if (m === 'compress') UI.compressSession(b.getAttribute('data-id'));
     else if (m === 'open-data'){
       if (NET.bridge.ok) NET.bridge.send({ t: 'win', act: 'datadir' });
@@ -17000,6 +17168,16 @@ $('#sidebar').addEventListener('click', function(e){
       var k = ck.slice(8);
       S.cfg.timeout[k] = clamp(parseInt(v, 10) || DEF_CFG.timeout[k], 1, 600);
       saveCfg();
+    } else if (ck.indexOf('modeCfg.') === 0 || ck.indexOf('toolCfg.') === 0){
+      /* v0.4.8：模式/工具参数是数值嵌套字段，不能按字符串保存；保存后立刻重算 LIMITS */
+      var _lp = ck.split('.'), _lo = S.cfg;
+      for (var _li2 = 0; _li2 < _lp.length - 1; _li2++){ _lo[_lp[_li2]] = _lo[_lp[_li2]] || {}; _lo = _lo[_lp[_li2]]; }
+      var _ln = parseFloat(v);
+      if (!isFinite(_ln)) return;
+      _lo[_lp[_lp.length - 1]] = _ln;
+      saveCfg();
+      try { applyLimitCfg(S.cfg.mode); } catch (e) {}
+      UI.toast('参数已保存并即时生效');
     } else if (ck.indexOf('.') > 0){ // v1.5：嵌套配置（如 ocr.mistralKey），点号路径直写
       var ps = ck.split('.'), o = S.cfg;
       for (var pi2 = 0; pi2 < ps.length - 1; pi2++){ o[ps[pi2]] = o[ps[pi2]] || {}; o = o[ps[pi2]]; }
@@ -17458,6 +17636,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     S._riskyWrites = {};
     /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Yolo 全部免确认 */
     var permMode = permForSid(msg.sid);
+    try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (permMode === 'plan'){
       var _blocked = [];
       reads = reads.filter(function(c){
@@ -17608,10 +17787,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
           }, function(e){ parts.push('[glob] 失败：' + ((e && e.message) || e)); next(); });
           return;
         }
-        var gdir2 = '', gglob = '', gmax = 100;
+        var gdir2 = '', gglob = '', gmax = LIMITS.GREP_MAX || 200;
         var pm = /--path\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (pm) gdir2 = pm[1] != null ? pm[1] : pm[2];
         var fm = /--glob\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (fm) gglob = fm[1] != null ? fm[1] : fm[2];
-        var mm = /--max\s+(\d+)/.exec(gbody); if (mm) gmax = parseInt(mm[1], 10) || 100;
+        var mm = /--max\s+(\d+)/.exec(gbody); if (mm) gmax = Math.min(LIMITS.GREP_MAX || 200, Math.max(1, parseInt(mm[1], 10) || 100));
         if (!garg){ parts.push('[grep] 需要正则，如 ```grep TODO'); next(); return; }
         NET.fs('grep', gdir2, JSON.stringify({ pattern: garg, glob: gglob, max: gmax }), gws).then(function(r){
           var hits = (r && r.matches) || [];
@@ -17692,7 +17871,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       var au = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
       if (!au){ parts.push('[crawl] 地址无效'); next(); return; }
       var amax = 10, am = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-      if (am) amax = Math.min(2000, Math.max(1, parseInt(am[1], 10)));
+      if (am) amax = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(am[1], 10)));
       NET.crawl(au, { max: amax }).then(function(r){
         var head = r.pages.slice(0, 3).map(function(p){
           return '### ' + (p.title || p.url) + '\n' + String(p.text || '').slice(0, 2000);
@@ -17817,6 +17996,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     if (btn && S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul'){ UI.toast('文件 Agent 已关闭', true); return; }
     var block = msg && findWrite(msg.content, path);
     if (!block){ UI.toast('找不到对应的写入申请', true); return; }
+    if (String(block.body || '').length > (LIMITS.FS_WRITE_MAX || 256 * 1024)){
+      UI.toast('单文件超过写入上限 ' + Math.round((LIMITS.FS_WRITE_MAX || 256 * 1024) / 1024) + 'KB，已拒绝', true);
+      return;
+    }
     var outside = isOutside(path);
     var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
@@ -19597,8 +19780,8 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
         var bodyTxt = String(c.body || '');
         var fm = bodyTxt.match(/^[ \t]*```[a-zA-Z0-9+#-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/);
         if (fm) bodyTxt = fm[1];
-        if (staged.length >= 6 || stagedBytes + bodyTxt.length > 300000)
-          return '（超出暂存上限 6 个文件/300KB：' + rel + '）';
+        if (staged.length >= (LIMITS.SUB_STAGE_FILES || 6) || stagedBytes + bodyTxt.length > (LIMITS.SUB_STAGE_BYTES || 300000))
+          return '（超出暂存上限 ' + (LIMITS.SUB_STAGE_FILES || 6) + ' 个文件/' + Math.round((LIMITS.SUB_STAGE_BYTES || 300000) / 1024) + 'KB：' + rel + '）';
         staged.push({ rel: rel, text: bodyTxt }); stagedBytes += bodyTxt.length;
         return '已暂存 _sub/' + p.name + '/' + rel + '（' + bodyTxt.length + ' 字符，待母智能体审阅）';
       }
@@ -19617,7 +19800,7 @@ function run(task, name, depth, sid){ // v0.3.46：第四个参数指定所属�
         if (op === 'patch'){
           var stamp = 'patch-' + (staged.length + 1) + '.patch';
           var body = String(c.body || c.arg || '');
-          if (staged.length >= 6 || stagedBytes + body.length > 300000) return Promise.resolve('（超出暂存上限）');
+          if (staged.length >= (LIMITS.SUB_STAGE_FILES || 6) || stagedBytes + body.length > (LIMITS.SUB_STAGE_BYTES || 300000)) return Promise.resolve('（超出暂存上限）');
           staged.push({ rel: 'patches/' + stamp, text: body }); stagedBytes += body.length;
           return Promise.resolve('补丁已暂存 _sub/' + p.name + '/patches/' + stamp + '（待母智能体审阅）');
         }
@@ -19830,7 +20013,8 @@ var BROWSER_TOOL = (function(){
     var title = String(d.title || '（无标题）'), url = String(d.url || '');
     var text = String(d.text || '').replace(/\r/g, '').trim();
     var total = text.length;
-    if (text.length > 12000) text = text.slice(0, 12000) + '\n…（正文已截断，共 ' + total + ' 字）';
+    var lim = LIMITS.BROWSER_READ_CHARS || 12000;
+    if (text.length > lim) text = text.slice(0, lim) + '\n…（正文已截断，共 ' + total + ' 字）';
     var links = Array.isArray(d.links) ? d.links.slice(0, 40) : [];
     var L = ['[browser-read] ' + title + ' / ' + url];
     if (d.frames) L.push('（页面含 ' + d.frames + ' 个 iframe，跨域内容未读取）');
@@ -19990,10 +20174,10 @@ var WORK = (function(){
     '```calc 算式 —— 纯数字四则运算（+ - * / ( ) % ^），不要带变量名。\n' +
     '```json 路径 —— 体为 JSON 文本，按点路径取值（如 data.0.name）；路径留空则格式化输出。\n' +
     '```http 方法 URL —— 直接发 HTTP 请求；下面几行可写 Header: 值，再写一行 --- 后是请求体。\n' +
-    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限 2000）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
+    '```crawl URL —— 批量抓取：沿页面里的「下一章/下一页」链接连续抓 N 页，逐页存进工作区 crawl/ 目录；参数行后另起一行写 max=N（默认 20，上限见设置 → 工具设置，默认 2000）。爬小说/章节列表用它，不要用 web 一页页抓。\n' +
     '```get URL —— 抓任意文件（pdf/docx/xlsx/pptx/图片/mp3/mp4/zip/md/json）；文档抽正文 4000 字回灌，图片会作为图片给你看。\n' +
     '```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\n' +
-    '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件 ≤1MB）。\n' +
+    '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件上限见设置 → 模式设置，默认 1MB）。\n' +
     '```vfs-list —— 列工作区。\n' +
     '```vfs-read 相对路径 —— 读文本文件原文；上传附件的提取文本在 attachments/ 下（.md/.txt），超过约 6KB 截断；图片/PDF/Office 原文件只回元数据，不能按文本读。\n' +
     '```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\n' +
@@ -20176,6 +20360,7 @@ var WORK = (function(){
     if (/```ask\b/.test(String(msg.content || ''))){ w0.waitAsk = true; return; }
   var soul = (S.cfg.mode === 'soul');
   if (S.cfg.mode !== 'work' && !soul && !w0.turns) return; // v0.3.3：已在跑的工具链不受切模式影响，只有首次进入要求 Work
+    try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (!soul && permForSid(msg.sid) !== 'plan') autoVfs(msg); /* v2.7：先落盘产物（模型没用 vfs-write 也不丢文件）；Plan 只读不落盘 */
     var calls = scan(msg.content);
     if (soul) calls = calls.filter(function(c){ return SOUL_OPS.indexOf(c.op) >= 0; });
@@ -20323,7 +20508,7 @@ var WORK = (function(){
         var cu = NET.safeUrl(String(c.arg || '').trim());
         if (!cu){ add('[crawl] 地址无效（需 http/https 绝对地址）', { op: 'crawl', ok: false, brief: '地址无效' }); next(); return; }
         var cmax = 20, cm = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-        if (cm) cmax = Math.min(2000, Math.max(1, parseInt(cm[1], 10)));
+        if (cm) cmax = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(cm[1], 10)));
         add('[crawl] 开始：' + cu + '（最多 ' + cmax + ' 页）', { op: 'crawl', ok: true, brief: '开始抓取' });
         NET.crawl(cu, { max: cmax }).then(function(r){
           var chain = Promise.resolve(), saved = 0;
@@ -22644,6 +22829,7 @@ try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题
    renderSrc: function(){ RUNNER.renderSrc(); },
       cfg: function(){ return S.cfg; },
       setCfg: function(o){ setCfg(o); } };
+    window.SC_DBG.limits = LIMITS; window.SC_DBG.limitsRefresh = applyLimitCfg;
   }
 } catch (e) {}
 loadCfg();

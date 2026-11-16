@@ -22,6 +22,7 @@ try { document.title = 'SoloChat ' + APP_VER; } catch (e) {} // v0.3.27：标题
    renderSrc: function(){ RUNNER.renderSrc(); },
       cfg: function(){ return S.cfg; },
       setCfg: function(o){ setCfg(o); } };
+    window.SC_DBG.limits = LIMITS; window.SC_DBG.limitsRefresh = applyLimitCfg;
   }
 } catch (e) {}
 loadCfg();

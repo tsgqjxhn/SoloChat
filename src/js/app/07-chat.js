@@ -79,20 +79,7 @@ function holdBusy(d, sid){
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    var modes = el('div', { class: 'e-modes e-modes-fixed' });
-    /* v1.14.1：模式切换回到空态（顶栏那个双箭头按钮删掉，只留模式名） */
-    var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
-      title: '模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格' });
-    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
-      var b = el('button', { type: 'button', 'data-mode': t[0] });
-      b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
-      b.appendChild(document.createTextNode(t[1]));
-      if ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona) b.classList.add('on');
-      seg.appendChild(b);
-    });
-    modes.appendChild(seg);
-    /* v0.4.2：模式条直接挂到 #empty（不在 .e-wrap 内），四个模式坐标完全固定 */
-    $empty.appendChild(modes);
+    /* v0.4.8：模式切换移到输入框最左侧，空态不再创建/固定模式条 */
     if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
@@ -1774,6 +1761,14 @@ function sendMessage(){
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
       _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', yolo: 'Yolo 全部工具、免确认' }[permNow()] || '');
     }
+    /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
+    var _segMode = $('#seg-mode');
+    if (_segMode){
+      var _modeBtns = _segMode.querySelectorAll('[data-mode]');
+      for (var _mi = 0; _mi < _modeBtns.length; _mi++)
+        _modeBtns[_mi].classList.toggle('on', _modeBtns[_mi].getAttribute('data-mode') === _mNow && !S.cfg.persona);
+    }
+    if (typeof applyLimitCfg === 'function') applyLimitCfg(_mNow);
     document.body.classList.toggle('m-chat', (S.cfg.mode || 'chat') === 'chat');
     document.body.classList.toggle('m-soul', _isSoul);
     applyVoiceClasses();
@@ -3810,6 +3805,14 @@ $('#sidebar').addEventListener('click', function(e){
     else if (m === 'grp-save'){ if (S._grpSave) S._grpSave(); }
     else if (m === 'grp-del'){ if (S._grpDel) S._grpDel(); }
     else if (m === 'settings') UI.openSettings();
+    else if (m === 'limits-mode-reset'){
+      S.cfg.modeCfg = JSON.parse(JSON.stringify(DEF_CFG.modeCfg));
+      saveCfg(); applyLimitCfg(S.cfg.mode); UI.openSettings(); UI.toast('模式参数已恢复默认');
+    }
+    else if (m === 'limits-tool-reset'){
+      S.cfg.toolCfg = JSON.parse(JSON.stringify(DEF_CFG.toolCfg));
+      saveCfg(); applyLimitCfg(S.cfg.mode); UI.openSettings(); UI.toast('工具参数已恢复默认');
+    }
     else if (m === 'compress') UI.compressSession(b.getAttribute('data-id'));
     else if (m === 'open-data'){
       if (NET.bridge.ok) NET.bridge.send({ t: 'win', act: 'datadir' });
@@ -3976,6 +3979,16 @@ $('#sidebar').addEventListener('click', function(e){
       var k = ck.slice(8);
       S.cfg.timeout[k] = clamp(parseInt(v, 10) || DEF_CFG.timeout[k], 1, 600);
       saveCfg();
+    } else if (ck.indexOf('modeCfg.') === 0 || ck.indexOf('toolCfg.') === 0){
+      /* v0.4.8：模式/工具参数是数值嵌套字段，不能按字符串保存；保存后立刻重算 LIMITS */
+      var _lp = ck.split('.'), _lo = S.cfg;
+      for (var _li2 = 0; _li2 < _lp.length - 1; _li2++){ _lo[_lp[_li2]] = _lo[_lp[_li2]] || {}; _lo = _lo[_lp[_li2]]; }
+      var _ln = parseFloat(v);
+      if (!isFinite(_ln)) return;
+      _lo[_lp[_lp.length - 1]] = _ln;
+      saveCfg();
+      try { applyLimitCfg(S.cfg.mode); } catch (e) {}
+      UI.toast('参数已保存并即时生效');
     } else if (ck.indexOf('.') > 0){ // v1.5：嵌套配置（如 ocr.mistralKey），点号路径直写
       var ps = ck.split('.'), o = S.cfg;
       for (var pi2 = 0; pi2 < ps.length - 1; pi2++){ o[ps[pi2]] = o[ps[pi2]] || {}; o = o[ps[pi2]]; }

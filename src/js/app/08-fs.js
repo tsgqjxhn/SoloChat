@@ -106,6 +106,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     S._riskyWrites = {};
     /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Yolo 全部免确认 */
     var permMode = permForSid(msg.sid);
+    try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (permMode === 'plan'){
       var _blocked = [];
       reads = reads.filter(function(c){
@@ -256,10 +257,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
           }, function(e){ parts.push('[glob] 失败：' + ((e && e.message) || e)); next(); });
           return;
         }
-        var gdir2 = '', gglob = '', gmax = 100;
+        var gdir2 = '', gglob = '', gmax = LIMITS.GREP_MAX || 200;
         var pm = /--path\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (pm) gdir2 = pm[1] != null ? pm[1] : pm[2];
         var fm = /--glob\s+(?:"([^"]*)"|(\S+))/.exec(gbody); if (fm) gglob = fm[1] != null ? fm[1] : fm[2];
-        var mm = /--max\s+(\d+)/.exec(gbody); if (mm) gmax = parseInt(mm[1], 10) || 100;
+        var mm = /--max\s+(\d+)/.exec(gbody); if (mm) gmax = Math.min(LIMITS.GREP_MAX || 200, Math.max(1, parseInt(mm[1], 10) || 100));
         if (!garg){ parts.push('[grep] 需要正则，如 ```grep TODO'); next(); return; }
         NET.fs('grep', gdir2, JSON.stringify({ pattern: garg, glob: gglob, max: gmax }), gws).then(function(r){
           var hits = (r && r.matches) || [];
@@ -340,7 +341,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       var au = NET.safeUrl(String(c.path || '').trim() || String(c.body || '').trim());
       if (!au){ parts.push('[crawl] 地址无效'); next(); return; }
       var amax = 10, am = /max\s*=\s*(\d+)/i.exec(String(c.body || '') + ' ' + String(c.arg || ''));
-      if (am) amax = Math.min(2000, Math.max(1, parseInt(am[1], 10)));
+      if (am) amax = Math.min(LIMITS.CRAWL_MAX_PAGES || 2000, Math.max(1, parseInt(am[1], 10)));
       NET.crawl(au, { max: amax }).then(function(r){
         var head = r.pages.slice(0, 3).map(function(p){
           return '### ' + (p.title || p.url) + '\n' + String(p.text || '').slice(0, 2000);
@@ -465,6 +466,10 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     if (btn && S.cfg.mode !== 'agent' && S.cfg.mode !== 'soul'){ UI.toast('文件 Agent 已关闭', true); return; }
     var block = msg && findWrite(msg.content, path);
     if (!block){ UI.toast('找不到对应的写入申请', true); return; }
+    if (String(block.body || '').length > (LIMITS.FS_WRITE_MAX || 256 * 1024)){
+      UI.toast('单文件超过写入上限 ' + Math.round((LIMITS.FS_WRITE_MAX || 256 * 1024) / 1024) + 'KB，已拒绝', true);
+      return;
+    }
     var outside = isOutside(path);
     var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
