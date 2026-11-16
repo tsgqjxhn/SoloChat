@@ -196,7 +196,7 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 /* 窗控：最小化/最大化/托盘 */
-#win-ctl{margin-left:auto;display:flex;align-self:stretch}
+#win-ctl{margin-left:auto;margin-right:-12px;display:flex;align-self:stretch} /* v0.4.9：关闭 X 顶到窗口右上角 */
 .win-btn{width:42px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);border-radius:0}
 .win-btn .ic{width:15px;height:15px}
 .win-btn:hover{background:var(--soft);color:var(--ink)}
@@ -773,6 +773,12 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
   background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--r-lg);
   box-shadow:var(--shadow-pop);padding:20px 22px;
 }
+#modal .dlg-x{
+  position:absolute;top:-1px;right:-11px;width:38px;height:38px;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:0 var(--r-lg) 0 0;color:var(--muted);z-index:2;
+}
+#modal .dlg-x:hover{background:var(--soft);color:var(--ink)}
 #modal h2{
   font-family:var(--font-display);font-size:20px;font-weight:600;color:var(--ink);
   letter-spacing:var(--tracking-display);margin-bottom:4px;
@@ -1435,13 +1441,12 @@ body.voice-tts #btn-tts{display:inline-flex!important}
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
       </div>
+      <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
       <div id="win-ctl">
         <button class="win-btn" data-win="min" title="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
         <button class="win-btn" data-win="max" title="最大化 / 还原（双击顶栏空白同效）"><svg class="ic"><use href="#i-max"/></svg></button>
         <button class="win-btn" data-win="close" title="隐藏到托盘（托盘菜单可退出）"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
-      <button id="btn-ws" class="icon-btn" title="工作区（文件 / 预览 / 终端）"><svg class="ic"><use href="#i-ws"/></svg></button>
-      <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-tune"/></svg></button>
     </header>
 
     <div id="msg-scroll">
@@ -1486,6 +1491,9 @@ body.voice-tts #btn-tts{display:inline-flex!important}
           <div class="cwrap">
             <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
+          </div>
+          <div class="czone cz-r2">
+            <button id="btn-sesscfg" class="icon-btn" title="会话参数（模型 / 提示词 / 温度）"><svg class="ic"><use href="#i-tune"/></svg></button>
           </div>
         </div>
         <div id="cmp-pop" hidden></div>
@@ -1659,7 +1667,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.8';
+var APP_VER = 'v0.4.9';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -12261,6 +12269,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       value: pp.maxTokens != null ? pp.maxTokens : '', placeholder: '跟随全局（0=不限）' }), 'maxTokens');
     var fSp = mark(el('textarea', { text: d.systemPrompt || '' }), 'systemPrompt');
     openModal(el('div', {}, [
+      el('button', { class: 'dlg-x', 'data-m': 'close', title: '关闭', 'aria-label': '关闭' }, [icon('close')]),
       el('h2', { text: isDraft ? '会话参数 · 新会话（发送前）' : ('会话参数 · ' + (s.title || '未命名')) }),
       el('div', { class: 'f-grid' }, [
         field('所属分组', fGroup), field('模式', fMode),

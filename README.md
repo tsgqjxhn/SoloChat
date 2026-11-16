@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.8 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.9 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -108,7 +108,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ## Android 版
 
-`dist/SoloChat-Android-0.4.8.apk`（478,658 字节，versionCode 26；项目自有 keystore 签名）
+`dist/SoloChat-Android-0.4.9.apk`（478,806 字节，versionCode 27；项目自有 keystore 签名）
 
 - 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
 - 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
@@ -186,7 +186,7 @@ node tools/build-android.mjs  # 注入 Android assets
 
 ## 版本与发布
 
-- 当前版本 **v0.4.8**；桌面 `APP_VER` / FileVersion **0.4.8.0**；Android `versionCode 26`。
+- 当前版本 **v0.4.9**；桌面 `APP_VER` / FileVersion **0.4.9.0**；Android `versionCode 27`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
 - 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/` 与 `dist/packages/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
@@ -196,11 +196,11 @@ node tools/build-android.mjs  # 注入 Android assets
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,520,000 字节**（v0.4.8，FileVersion 0.4.8.0），单文件 |
-| 主产物 | `index.html` **1,336,876 字节 / 22,917 行** |
-| 源码 | `src/` **19 个文件 / 1,336,948 字节** |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,520,512 字节**（v0.4.9，FileVersion 0.4.9.0），单文件 |
+| 主产物 | `index.html` **1,337,395 字节 / 22,926 行** |
+| 源码 | `src/` **19 个文件 / 1,337,467 字节** |
 | 宿主源码 | `host/Program.cs` **205,349 字节 / 3,854 行** |
-| Android APK | `dist/SoloChat-Android-0.4.8.apk` **478,666 字节**（versionCode 26） |
+| Android APK | `dist/SoloChat-Android-0.4.9.apk` **478,806 字节**（versionCode 27） |
 
 ## 数据存储
 

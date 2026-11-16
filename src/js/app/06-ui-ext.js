@@ -1002,6 +1002,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       value: pp.maxTokens != null ? pp.maxTokens : '', placeholder: '跟随全局（0=不限）' }), 'maxTokens');
     var fSp = mark(el('textarea', { text: d.systemPrompt || '' }), 'systemPrompt');
     openModal(el('div', {}, [
+      el('button', { class: 'dlg-x', 'data-m': 'close', title: '关闭', 'aria-label': '关闭' }, [icon('close')]),
       el('h2', { text: isDraft ? '会话参数 · 新会话（发送前）' : ('会话参数 · ' + (s.title || '未命名')) }),
       el('div', { class: 'f-grid' }, [
         field('所属分组', fGroup), field('模式', fMode),
