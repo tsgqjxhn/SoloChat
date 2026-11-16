@@ -710,11 +710,18 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 #btn-send{color:var(--primary);flex:none}
 #btn-send:hover{background:var(--soft);color:var(--primary)}
 .cbox:focus-within{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
-.perm-switch{flex:none;align-self:center;padding:1px;gap:1px;background:var(--canvas);border:1px solid var(--hairline);border-radius:9px}
-.perm-switch button{padding:3px 6px;font-size:10.5px;line-height:1.2;border-radius:7px;color:var(--faint)}
-.perm-switch button.on{background:var(--primary);color:var(--on-primary);box-shadow:none}
-.perm-switch button:hover{color:var(--ink)}
-@media (max-width:520px){ .perm-switch button{padding:3px 4px;font-size:9.5px} }
+.perm-pick{position:relative;flex:none;align-self:center}
+.perm-trigger{display:flex;align-items:center;gap:3px;height:26px;padding:0 7px;border:1px solid var(--hairline);border-radius:8px;background:var(--canvas);font-size:11px;color:var(--body);white-space:nowrap}
+.perm-trigger:hover{background:var(--soft);color:var(--ink)}
+.perm-trigger .caret{margin-left:1px}
+.perm-menu{position:absolute;left:0;bottom:calc(100% + 8px);z-index:80;width:190px;padding:4px;background:var(--canvas);border:1px solid var(--hairline);border-radius:11px;box-shadow:0 12px 32px rgba(20,20,19,.14),0 2px 6px rgba(20,20,19,.06)}
+.perm-menu[hidden]{display:none}
+.perm-menu button{display:flex;align-items:baseline;gap:8px;width:100%;padding:7px 8px;border-radius:7px;text-align:left;color:var(--body);font-size:12px}
+.perm-menu button:hover{background:var(--soft);color:var(--ink)}
+.perm-menu button.on{background:var(--soft);color:var(--ink)}
+.perm-menu button b{width:42px;flex:none;font-weight:600;color:var(--ink)}
+.perm-menu button span{font-size:11px;color:var(--faint)}
+@media (max-width:520px){ .perm-trigger{font-size:10px;padding:0 5px} .perm-menu{width:180px} }
 #input{
   flex:1;border:0;outline:none;background:none;resize:none;
   max-height:180px;padding:5px 4px;font-size:15px;line-height:1.5;color:var(--ink);
@@ -1469,7 +1476,14 @@ body.voice-tts #btn-tts{display:inline-flex!important}
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
-            <div class="cbox"><div id="perm-switch" class="seg perm-switch" style="display:none" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><button type="button" data-perm="plan">Plan</button><button type="button" data-perm="write">Write</button><button type="button" data-perm="free">Free</button></div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="cbox"><div id="perm-pick" class="perm-pick" style="display:none">
+              <button id="perm-trigger" class="perm-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><span id="perm-label">Write</span><span class="caret"></span></button>
+              <div id="perm-menu" class="perm-menu" role="listbox" hidden>
+                <button type="button" data-perm="plan" role="option"><b>Plan</b><span>只读规划</span></button>
+                <button type="button" data-perm="write" role="option"><b>Write</b><span>命令确认</span></button>
+                <button type="button" data-perm="free" role="option"><b>Free</b><span>全部免确认</span></button>
+              </div>
+            </div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
@@ -1647,7 +1661,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.10';
+var APP_VER = 'v0.4.11';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -14922,14 +14936,36 @@ function sendMessage(){
   }
   var _cmodeBtn = $('#btn-cmode');
   if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
-  var _permSel0 = $('#perm-switch'); /* v0.4.10：权限切换在输入框内部最左侧 */
-  if (_permSel0) _permSel0.addEventListener('click', function(e){
+  var _permPick = $('#perm-pick'), _permTrigger = $('#perm-trigger'), _permMenu = $('#perm-menu');
+  function closePermMenu(){
+    if (!_permMenu) return;
+    _permMenu.hidden = true;
+    if (_permTrigger) _permTrigger.setAttribute('aria-expanded', 'false');
+  }
+  function openPermMenu(){
+    if (!_permMenu) return;
+    _permMenu.hidden = false;
+    if (_permTrigger) _permTrigger.setAttribute('aria-expanded', 'true');
+  }
+  if (_permTrigger) _permTrigger.addEventListener('click', function(e){
+    e.stopPropagation();
+    if (_permMenu && _permMenu.hidden) openPermMenu(); else closePermMenu();
+  });
+  if (_permMenu) _permMenu.addEventListener('click', function(e){
+    e.stopPropagation();
     var b = e.target.closest && e.target.closest('button[data-perm]');
     if (!b) return;
     var v = b.getAttribute('data-perm');
     setPerm(v);
+    closePermMenu();
     try { renderComposerCtl(); } catch (x) {}
     UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', free: 'Free · 全部免确认' }[normPerm(v)] || v));
+  });
+  document.addEventListener('click', function(e){
+    if (_permPick && !_permPick.contains(e.target)) closePermMenu();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && _permMenu && !_permMenu.hidden){ e.preventDefault(); e.stopPropagation(); closePermMenu(); }
   });
 
   document.addEventListener('click', function(e){
@@ -14965,15 +15001,18 @@ function sendMessage(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
-    var _permSel = $('#perm-switch');
+    var _permSel = $('#perm-pick');
     if (_permSel){
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
-      var _pbs = _permSel.querySelectorAll('[data-perm]');
+      var _plab = $('#perm-label');
+      if (_plab) _plab.textContent = ({ plan: 'Plan', write: 'Write', free: 'Free' }[permNow()] || 'Write');
+      var _pbs = _permSel.querySelectorAll('#perm-menu [data-perm]');
       for (var _pi = 0; _pi < _pbs.length; _pi++)
         _pbs[_pi].classList.toggle('on', _pbs[_pi].getAttribute('data-perm') === permNow());
       _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', free: 'Free 全部工具、免确认' }[permNow()] || '');
+      closePermMenu();
     }
-    /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
+    /* v0.4.11：空态模式条状态同步（权限选框在输入框内） */
     var _segMode = $('#seg-mode');
     if (_segMode){
       var _modeBtns = _segMode.querySelectorAll('[data-mode]');

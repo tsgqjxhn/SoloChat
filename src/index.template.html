@@ -98,7 +98,14 @@
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
-            <div class="cbox"><div id="perm-switch" class="seg perm-switch" style="display:none" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><button type="button" data-perm="plan">Plan</button><button type="button" data-perm="write">Write</button><button type="button" data-perm="free">Free</button></div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="cbox"><div id="perm-pick" class="perm-pick" style="display:none">
+              <button id="perm-trigger" class="perm-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><span id="perm-label">Write</span><span class="caret"></span></button>
+              <div id="perm-menu" class="perm-menu" role="listbox" hidden>
+                <button type="button" data-perm="plan" role="option"><b>Plan</b><span>只读规划</span></button>
+                <button type="button" data-perm="write" role="option"><b>Write</b><span>命令确认</span></button>
+                <button type="button" data-perm="free" role="option"><b>Free</b><span>全部免确认</span></button>
+              </div>
+            </div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">

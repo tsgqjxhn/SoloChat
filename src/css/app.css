@@ -667,11 +667,18 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 #btn-send{color:var(--primary);flex:none}
 #btn-send:hover{background:var(--soft);color:var(--primary)}
 .cbox:focus-within{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
-.perm-switch{flex:none;align-self:center;padding:1px;gap:1px;background:var(--canvas);border:1px solid var(--hairline);border-radius:9px}
-.perm-switch button{padding:3px 6px;font-size:10.5px;line-height:1.2;border-radius:7px;color:var(--faint)}
-.perm-switch button.on{background:var(--primary);color:var(--on-primary);box-shadow:none}
-.perm-switch button:hover{color:var(--ink)}
-@media (max-width:520px){ .perm-switch button{padding:3px 4px;font-size:9.5px} }
+.perm-pick{position:relative;flex:none;align-self:center}
+.perm-trigger{display:flex;align-items:center;gap:3px;height:26px;padding:0 7px;border:1px solid var(--hairline);border-radius:8px;background:var(--canvas);font-size:11px;color:var(--body);white-space:nowrap}
+.perm-trigger:hover{background:var(--soft);color:var(--ink)}
+.perm-trigger .caret{margin-left:1px}
+.perm-menu{position:absolute;left:0;bottom:calc(100% + 8px);z-index:80;width:190px;padding:4px;background:var(--canvas);border:1px solid var(--hairline);border-radius:11px;box-shadow:0 12px 32px rgba(20,20,19,.14),0 2px 6px rgba(20,20,19,.06)}
+.perm-menu[hidden]{display:none}
+.perm-menu button{display:flex;align-items:baseline;gap:8px;width:100%;padding:7px 8px;border-radius:7px;text-align:left;color:var(--body);font-size:12px}
+.perm-menu button:hover{background:var(--soft);color:var(--ink)}
+.perm-menu button.on{background:var(--soft);color:var(--ink)}
+.perm-menu button b{width:42px;flex:none;font-weight:600;color:var(--ink)}
+.perm-menu button span{font-size:11px;color:var(--faint)}
+@media (max-width:520px){ .perm-trigger{font-size:10px;padding:0 5px} .perm-menu{width:180px} }
 #input{
   flex:1;border:0;outline:none;background:none;resize:none;
   max-height:180px;padding:5px 4px;font-size:15px;line-height:1.5;color:var(--ink);

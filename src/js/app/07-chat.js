@@ -1727,14 +1727,36 @@ function sendMessage(){
   }
   var _cmodeBtn = $('#btn-cmode');
   if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
-  var _permSel0 = $('#perm-switch'); /* v0.4.10：权限切换在输入框内部最左侧 */
-  if (_permSel0) _permSel0.addEventListener('click', function(e){
+  var _permPick = $('#perm-pick'), _permTrigger = $('#perm-trigger'), _permMenu = $('#perm-menu');
+  function closePermMenu(){
+    if (!_permMenu) return;
+    _permMenu.hidden = true;
+    if (_permTrigger) _permTrigger.setAttribute('aria-expanded', 'false');
+  }
+  function openPermMenu(){
+    if (!_permMenu) return;
+    _permMenu.hidden = false;
+    if (_permTrigger) _permTrigger.setAttribute('aria-expanded', 'true');
+  }
+  if (_permTrigger) _permTrigger.addEventListener('click', function(e){
+    e.stopPropagation();
+    if (_permMenu && _permMenu.hidden) openPermMenu(); else closePermMenu();
+  });
+  if (_permMenu) _permMenu.addEventListener('click', function(e){
+    e.stopPropagation();
     var b = e.target.closest && e.target.closest('button[data-perm]');
     if (!b) return;
     var v = b.getAttribute('data-perm');
     setPerm(v);
+    closePermMenu();
     try { renderComposerCtl(); } catch (x) {}
     UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', free: 'Free · 全部免确认' }[normPerm(v)] || v));
+  });
+  document.addEventListener('click', function(e){
+    if (_permPick && !_permPick.contains(e.target)) closePermMenu();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && _permMenu && !_permMenu.hidden){ e.preventDefault(); e.stopPropagation(); closePermMenu(); }
   });
 
   document.addEventListener('click', function(e){
@@ -1770,15 +1792,18 @@ function sendMessage(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
-    var _permSel = $('#perm-switch');
+    var _permSel = $('#perm-pick');
     if (_permSel){
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
-      var _pbs = _permSel.querySelectorAll('[data-perm]');
+      var _plab = $('#perm-label');
+      if (_plab) _plab.textContent = ({ plan: 'Plan', write: 'Write', free: 'Free' }[permNow()] || 'Write');
+      var _pbs = _permSel.querySelectorAll('#perm-menu [data-perm]');
       for (var _pi = 0; _pi < _pbs.length; _pi++)
         _pbs[_pi].classList.toggle('on', _pbs[_pi].getAttribute('data-perm') === permNow());
       _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', free: 'Free 全部工具、免确认' }[permNow()] || '');
+      closePermMenu();
     }
-    /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
+    /* v0.4.11：空态模式条状态同步（权限选框在输入框内） */
     var _segMode = $('#seg-mode');
     if (_segMode){
       var _modeBtns = _segMode.querySelectorAll('[data-mode]');
