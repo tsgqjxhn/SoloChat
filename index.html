@@ -810,6 +810,12 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .f-row.ext-row label{flex:0 0 auto}
 .f-row.ext-row .hint{flex:1 1 auto;min-width:0}
 .f-row.ext-row .f-acts{margin-left:auto;display:flex;gap:6px;align-items:center}
+.f-acts .btn.on{background:var(--soft);color:var(--ink)}
+.tool-cfg-host{margin:-2px 0 10px;padding:10px 12px;border:1px solid var(--hairline);border-radius:9px;background:var(--soft)}
+.tool-cfg-host[hidden]{display:none}
+.tool-cfg-host .f-row{margin-bottom:8px}
+.tool-cfg-host .f-row label{font-size:12px;margin-bottom:3px}
+.tool-cfg-host .hint{font-size:11.5px;margin:0 0 7px}
 .f-row label{display:block;font-size:13px;font-weight:500;color:var(--ink);margin-bottom:5px}
 .f-row .hint{font-size:12px;color:var(--faint);margin-top:4px}
 .f-in,.f-row textarea,.f-row select{
@@ -1644,7 +1650,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.11';
+var APP_VER = 'v0.4.12';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1755,6 +1761,7 @@ var DEF_CFG = {
   prompts: [],                  // / 提示词库 [{name, text}]
   ext: [],                      // v0.4.0：用户扩展 [{kind:'tool'|'skill', name, desc, url|body, modes, on}]（v1.0.0 工具只接受声明式 http）
   extOff: [],                   // v0.4.0：被关闭的内置工具 id 列表
+  extHidden: [],                // v0.4.12：扩展页里「删除」的内置项 id（隐藏 + 停止注入；可恢复）
   sysEdits: {},                 // v1.28：系统提示词各段改写（空串也算改过）
   picks: {},                    // v0.4.0c：本轮勾选的扩展 id（'tool:fs-read' 这种，按类型分组）
   mcp: [],                      // MCP 服务器登记 [{name, url, tools:[]}]
@@ -10572,7 +10579,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         i.value = cfgVal(path);
         return field(label, i, hint);
       }
-      p.appendChild(el('div', { class: 'hint', text: '模式参数按模式独立保存；VFS 只影响 Work，Agent 使用真实磁盘。命令超时、读取/写入上限等工具参数在「工具设置」里。' }));
+      p.appendChild(el('div', { class: 'hint', text: '模式参数按模式独立保存；VFS 只影响 Work，Agent 使用真实磁盘。命令超时、读取/写入上限等工具参数在「扩展 → 工具」对应卡片右侧的齿轮里。' }));
       p.appendChild(acc('Chat · 常规对话', function(b){
         b.appendChild(numCfg('modeCfg.chat.ctxMsgs', '上下文消息条数', '每次请求最多带多少条历史消息；默认 20。', 1, 500, 1));
         b.appendChild(numCfg('modeCfg.chat.ctxCharsKB', '上下文字符上限（KB）', '每条历史总计字符预算；默认 32KB，超出从最旧开始丢弃。', 1, 8192, 1));
@@ -10589,7 +10596,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
         b.appendChild(numCfg('modeCfg.agent.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
         b.appendChild(numCfg('modeCfg.agent.ctxCharsKB', '上下文字符上限（KB）', '默认 32KB。', 1, 8192, 1));
         b.appendChild(numCfg('modeCfg.agent.maxTurns', '工具轮次上限', '0 = 不限制（默认）；真实磁盘 Agent 循环的执行护栏。', 0, 99999, 1));
-        b.appendChild(el('div', { class: 'hint', text: 'Agent 没有 Work 的 VFS 200 文件/20MB 配额；它的单文件读写上限、结果截断、命令超时在「工具设置」里。' }));
+        b.appendChild(el('div', { class: 'hint', text: 'Agent 没有 Work 的 VFS 200 文件/20MB 配额；它的单文件读写上限、结果截断、命令超时在「扩展 → 工具」对应卡片右侧的齿轮里。' }));
       }, false));
       p.appendChild(acc('Soul · 自主人格', function(b){
         b.appendChild(numCfg('modeCfg.soul.ctxMsgs', '上下文消息条数', '默认 20。', 1, 500, 1));
@@ -10598,48 +10605,6 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
       }, false));
       p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
         el('button', { class: 'btn btn-sec', type: 'button', text: '恢复模式默认值', 'data-m': 'limits-mode-reset' })
-      ]));
-    });
-
-    /* —— 页④ 工具设置（v0.4.8：和模式分开的工具参数） —— */
-    page('tools', '工具设置', function(p){
-      function cfgVal(path){
-        var o = S.cfg, a = String(path || '').split('.');
-        for (var i = 0; i < a.length; i++){ if (!o || typeof o !== 'object') return ''; o = o[a[i]]; }
-        return o == null ? '' : o;
-      }
-      function numCfg(path, label, hint, min, max, step){
-        var i = el('input', { class: 'f-in', type: 'number', min: String(min), max: String(max), step: String(step || 1), 'data-cfg': path });
-        i.value = cfgVal(path);
-        return field(label, i, hint);
-      }
-      p.appendChild(el('div', { class: 'hint', text: '这里改「工具本身」的参数；模式切换不改这些值。改完立即生效，不需要重启。' }));
-      p.appendChild(acc('crawl · 批量抓取', function(b){
-        b.appendChild(numCfg('toolCfg.crawl.maxPages', '单次最大页数', '一次 crawl 最多抓多少页；默认 2000。沿「下一章/下一页」链式抓取时也受此上限。', 1, 20000, 100));
-      }, true));
-      p.appendChild(acc('web / browser · 网页读取', function(b){
-        b.appendChild(numCfg('toolCfg.web.maxCharsKB', 'web 正文回灌上限（KB）', 'web / vfs-read 单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8));
-        b.appendChild(numCfg('toolCfg.browser.readChars', 'browser-read 正文上限（字符）', '真实浏览器读取的正文长度；默认 12000，链接最多 40 条。', 500, 200000, 500));
-      }, false));
-      p.appendChild(acc('fs-read / fs-write · 文件工具', function(b){
-        b.appendChild(numCfg('toolCfg.read.maxCharsKB', '单文件读取上限（KB）', 'fs-read 一次注入上下文的上限；默认 64KB，长文件先定位再读。', 1, 4096, 8));
-        b.appendChild(numCfg('toolCfg.write.maxKB', '单文件写入上限（KB）', 'fs-write / write 单次写入的最大体积；默认 256KB。', 1, 4096, 16));
-      }, false));
-      p.appendChild(acc('shell / run · 命令与沙箱', function(b){
-        b.appendChild(numCfg('toolCfg.shell.outLines', '控制台保留行数', 'Work 控制台最多保留多少行输出；默认 500。', 10, 100000, 50));
-        b.appendChild(numCfg('toolCfg.shell.outCharsKB', '控制台字符上限（KB）', '默认 64KB。', 1, 4096, 8));
-        b.appendChild(numCfg('toolCfg.shell.resultKB', '单条结果回灌上限（KB）', '工具结果回灌模型和 UI 的单条上限；默认 64KB。', 1, 4096, 8));
-        b.appendChild(numCfg('toolCfg.shell.timeoutSec', '沙箱执行超时（秒）', '0 = 不限制（默认）；只约束 Work 沙箱，不影响真实命令确认。', 0, 600, 10));
-      }, false));
-      p.appendChild(acc('grep · 全文检索', function(b){
-        b.appendChild(numCfg('toolCfg.grep.maxHits', '最大命中数', 'grep 一次最多返回多少处；默认 200，--max 不能超过它。', 1, 10000, 50));
-      }, false));
-      p.appendChild(acc('sub / agent · 子智能体暂存', function(b){
-        b.appendChild(numCfg('toolCfg.sub.stageFiles', '暂存文件数上限', '子智能体一次最多暂存多少个文件；默认 6。', 1, 1000, 1));
-        b.appendChild(numCfg('toolCfg.sub.stageKB', '暂存总量上限（KB）', '子智能体暂存内容总字节；默认 300KB。', 1, 102400, 100));
-      }, false));
-      p.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start' }, [
-        el('button', { class: 'btn btn-sec', type: 'button', text: '恢复工具默认值', 'data-m': 'limits-tool-reset' })
       ]));
     });
 
@@ -11326,6 +11291,83 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       mcpBox.appendChild(form);
     }
 
+    /* v0.4.12：工具参数不再单独成页；按工具 id 映射到卡片右侧的设置弹层 */
+    function toolCfgFields(id){
+      function n(path, label, hint, min, max, step){ return { path: path, label: label, hint: hint, min: min, max: max, step: step }; }
+      var shell = [
+        n('toolCfg.shell.outLines', '控制台保留行数', 'Work 控制台最多保留多少行；默认 500。', 10, 100000, 50),
+        n('toolCfg.shell.outCharsKB', '控制台字符上限（KB）', '默认 64KB。', 1, 4096, 8),
+        n('toolCfg.shell.resultKB', '单条结果回灌上限（KB）', '默认 64KB。', 1, 4096, 8),
+        n('toolCfg.shell.timeoutSec', '沙箱执行超时（秒）', '0 = 不限制（默认）。', 0, 600, 10)
+      ];
+      var sub = [
+        n('toolCfg.sub.stageFiles', '暂存文件数上限', '子智能体一次最多暂存多少个文件；默认 6。', 1, 1000, 1),
+        n('toolCfg.sub.stageKB', '暂存总量上限（KB）', '默认 300KB。', 1, 102400, 100)
+      ];
+      var map = {
+        crawl: [n('toolCfg.crawl.maxPages', '单次最大页数', '一次 crawl 最多抓多少页；默认 2000。', 1, 20000, 100)],
+        web: [n('toolCfg.web.maxCharsKB', '正文回灌上限（KB）', 'web / 文档抓取单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8)],
+        get: [n('toolCfg.web.maxCharsKB', '文档正文回灌上限（KB）', '文档抽正文时的单次上限；默认 64KB。', 1, 4096, 8)],
+        'vfs-read': [n('toolCfg.web.maxCharsKB', '读虚拟工作区上限（KB）', 'vfs-read 单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8)],
+        'vfs-write': [n('modeCfg.work.vfsFileMB', '单个 VFS 文件上限（MB）', '默认 1MB；只影响 Work 虚拟工作区。', 1, 100, 1)],
+        'browser-read': [n('toolCfg.browser.readChars', '浏览器正文上限（字符）', '默认 12000，最多 200000。', 500, 200000, 500)],
+        'fs-read': [n('toolCfg.read.maxCharsKB', '单文件读取上限（KB）', '默认 64KB；长文件先定位再读。', 1, 4096, 8)],
+        'fs-write': [n('toolCfg.write.maxKB', '单文件写入上限（KB）', '默认 256KB。', 1, 4096, 16)],
+        cmd: shell, git: shell, python: shell, run: shell,
+        grep: [n('toolCfg.grep.maxHits', '最大命中数', '默认 200；--max 不能超过它。', 1, 10000, 50)],
+        sub: sub, suball: sub, agent: sub
+      };
+      return map[id] || [];
+    }
+    function openToolSettings(it, host, btn){
+      host.textContent = '';
+      var fields = toolCfgFields(it.id);
+      host.appendChild(el('div', { class: 'hint', text: fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。' }));
+      fields.forEach(function(f){
+        var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
+        var cur = S.cfg, a = f.path.split('.');
+        for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
+        inp.value = (cur == null ? '' : cur);
+        host.appendChild(field(f.label, inp, f.hint));
+      });
+      var close = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '收起' });
+      close.addEventListener('click', function(){
+        host.hidden = true;
+        if (btn) btn.classList.remove('on');
+      });
+      host.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:4px 0 0' }, [close]));
+    }
+    function reopenExtList(){
+      UI.openSettings();
+      setTimeout(function(){
+        var m = $('#modal');
+        if (!m) return;
+        var nb = m.querySelector('.set-nav button[data-sp="ext"]');
+        if (nb) nb.click();
+        var tb = null, tbs = m.querySelectorAll('.pt-tabs button');
+        for (var i = 0; i < tbs.length; i++) if (String(tbs[i].textContent || '').trim() === '工具'){ tb = tbs[i]; break; }
+        if (tb) tb.click();
+        var sm = m.querySelector('.ext-acc summary');
+        if (sm && sm.parentElement && !sm.parentElement.open) sm.click();
+      }, 30);
+    }
+    function deleteExt(it){
+      if (it.kind === 'builtin'){
+        UI.confirmBox({ title: '删除内置工具？', text: '「' + (it.title || it.id) + '」是内置工具，不能从代码里删除；会从扩展列表隐藏并停止注入/执行。可点列表底部「恢复已删除」找回。', okText: '删除', danger: true }).then(function(ok){
+          if (ok){
+            EXT.hide(it.id); UI.toast('已删除（隐藏）：' + (it.title || it.id));
+          }
+          reopenExtList();
+        });
+        return;
+      }
+      UI.confirmBox({ title: '删除扩展？', text: '删除「' + (it.title || it.name) + '」，不可恢复。', okText: '删除', danger: true }).then(function(ok){
+        if (ok){
+          EXT.del(it.id); UI.toast('已删除：' + (it.title || it.name));
+        }
+        reopenExtList();
+      });
+    }
     function renderList(kind){
       list.textContent = '';
       var all = EXT.all(), shown = 0;
@@ -11342,24 +11384,45 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') })
         ]);
         var dhost = el('div', { class: 'det-host' });
+        var shost = el('div', { class: 'tool-cfg-host', hidden: '' });
         var acts = el('div', { class: 'f-acts' });
-        /* v1.29.2：右侧箭头代替「查看」 */
-    acts.appendChild(chevBtn(dhost, function(){ return EXT.describe(it.id); }));
+        var cfgBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '工具设置' }, [icon('gear')]);
+        cfgBtn.addEventListener('click', function(e){
+          e.stopPropagation();
+          var open = !!shost.hidden;
+          shost.hidden = !open;
+          cfgBtn.classList.toggle('on', open);
+          if (open) openToolSettings(it, shost, cfgBtn);
+        });
+        acts.appendChild(cfgBtn);
         if (it.kind !== 'builtin'){
           var exBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
-          exBtn.addEventListener('click', function(){
-            try { savePkg(EXT.exportOne(it.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+          exBtn.addEventListener('click', function(e){
+            e.stopPropagation();
+            try { savePkg(EXT.exportOne(it.id)); } catch(e2){ UI.toast('导出失败：' + (e2 && e2.message || e2), true); }
           });
           acts.appendChild(exBtn);
-          var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-          delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); renderModeBox(); });
-          acts.appendChild(delBtn);
         }
+        var delBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '删除' }, [icon('trash')]);
+        delBtn.addEventListener('click', function(e){ e.stopPropagation(); deleteExt(it); });
+        acts.appendChild(delBtn);
+        /* v1.29.2：右侧箭头代替「查看」 */
+        acts.appendChild(chevBtn(dhost, function(){ return EXT.describe(it.id); }));
         row.appendChild(acts);
         list.appendChild(row);
+        list.appendChild(shost);
         list.appendChild(dhost);
       });
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
+      var hid = EXT.hiddenList();
+      if (hid.length){
+        var restore = el('button', { class: 'btn btn-sec rn-mini', type: 'button', text: '恢复已删除（' + hid.length + '）' });
+        restore.addEventListener('click', function(){
+          EXT.restoreHidden(); renderList(filter); renderModeBox(); updateAccLabels();
+          UI.toast('已恢复删除的内置项');
+        });
+        list.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:4px' }, [restore]));
+      }
     }
 
     /* ===== 市场（本地 packages/ 优先，远端 origin/ext/plugins 兜底）+ 三子页签调度 ===== */
@@ -18228,12 +18291,14 @@ var EXT = (function(){
   ];
   function userItems(){ return (S.cfg.ext || []); }
   function offList(){ var l = S.cfg.extOff; return Array.isArray(l) ? l : []; }
+  function hiddenList(){ var l = S.cfg.extHidden; return Array.isArray(l) ? l : []; }
+  function isHidden(id){ return hiddenList().indexOf(id) >= 0; }
   function save(){ saveCfg(); }
   /* B1-1：find() 返回的是 BUILTIN 原始对象（kind='tool'，没有 'builtin'），
      所以不能用 it.kind 判断内置。内置项一律先按 isKnownBuiltin 分流，
      开关只落在 cfg.extOff（会持久化），刷新后才不会丢。 */
   function isOn(id){
-    if (isKnownBuiltin(id)) return offList().indexOf(id) < 0;
+    if (isKnownBuiltin(id)) return !isHidden(id) && offList().indexOf(id) < 0;
     var it = find(id);
     if (it) return it.on !== false;
     return offList().indexOf(id) < 0;
@@ -18309,6 +18374,16 @@ var EXT = (function(){
   function del(id){
     var u = userItems().filter(function(x){ return x.id !== id && x.name !== id; });
     setCfg({ ext: u }); save();
+  }
+  /* v0.4.12：内置项不能从代码里删；「删除」= 隐藏 + 停止注入，可一键恢复 */
+  function hide(id){
+    if (!isKnownBuiltin(id)){ del(id); return; }
+    var l = hiddenList().filter(function(x){ return x !== id; });
+    l.push(id);
+    setCfg({ extHidden: l }); save();
+  }
+  function restoreHidden(){
+    setCfg({ extHidden: [] }); save();
   }
   /* 插件：{name, tools:[{name,desc,code}], skills:[{name,desc,body}]} 一次性展开成多条 */
   function importPlugin(pk){
@@ -18991,6 +19066,7 @@ function importFiles(list){
     var out = [], i, u = userItems(), seen = {};
     for (i = 0; i < BUILTIN.length; i++){
       var b = BUILTIN[i];
+      if (isHidden(b.id)) continue;
       out.push({ id: 'builtin:' + b.id, kind: 'tool', name: b.id, title: b.title, desc: b.brief || '',
         modes: b.modes.slice(), builtin: true, on: isOn(b.id) });
     }
@@ -19062,8 +19138,8 @@ function importFiles(list){
     if (off.length) lines.push('本轮已关闭的内置工具（调用会被拒绝）：' + off.join(' / '));
     return lines.join('\n');
   }
-  return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
-    isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, importPlugin: importPlugin, find: find,
+  return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.filter(function(b){ return !isHidden(b.id); }).map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
+    isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, hide: hide, restoreHidden: restoreHidden, isHidden: isHidden, hiddenList: hiddenList, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,

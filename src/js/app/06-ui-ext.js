@@ -82,6 +82,83 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       mcpBox.appendChild(form);
     }
 
+    /* v0.4.12：工具参数不再单独成页；按工具 id 映射到卡片右侧的设置弹层 */
+    function toolCfgFields(id){
+      function n(path, label, hint, min, max, step){ return { path: path, label: label, hint: hint, min: min, max: max, step: step }; }
+      var shell = [
+        n('toolCfg.shell.outLines', '控制台保留行数', 'Work 控制台最多保留多少行；默认 500。', 10, 100000, 50),
+        n('toolCfg.shell.outCharsKB', '控制台字符上限（KB）', '默认 64KB。', 1, 4096, 8),
+        n('toolCfg.shell.resultKB', '单条结果回灌上限（KB）', '默认 64KB。', 1, 4096, 8),
+        n('toolCfg.shell.timeoutSec', '沙箱执行超时（秒）', '0 = 不限制（默认）。', 0, 600, 10)
+      ];
+      var sub = [
+        n('toolCfg.sub.stageFiles', '暂存文件数上限', '子智能体一次最多暂存多少个文件；默认 6。', 1, 1000, 1),
+        n('toolCfg.sub.stageKB', '暂存总量上限（KB）', '默认 300KB。', 1, 102400, 100)
+      ];
+      var map = {
+        crawl: [n('toolCfg.crawl.maxPages', '单次最大页数', '一次 crawl 最多抓多少页；默认 2000。', 1, 20000, 100)],
+        web: [n('toolCfg.web.maxCharsKB', '正文回灌上限（KB）', 'web / 文档抓取单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8)],
+        get: [n('toolCfg.web.maxCharsKB', '文档正文回灌上限（KB）', '文档抽正文时的单次上限；默认 64KB。', 1, 4096, 8)],
+        'vfs-read': [n('toolCfg.web.maxCharsKB', '读虚拟工作区上限（KB）', 'vfs-read 单次注入上下文的正文字符；默认 64KB。', 1, 4096, 8)],
+        'vfs-write': [n('modeCfg.work.vfsFileMB', '单个 VFS 文件上限（MB）', '默认 1MB；只影响 Work 虚拟工作区。', 1, 100, 1)],
+        'browser-read': [n('toolCfg.browser.readChars', '浏览器正文上限（字符）', '默认 12000，最多 200000。', 500, 200000, 500)],
+        'fs-read': [n('toolCfg.read.maxCharsKB', '单文件读取上限（KB）', '默认 64KB；长文件先定位再读。', 1, 4096, 8)],
+        'fs-write': [n('toolCfg.write.maxKB', '单文件写入上限（KB）', '默认 256KB。', 1, 4096, 16)],
+        cmd: shell, git: shell, python: shell, run: shell,
+        grep: [n('toolCfg.grep.maxHits', '最大命中数', '默认 200；--max 不能超过它。', 1, 10000, 50)],
+        sub: sub, suball: sub, agent: sub
+      };
+      return map[id] || [];
+    }
+    function openToolSettings(it, host, btn){
+      host.textContent = '';
+      var fields = toolCfgFields(it.id);
+      host.appendChild(el('div', { class: 'hint', text: fields.length ? '只影响这个工具的运行参数；改完立即生效。' : '这个工具没有独立的数值参数；启停用左侧勾选，调用详情点右侧箭头。' }));
+      fields.forEach(function(f){
+        var inp = el('input', { class: 'f-in', type: 'number', min: String(f.min), max: String(f.max), step: String(f.step), 'data-cfg': f.path });
+        var cur = S.cfg, a = f.path.split('.');
+        for (var i = 0; i < a.length; i++) cur = cur && cur[a[i]];
+        inp.value = (cur == null ? '' : cur);
+        host.appendChild(field(f.label, inp, f.hint));
+      });
+      var close = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '收起' });
+      close.addEventListener('click', function(){
+        host.hidden = true;
+        if (btn) btn.classList.remove('on');
+      });
+      host.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin:4px 0 0' }, [close]));
+    }
+    function reopenExtList(){
+      UI.openSettings();
+      setTimeout(function(){
+        var m = $('#modal');
+        if (!m) return;
+        var nb = m.querySelector('.set-nav button[data-sp="ext"]');
+        if (nb) nb.click();
+        var tb = null, tbs = m.querySelectorAll('.pt-tabs button');
+        for (var i = 0; i < tbs.length; i++) if (String(tbs[i].textContent || '').trim() === '工具'){ tb = tbs[i]; break; }
+        if (tb) tb.click();
+        var sm = m.querySelector('.ext-acc summary');
+        if (sm && sm.parentElement && !sm.parentElement.open) sm.click();
+      }, 30);
+    }
+    function deleteExt(it){
+      if (it.kind === 'builtin'){
+        UI.confirmBox({ title: '删除内置工具？', text: '「' + (it.title || it.id) + '」是内置工具，不能从代码里删除；会从扩展列表隐藏并停止注入/执行。可点列表底部「恢复已删除」找回。', okText: '删除', danger: true }).then(function(ok){
+          if (ok){
+            EXT.hide(it.id); UI.toast('已删除（隐藏）：' + (it.title || it.id));
+          }
+          reopenExtList();
+        });
+        return;
+      }
+      UI.confirmBox({ title: '删除扩展？', text: '删除「' + (it.title || it.name) + '」，不可恢复。', okText: '删除', danger: true }).then(function(ok){
+        if (ok){
+          EXT.del(it.id); UI.toast('已删除：' + (it.title || it.name));
+        }
+        reopenExtList();
+      });
+    }
     function renderList(kind){
       list.textContent = '';
       var all = EXT.all(), shown = 0;
@@ -98,24 +175,45 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
           el('span', { class: 'hint', text: kindName + ' · ' + modeTxt + ' · ' + (it.brief || it.desc || '') })
         ]);
         var dhost = el('div', { class: 'det-host' });
+        var shost = el('div', { class: 'tool-cfg-host', hidden: '' });
         var acts = el('div', { class: 'f-acts' });
-        /* v1.29.2：右侧箭头代替「查看」 */
-    acts.appendChild(chevBtn(dhost, function(){ return EXT.describe(it.id); }));
+        var cfgBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '工具设置' }, [icon('gear')]);
+        cfgBtn.addEventListener('click', function(e){
+          e.stopPropagation();
+          var open = !!shost.hidden;
+          shost.hidden = !open;
+          cfgBtn.classList.toggle('on', open);
+          if (open) openToolSettings(it, shost, cfgBtn);
+        });
+        acts.appendChild(cfgBtn);
         if (it.kind !== 'builtin'){
           var exBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '导出' });
-          exBtn.addEventListener('click', function(){
-            try { savePkg(EXT.exportOne(it.id)); } catch(e){ UI.toast('导出失败：' + (e && e.message || e), true); }
+          exBtn.addEventListener('click', function(e){
+            e.stopPropagation();
+            try { savePkg(EXT.exportOne(it.id)); } catch(e2){ UI.toast('导出失败：' + (e2 && e2.message || e2), true); }
           });
           acts.appendChild(exBtn);
-          var delBtn = el('button', { class: 'btn btn-ghost rn-mini', text: '删除' });
-          delBtn.addEventListener('click', function(){ EXT.del(it.id); renderList(filter); renderModeBox(); });
-          acts.appendChild(delBtn);
         }
+        var delBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', title: '删除' }, [icon('trash')]);
+        delBtn.addEventListener('click', function(e){ e.stopPropagation(); deleteExt(it); });
+        acts.appendChild(delBtn);
+        /* v1.29.2：右侧箭头代替「查看」 */
+        acts.appendChild(chevBtn(dhost, function(){ return EXT.describe(it.id); }));
         row.appendChild(acts);
         list.appendChild(row);
+        list.appendChild(shost);
         list.appendChild(dhost);
       });
       if (!shown) list.appendChild(el('div', { class: 'hint', text: '这一类还没有内容。' }));
+      var hid = EXT.hiddenList();
+      if (hid.length){
+        var restore = el('button', { class: 'btn btn-sec rn-mini', type: 'button', text: '恢复已删除（' + hid.length + '）' });
+        restore.addEventListener('click', function(){
+          EXT.restoreHidden(); renderList(filter); renderModeBox(); updateAccLabels();
+          UI.toast('已恢复删除的内置项');
+        });
+        list.appendChild(el('div', { class: 'f-actions', style: 'justify-content:flex-start;margin-top:4px' }, [restore]));
+      }
     }
 
     /* ===== 市场（本地 packages/ 优先，远端 origin/ext/plugins 兜底）+ 三子页签调度 ===== */

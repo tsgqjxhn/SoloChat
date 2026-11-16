@@ -653,12 +653,14 @@ var EXT = (function(){
   ];
   function userItems(){ return (S.cfg.ext || []); }
   function offList(){ var l = S.cfg.extOff; return Array.isArray(l) ? l : []; }
+  function hiddenList(){ var l = S.cfg.extHidden; return Array.isArray(l) ? l : []; }
+  function isHidden(id){ return hiddenList().indexOf(id) >= 0; }
   function save(){ saveCfg(); }
   /* B1-1：find() 返回的是 BUILTIN 原始对象（kind='tool'，没有 'builtin'），
      所以不能用 it.kind 判断内置。内置项一律先按 isKnownBuiltin 分流，
      开关只落在 cfg.extOff（会持久化），刷新后才不会丢。 */
   function isOn(id){
-    if (isKnownBuiltin(id)) return offList().indexOf(id) < 0;
+    if (isKnownBuiltin(id)) return !isHidden(id) && offList().indexOf(id) < 0;
     var it = find(id);
     if (it) return it.on !== false;
     return offList().indexOf(id) < 0;
@@ -734,6 +736,16 @@ var EXT = (function(){
   function del(id){
     var u = userItems().filter(function(x){ return x.id !== id && x.name !== id; });
     setCfg({ ext: u }); save();
+  }
+  /* v0.4.12：内置项不能从代码里删；「删除」= 隐藏 + 停止注入，可一键恢复 */
+  function hide(id){
+    if (!isKnownBuiltin(id)){ del(id); return; }
+    var l = hiddenList().filter(function(x){ return x !== id; });
+    l.push(id);
+    setCfg({ extHidden: l }); save();
+  }
+  function restoreHidden(){
+    setCfg({ extHidden: [] }); save();
   }
   /* 插件：{name, tools:[{name,desc,code}], skills:[{name,desc,body}]} 一次性展开成多条 */
   function importPlugin(pk){
@@ -1416,6 +1428,7 @@ function importFiles(list){
     var out = [], i, u = userItems(), seen = {};
     for (i = 0; i < BUILTIN.length; i++){
       var b = BUILTIN[i];
+      if (isHidden(b.id)) continue;
       out.push({ id: 'builtin:' + b.id, kind: 'tool', name: b.id, title: b.title, desc: b.brief || '',
         modes: b.modes.slice(), builtin: true, on: isOn(b.id) });
     }
@@ -1487,8 +1500,8 @@ function importFiles(list){
     if (off.length) lines.push('本轮已关闭的内置工具（调用会被拒绝）：' + off.join(' / '));
     return lines.join('\n');
   }
-  return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
-    isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, importPlugin: importPlugin, find: find,
+  return { BUILTIN: BUILTIN, all: function(){ return BUILTIN.filter(function(b){ return !isHidden(b.id); }).map(function(b){ var o = {}; for (var k in b) o[k] = b[k]; o.kind = 'builtin'; o.on = isOn(b.id); return o; }).concat(userItems().map(function(x){ var o = {}; for (var k in x) o[k] = x[k]; o.on = x.on !== false; return o; })); },
+    isOn: isOn, setOn: setOn, add: add, upsert: upsert, del: del, hide: hide, restoreHidden: restoreHidden, isHidden: isHidden, hiddenList: hiddenList, importPlugin: importPlugin, find: find,
     toolsFor: toolsFor, skillsFor: skillsFor, hasTool: hasTool, isKnownBuiltin: isKnownBuiltin,
     runTool: runTool, skillText: skillText, skillNames: skillNames, prompt: prompt, registry: registry,
     hasSmall: hasSmall, runSmall: runSmall,

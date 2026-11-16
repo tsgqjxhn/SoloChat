@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.11 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.12 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -29,16 +29,16 @@ Work、Agent、Soul 的输入框内部最左侧有一个权限触发钮，点开
 
 旧配置 `ask / auto / readonly / yolo` 会自动迁移到 `Write / Free / Plan`，不需要手动改。
 
-### 模式设置 / 工具设置
+### 模式设置 / 工具参数
 
-设置里新增两个独立页：
+设置里保留模式页，工具参数不再单独成页：
 
 - **模式设置**：按 Chat / Work / Agent / Soul 四块配置上下文条数、上下文字符；Work 另有 VFS 文件数、总量、单文件和工具轮次上限；Agent / Soul 各有工具轮次。
-- **工具设置**：crawl 单次页数、web / browser-read 正文上限、fs-read / fs-write 上限、Work 控制台行数/字符/结果回灌/沙箱超时、grep 命中数、子智能体暂存文件与容量。改完立即生效，不需要重启。
+- **工具参数**：到「扩展 → 工具」每张卡片右侧点齿轮，参数会在该卡片下方**就地展开**（crawl 页数、web/browser 正文上限、fs-read/write 上限、控制台、grep、子智能体暂存等）。改完立即生效，不需要重启。
 
 基础模式条回到空态原位置（Chat / Work / Agent / Soul 固定居中，不再放入输入框）；输入框内部最左侧只放上拉式 Plan / Write / Free 权限选框。
 
-Agent 没有 Work 的 VFS 文件/总量配额（它直接操作真实工作区），但有工具轮次、单文件读写上限、结果截断、diff 预览和工作区外写入确认，这些在「模式设置 / 工具设置」里调整；宿主单文件硬上限提升到 4MB，页面侧默认仍是 256KB。
+Agent 没有 Work 的 VFS 文件/总量配额（它直接操作真实工作区），但有工具轮次、单文件读写上限、结果截断、diff 预览和工作区外写入确认；工具参数到「扩展 → 工具」卡片齿轮里改，宿主单文件硬上限提升到 4MB，页面侧默认仍是 256KB。
 
 ### 会话执行记录
 
@@ -108,7 +108,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ## Android 版
 
-`dist/SoloChat-Android-0.4.11.apk`（480,310 字节，versionCode 29；项目自有 keystore 签名）
+`dist/SoloChat-Android-0.4.12.apk`（481,754 字节，versionCode 30；项目自有 keystore 签名）
 
 - 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
 - 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
@@ -186,7 +186,7 @@ node tools/build-android.mjs  # 注入 Android assets
 
 ## 版本与发布
 
-- 当前版本 **v0.4.11**；桌面 `APP_VER` / FileVersion **0.4.11.0**；Android `versionCode 29`。
+- 当前版本 **v0.4.12**；桌面 `APP_VER` / FileVersion **0.4.12.0**；Android `versionCode 30`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
 - 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/` 与 `dist/packages/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
@@ -196,11 +196,11 @@ node tools/build-android.mjs  # 注入 Android assets
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,533,824 字节**（v0.4.11，FileVersion 0.4.11.0），单文件 |
-| 主产物 | `index.html` **1,350,769 字节 / 22,962 行** |
-| 源码 | `src/` **19 个文件 / 1,350,841 字节** |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,537,408 字节**（v0.4.12，FileVersion 0.4.12.0），单文件 |
+| 主产物 | `index.html` **1,354,634 字节 / 23,038 行** |
+| 源码 | `src/` **19 个文件 / 1,354,706 字节** |
 | 宿主源码 | `host/Program.cs` **205,349 字节 / 3,854 行** |
-| Android APK | `dist/SoloChat-Android-0.4.11.apk` **480,310 字节**（versionCode 29） |
+| Android APK | `dist/SoloChat-Android-0.4.12.apk` **481,754 字节**（versionCode 30） |
 
 ## 数据存储
 

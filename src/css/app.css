@@ -784,6 +784,12 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .f-row.ext-row label{flex:0 0 auto}
 .f-row.ext-row .hint{flex:1 1 auto;min-width:0}
 .f-row.ext-row .f-acts{margin-left:auto;display:flex;gap:6px;align-items:center}
+.f-acts .btn.on{background:var(--soft);color:var(--ink)}
+.tool-cfg-host{margin:-2px 0 10px;padding:10px 12px;border:1px solid var(--hairline);border-radius:9px;background:var(--soft)}
+.tool-cfg-host[hidden]{display:none}
+.tool-cfg-host .f-row{margin-bottom:8px}
+.tool-cfg-host .f-row label{font-size:12px;margin-bottom:3px}
+.tool-cfg-host .hint{font-size:11.5px;margin:0 0 7px}
 .f-row label{display:block;font-size:13px;font-weight:500;color:var(--ink);margin-bottom:5px}
 .f-row .hint{font-size:12px;color:var(--faint);margin-top:4px}
 .f-in,.f-row textarea,.f-row select{
