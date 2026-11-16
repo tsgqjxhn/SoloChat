@@ -488,12 +488,6 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .crow{display:grid;grid-template-columns:1fr minmax(300px,var(--content-w)) 1fr;grid-template-rows:auto auto;align-items:end;gap:8px}
 .cwrap{grid-column:2;grid-row:2;display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
-#composer-mode{flex:none;display:flex;align-items:center;margin-right:2px}
-#composer-mode .seg{padding:1px;gap:1px}
-#composer-mode .seg button{padding:4px 7px;font-size:11px;height:28px;gap:4px}
-#composer-mode .seg-ic{width:12px;height:12px}
-#composer .czone.cz-l{min-width:0;overflow-x:auto;scrollbar-width:none}
-#composer .czone.cz-l::-webkit-scrollbar{display:none}
 .cz-l{grid-column:1;grid-row:2;justify-self:stretch;justify-content:flex-start}
 .cz-r2{grid-column:3;grid-row:2;justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
@@ -515,8 +509,6 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:13px;
 }
 .sel-think{width:96px}
-.sel-perm{width:78px}
-@media (max-width: 900px){ .sel-perm{width:70px;font-size:12px} }
 .icon-btn:disabled{opacity:.35;cursor:not-allowed}
 #ws-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* v2.9：工作区选择按钮（Agent 主页内，顶栏不再放） */
@@ -701,6 +693,11 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 #btn-send{color:var(--primary);flex:none}
 #btn-send:hover{background:var(--soft);color:var(--primary)}
 .cbox:focus-within{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+.perm-switch{flex:none;align-self:center;padding:1px;gap:1px;background:var(--canvas);border:1px solid var(--hairline);border-radius:9px}
+.perm-switch button{padding:3px 6px;font-size:10.5px;line-height:1.2;border-radius:7px;color:var(--faint)}
+.perm-switch button.on{background:var(--primary);color:var(--on-primary);box-shadow:none}
+.perm-switch button:hover{color:var(--ink)}
+@media (max-width:520px){ .perm-switch button{padding:3px 4px;font-size:9.5px} }
 #input{
   flex:1;border:0;outline:none;background:none;resize:none;
   max-height:180px;padding:5px 4px;font-size:15px;line-height:1.5;color:var(--ink);
@@ -1252,9 +1249,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .crow{display:flex;flex-wrap:wrap;gap:6px}
   body.m-phone #chips{order:0;width:100%;margin:0}
   body.m-phone .czone.cz-l{order:1;width:100%;padding:0;gap:2px;overflow-x:auto;justify-content:flex-start}
-  body.m-phone #composer-mode .seg button span{display:none}
-  body.m-phone #composer-mode .seg button{height:34px;padding:0 8px}
-  body.m-phone #composer-mode .seg-ic{width:15px;height:15px}
   body.m-phone .czone.cz-l .icon-btn{flex:none;width:42px;height:42px;color:var(--ink);opacity:.72}
   body.m-phone .czone.cz-l #btn-more{margin-left:auto;opacity:.85}
   /* 手机端把六类「本轮选择」收成一个扩展按钮，点开 / 面板统一搜索/勾选，避免 10 个图标挤一排 */
@@ -1324,7 +1318,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}
   body.m-phone #empty .e-mode-desc{font-size:12px;line-height:1.6;padding:0 10px}
-  body.m-phone #sel-perm{max-width:92px;font-size:11px}
   body.m-phone #empty .e-modes .seg button{padding:6px 10px;font-size:12px}
   body.m-phone #tb-mode{display:none}
   body.m-phone #sel-model{max-width:92px}
@@ -1415,11 +1408,6 @@ body.voice-tts #btn-tts{display:inline-flex!important}
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
         <div id="tb-mode"><span id="tb-mode-name">Chat</span></div>
-        <select id="sel-perm" class="sel-mini sel-perm" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Yolo 全部免确认">
-          <option value="plan">Plan</option>
-          <option value="write">Write</option>
-          <option value="yolo">Yolo</option>
-        </select>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
@@ -1447,14 +1435,6 @@ body.voice-tts #btn-tts{display:inline-flex!important}
           <!-- v1.1.6：附件缩略图放进输入框所在的中间列，默认显示在输入框上方。 -->
           <div id="chips"></div>
           <div class="czone cz-l">
-            <div id="composer-mode" class="composer-mode">
-              <div class="seg seg-sm" id="seg-mode" title="模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格">
-                <button type="button" class="on" data-mode="chat" title="Chat：通用推理与写作"><svg class="ic seg-ic fill"><use href="#i-logo"/></svg><span>Chat</span></button>
-                <button type="button" data-mode="work" title="Work：虚拟沙箱"><svg class="ic seg-ic"><use href="#i-work"/></svg><span>Work</span></button>
-                <button type="button" data-mode="agent" title="Agent：真实文件工具"><svg class="ic seg-ic fill"><use href="#i-agent"/></svg><span>Agent</span></button>
-                <button type="button" data-mode="soul" title="Soul：长期记忆与人格"><svg class="ic seg-ic fill"><use href="#i-user"/></svg><span>Soul</span></button>
-              </div>
-            </div>
             <button id="btn-m-settings" class="icon-btn m-set-btn" data-m="settings" title="设置"><svg class="ic"><use href="#i-gear"/></svg></button>
             <button id="btn-soul-profile" class="icon-btn" type="button" title="Soul 人格设置（脸 / 性格 / 声音 / 能力 / 记忆 / 身体）"><span class="sp-face">🌙</span></button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
@@ -1472,7 +1452,7 @@ body.voice-tts #btn-tts{display:inline-flex!important}
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
-            <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="cbox"><div id="perm-switch" class="seg perm-switch" style="display:none" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><button type="button" data-perm="plan">Plan</button><button type="button" data-perm="write">Write</button><button type="button" data-perm="free">Free</button></div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">
@@ -1650,7 +1630,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.9';
+var APP_VER = 'v0.4.10';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1769,7 +1749,7 @@ var DEF_CFG = {
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
   planGate: true,     // v1.29.0：本会话第一次写入先手动确认一次（之后自动写入）
-  permMode: 'write',  // v0.4.7：plan 只读规划 / write 全部工具、命令需确认 / yolo 全部工具且免确认
+  permMode: 'write',  // v0.4.10：plan 只读规划 / write 全部工具、命令需确认 / free 全部工具且免确认（旧名 yolo）
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -2190,7 +2170,7 @@ function loadCfg(){
   try {
     var _oldPerm = cfg.permMode;
     cfg.permMode = normPerm(cfg.permMode);
-    if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'yolo'; // 旧版 planGate=false 等同意免确认
+    if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'free'; // 旧版 planGate=false 等同意免确认
     applyLimitCfg(cfg.mode);
   } catch (e) {}
   if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
@@ -2569,12 +2549,12 @@ function sessMode(s){
   var g = groupOfSession(s);
   return (s && s.mode) || (g && g.mode) || (S.cfg && S.cfg.mode) || 'chat';
 }
-/* v0.4.7：执行权限 —— plan 只读 / write 全部工具但命令确认 / yolo 全部免确认。
-   旧值 ask→write、auto→yolo、readonly→plan；旧配置不会把权限重置。 */
+/* v0.4.10：执行权限 —— plan 只读 / write 全部工具但命令确认 / free 全部免确认（Free，旧值 yolo）。
+   旧值 ask→write、auto/yolo→free、readonly→plan；旧配置不会把权限重置。 */
 function normPerm(v){
   v = String(v || '').toLowerCase();
   if (v === 'plan' || v === 'readonly' || v === 'read') return 'plan';
-  if (v === 'yolo' || v === 'auto' || v === 'full') return 'yolo';
+  if (v === 'free' || v === 'yolo' || v === 'auto' || v === 'full') return 'free';
   return 'write';
 }
 function sessPerm(s){
@@ -4123,9 +4103,9 @@ var NET = (function(){
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var _pm = permForSid(session && session.id);
     if (S.cfg.mode !== 'chat'){
-      sys += '\n\n【执行权限：' + (_pm === 'plan' ? 'Plan 只读规划' : (_pm === 'yolo' ? 'Yolo 免确认' : 'Write 命令确认')) + '】';
-      if (_pm === 'plan') sys += ' 只能使用只读工具（搜索/网页读取/文件读取/列目录/智能体与扩展的只读能力）；禁止写文件、补丁、cmd/git/python、vfs-write、run、crawl、download。先给出可执行计划，等用户切到 Write 或 Yolo 再落地。';
-      else if (_pm === 'yolo') sys += ' 所有工具与命令都允许直接执行，不再弹用户确认；仍要如实报告退出码、失败与未验证项，禁止把没做的事写成完成。';
+      sys += '\n\n【执行权限：' + (_pm === 'plan' ? 'Plan 只读规划' : (_pm === 'free' ? 'Free 免确认' : 'Write 命令确认')) + '】';
+      if (_pm === 'plan') sys += ' 只能使用只读工具（搜索/网页读取/文件读取/列目录/智能体与扩展的只读能力）；禁止写文件、补丁、cmd/git/python、vfs-write、run、crawl、download。先给出可执行计划，等用户切到 Write 或 Free 再落地。';
+      else if (_pm === 'free') sys += ' 所有工具与命令都允许直接执行，不再弹用户确认；仍要如实报告退出码、失败与未验证项，禁止把没做的事写成完成。';
       else sys += ' 所有扩展工具都可用；cmd、git、python 每次执行前会弹确认，用户拒绝就停下换方案，不要原样重试；写文件在工作区内可直接应用。';
     }
     /* v0.4.7：把用户上下文里的链接和内置浏览器当前页交给模型；不要求用户重复发链接 */
@@ -10478,7 +10458,7 @@ function buildSettings(){
   var pgRow = el('div', { class: 'f-row' });
   (function(){
   var pmSel = el('select', { class: 'f-in' });
-  [['plan', 'Plan（只读规划：不写文件、不跑命令）'], ['write', 'Write（全部工具；cmd / git / Python 需确认）'], ['yolo', 'Yolo（全部工具与命令免确认，危险）']].forEach(function(o){
+  [['plan', 'Plan（只读规划：不写文件、不跑命令）'], ['write', 'Write（全部工具；cmd / git / Python 需确认）'], ['free', 'Free（全部工具与命令免确认，危险）']].forEach(function(o){
     pmSel.appendChild(el('option', { value: o[0], text: o[1], selected: (permNow() === o[0]) ? '' : null }));
   });
   pmSel.addEventListener('change', function(){ setPerm(pmSel.value); });
@@ -12241,7 +12221,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var fModel = mark(modelSelect(d.model || '', '跟随分组 / 全局'), 'model');
     var fPerm = mark((function(){
       var ps = el('select', { class: 'f-in' });
-      [['plan', 'Plan · 只读规划'], ['write', 'Write · 命令确认'], ['yolo', 'Yolo · 全部免确认']].forEach(function(o){
+      [['plan', 'Plan · 只读规划'], ['write', 'Write · 命令确认'], ['free', 'Free · 全部免确认']].forEach(function(o){
         ps.appendChild(el('option', { value: o[0], text: o[1], selected: (normPerm(d.perm || S.cfg.permMode) === o[0]) ? '' : null }));
       });
       return ps;
@@ -12259,7 +12239,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         field('模型', fModel, '空=跟随分组 / 全局；会话值优先')
       ]),
       el('div', { class: 'f-grid' }, [
-        field('执行权限', fPerm, 'Plan 只读 / Write 命令确认 / Yolo 全免确认')
+        field('执行权限', fPerm, 'Plan 只读 / Write 命令确认 / Free 全免确认')
       ]),
       el('div', { class: 'f-grid' }, [
         field('temperature', fTemp, '0~2；留空=跟随'),
@@ -13277,7 +13257,19 @@ function holdBusy(d, sid){
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    /* v0.4.8：模式切换移到输入框最左侧，空态不再创建/固定模式条 */
+    /* v0.4.10：模式切换恢复空态原位置（Plan/Write/Free 在输入框内部） */
+    var modes = el('div', { class: 'e-modes e-modes-fixed' });
+    var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
+      title: '模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格' });
+    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
+      var b = el('button', { type: 'button', 'data-mode': t[0] });
+      b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
+      b.appendChild(document.createTextNode(t[1]));
+      if ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona) b.classList.add('on');
+      seg.appendChild(b);
+    });
+    modes.appendChild(seg);
+    $empty.appendChild(modes);
     if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
@@ -13316,7 +13308,7 @@ function holdBusy(d, sid){
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
       core.appendChild(el('h1', { text: 'Agent：真实文件工具' }));
-      core.appendChild(el('div', { class: 'e-mode-desc', text: '在授权文件夹里读写代码、运行命令 / Python / Git；按 Plan / Write / Yolo 控制执行权限。' }));
+      core.appendChild(el('div', { class: 'e-mode-desc', text: '在授权文件夹里读写代码、运行命令 / Python / Git；按 Plan / Write / Free 控制执行权限。' }));
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '选择工作区文件夹：本次会话中 AI 只能读写该文件夹内的文件（开始后不可更改）'
@@ -13719,13 +13711,13 @@ function sendMessage(){
       _nb.click(); UI.toast('已撤销最近一次写入');
       return;
     }
-    if (cmd === '/perm'){ /* v0.4.7：Plan 只读 / Write 命令确认 / Yolo 免确认 */
+    if (cmd === '/perm'){ /* v0.4.7：Plan 只读 / Write 命令确认 / Free 免确认 */
       var _pv = text.slice(5).trim().toLowerCase();
       $input.value = ''; $input.style.height = ''; UI.autosize();
-      var _okv = ['plan', 'write', 'yolo', 'ask', 'auto', 'readonly'];
-      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm plan|write|yolo（当前 ' + permNow() + '）', true); return; }
+      var _okv = ['plan', 'write', 'free', 'ask', 'auto', 'readonly'];
+      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm plan|write|free（当前 ' + permNow() + '）', true); return; }
       setPerm(_pv); renderComposerCtl();
-      UI.toast('执行权限已设为 ' + ({ plan: 'Plan 只读', write: 'Write 命令确认', yolo: 'Yolo 免确认' })[normPerm(_pv)]);
+      UI.toast('执行权限已设为 ' + ({ plan: 'Plan 只读', write: 'Write 命令确认', free: 'Free 免确认' })[normPerm(_pv)]);
       return;
     }
     if (cmd === '/status'){ /* v0.3.84：当前会话/工作区/权限状态（对标 Devin 的会话状态栏） */
@@ -14913,11 +14905,14 @@ function sendMessage(){
   }
   var _cmodeBtn = $('#btn-cmode');
   if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
-  var _permSel0 = $('#sel-perm');
-  if (_permSel0) _permSel0.addEventListener('change', function(){
-    setPerm(_permSel0.value);
-    try { renderComposerCtl(); } catch (e) {}
-    UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', yolo: 'Yolo · 全部免确认' }[_permSel0.value] || _permSel0.value));
+  var _permSel0 = $('#perm-switch'); /* v0.4.10：权限切换在输入框内部最左侧 */
+  if (_permSel0) _permSel0.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('button[data-perm]');
+    if (!b) return;
+    var v = b.getAttribute('data-perm');
+    setPerm(v);
+    try { renderComposerCtl(); } catch (x) {}
+    UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', free: 'Free · 全部免确认' }[normPerm(v)] || v));
   });
 
   document.addEventListener('click', function(e){
@@ -14953,11 +14948,13 @@ function sendMessage(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
-    var _permSel = $('#sel-perm');
+    var _permSel = $('#perm-switch');
     if (_permSel){
-      _permSel.value = permNow();
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
-      _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', yolo: 'Yolo 全部工具、免确认' }[permNow()] || '');
+      var _pbs = _permSel.querySelectorAll('[data-perm]');
+      for (var _pi = 0; _pi < _pbs.length; _pi++)
+        _pbs[_pi].classList.toggle('on', _pbs[_pi].getAttribute('data-perm') === permNow());
+      _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', free: 'Free 全部工具、免确认' }[permNow()] || '');
     }
     /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
     var _segMode = $('#seg-mode');
@@ -17542,11 +17539,11 @@ var FS = (function(){
   /* v2.2：工具循环状态按会话隔离（切走后仍在后台推进，互不干扰） */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false }); }
-  /* v0.4.7：Plan / Write / Yolo 的共用操作白名单与确认策略 */
+  /* v0.4.10：Plan / Write / Free 的共用操作白名单与确认策略 */
   var PLAN_DENY = ['fs-write','fs-edit','patch','cmd','git','python','vfs-write','run','crawl','download','extract'];
   function planDenied(op, sid){ return permForSid(sid) === 'plan' && PLAN_DENY.indexOf(op) >= 0; }
   function askRun(title, text, okText, sid){
-    if (permForSid(sid) === 'yolo') return Promise.resolve(true); // Yolo：连命令确认也跳过
+    if (permForSid(sid) === 'free') return Promise.resolve(true); // Free：连命令确认也跳过
     return UI.confirmBox({ title: title, text: text, okText: okText || '运行', danger: true });
   }
   /* v1.29.4 重写：目标 → 工具 → 循环 → 边界 → 输出，去掉重复与口头禅 */
@@ -17643,7 +17640,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       return '';
     }
     S._riskyWrites = {};
-    /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Yolo 全部免确认 */
+    /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Free 全部免确认 */
     var permMode = permForSid(msg.sid);
     try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (permMode === 'plan'){
@@ -17655,7 +17652,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (writes.length || _blocked.length){
         var _planN = writes.length + _blocked.length;
         var _planMsg = '> 📋 Plan 只读：本轮 ' + _planN + ' 个写入/执行操作未运行' +
-          (_blocked.length ? '（' + _blocked.slice(0, 6).join('、') + '）' : '') + '。先给出计划，切到 Write / Yolo 再落地。';
+          (_blocked.length ? '（' + _blocked.slice(0, 6).join('、') + '）' : '') + '。先给出计划，切到 Write / Free 再落地。';
         try { msg.content = String(msg.content || '') + '\n\n' + _planMsg; DB.putMessage(msg); UI.repaintMsg(msg.id); } catch (e) {}
         writes = [];
         UI.toast('Plan 只读：已拦截 ' + _planN + ' 个操作', true);
@@ -17664,14 +17661,14 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     /* v0.3.47：fs-edit 也在计划门禁之内（它同样是写盘）；v0.4.7 Write 不再拦截普通写入 */
   var gated = false;
   if (permMode === 'write' && S.cfg.fsAutoWrite === false) gated = writes.length > 0;
-    if ((S.cfg.fsAutoWrite !== false || permMode === 'yolo') && !gated)
+    if ((S.cfg.fsAutoWrite !== false || permMode === 'free') && !gated)
       for (i = 0; i < writes.length; i++){
-        if (isOutside(writes[i].path) && permMode !== 'yolo') continue;
+        if (isOutside(writes[i].path) && permMode !== 'free') continue;
         var why = riskyWrite(writes[i].path);
-        if (why && permMode !== 'yolo'){ S._riskyWrites[writes[i].path] = why; continue; }
+        if (why && permMode !== 'free'){ S._riskyWrites[writes[i].path] = why; continue; }
         auto.push(writes[i]);
       }
-    if (Object.keys(S._riskyWrites).length && permMode !== 'yolo')
+    if (Object.keys(S._riskyWrites).length && permMode !== 'free')
       UI.toast('有 ' + Object.keys(S._riskyWrites).length + ' 个写入需要确认（' + Object.keys(S._riskyWrites).map(function(k){ return S._riskyWrites[k]; })[0] + '）');
       if (gated){
         try { D('gated'); } catch (e) {}
@@ -17735,7 +17732,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       }
       var c = reads[done++];
       if (planDenied(c.op, sid0)){
-        parts.push('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先把方案写清楚，切到 Write / Yolo 再执行。');
+        parts.push('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先把方案写清楚，切到 Write / Free 再执行。');
         next(); return;
       }
       if (c.op === 'skill'){
@@ -18013,7 +18010,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
     var ask = Promise.resolve(true);
-    if (outside && permForSid(msg.sid) !== 'yolo'){
+    if (outside && permForSid(msg.sid) !== 'free'){
       var lines = (String(block.body).match(/\n/g) || []).length + 1;
       ask = UI.confirmBox({
         title: '工作区外写入确认',
@@ -20160,7 +20157,7 @@ var WORK = (function(){
   var stMap = {};
   /* v0.4.1：Soul 下 Work 只执行 Work 专属操作，共享操作交给 FS，避免重复执行 */
   var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
-  /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Yolo 全部免确认 */
+  /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Free 全部免确认 */
   var PLAN_DENY_WORK = ['vfs-write','run','patch','download','play','crawl','extract'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   /* v1.29.4 重写：目标 / 工具 / 路由 / 纪律 / 输出 五段，保留全部工具与既有约定 */
@@ -20415,7 +20412,7 @@ var WORK = (function(){
       }
       var c = calls[done++];
       if (permForSid(sid0) === 'plan' && PLAN_DENY_WORK.indexOf(c.op) >= 0){
-        add('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先给出方案，切到 Write / Yolo 再执行。', { op: c.op, ok: false, brief: 'Plan 只读' });
+        add('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先给出方案，切到 Write / Free 再执行。', { op: c.op, ok: false, brief: 'Plan 只读' });
         next(); return;
       }
       /* v0.4.0：扩展系统 —— 关闭的内置工具直接拒绝；技能懒加载；自定义工具走 EXT.runTool */

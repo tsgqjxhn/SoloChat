@@ -462,12 +462,6 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .crow{display:grid;grid-template-columns:1fr minmax(300px,var(--content-w)) 1fr;grid-template-rows:auto auto;align-items:end;gap:8px}
 .cwrap{grid-column:2;grid-row:2;display:flex;align-items:flex-end;gap:8px;min-width:0}
 .czone{display:flex;align-items:center;gap:4px;flex:none;padding-bottom:9px}
-#composer-mode{flex:none;display:flex;align-items:center;margin-right:2px}
-#composer-mode .seg{padding:1px;gap:1px}
-#composer-mode .seg button{padding:4px 7px;font-size:11px;height:28px;gap:4px}
-#composer-mode .seg-ic{width:12px;height:12px}
-#composer .czone.cz-l{min-width:0;overflow-x:auto;scrollbar-width:none}
-#composer .czone.cz-l::-webkit-scrollbar{display:none}
 .cz-l{grid-column:1;grid-row:2;justify-self:stretch;justify-content:flex-start}
 .cz-r2{grid-column:3;grid-row:2;justify-self:end}
 .ctx-num{white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
@@ -489,8 +483,6 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:13px;
 }
 .sel-think{width:96px}
-.sel-perm{width:78px}
-@media (max-width: 900px){ .sel-perm{width:70px;font-size:12px} }
 .icon-btn:disabled{opacity:.35;cursor:not-allowed}
 #ws-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* v2.9：工作区选择按钮（Agent 主页内，顶栏不再放） */
@@ -675,6 +667,11 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 #btn-send{color:var(--primary);flex:none}
 #btn-send:hover{background:var(--soft);color:var(--primary)}
 .cbox:focus-within{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+.perm-switch{flex:none;align-self:center;padding:1px;gap:1px;background:var(--canvas);border:1px solid var(--hairline);border-radius:9px}
+.perm-switch button{padding:3px 6px;font-size:10.5px;line-height:1.2;border-radius:7px;color:var(--faint)}
+.perm-switch button.on{background:var(--primary);color:var(--on-primary);box-shadow:none}
+.perm-switch button:hover{color:var(--ink)}
+@media (max-width:520px){ .perm-switch button{padding:3px 4px;font-size:9.5px} }
 #input{
   flex:1;border:0;outline:none;background:none;resize:none;
   max-height:180px;padding:5px 4px;font-size:15px;line-height:1.5;color:var(--ink);
@@ -1226,9 +1223,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
   body.m-phone .crow{display:flex;flex-wrap:wrap;gap:6px}
   body.m-phone #chips{order:0;width:100%;margin:0}
   body.m-phone .czone.cz-l{order:1;width:100%;padding:0;gap:2px;overflow-x:auto;justify-content:flex-start}
-  body.m-phone #composer-mode .seg button span{display:none}
-  body.m-phone #composer-mode .seg button{height:34px;padding:0 8px}
-  body.m-phone #composer-mode .seg-ic{width:15px;height:15px}
   body.m-phone .czone.cz-l .icon-btn{flex:none;width:42px;height:42px;color:var(--ink);opacity:.72}
   body.m-phone .czone.cz-l #btn-more{margin-left:auto;opacity:.85}
   /* 手机端把六类「本轮选择」收成一个扩展按钮，点开 / 面板统一搜索/勾选，避免 10 个图标挤一排 */
@@ -1298,7 +1292,6 @@ pre.ln .cl::before{content:counter(ln);position:absolute;left:0;width:2.2em;text
 @media (max-width:520px){
   body.m-phone #empty h1{font-size:21px}
   body.m-phone #empty .e-mode-desc{font-size:12px;line-height:1.6;padding:0 10px}
-  body.m-phone #sel-perm{max-width:92px;font-size:11px}
   body.m-phone #empty .e-modes .seg button{padding:6px 10px;font-size:12px}
   body.m-phone #tb-mode{display:none}
   body.m-phone #sel-model{max-width:92px}

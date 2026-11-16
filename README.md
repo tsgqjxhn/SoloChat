@@ -1,6 +1,6 @@
 # SoloChat
 
-**v0.4.9 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
+**v0.4.10 · 一个单 exe，双击就是完整的本地 AI 聊天客户端。**
 
 没有安装器、没有 npm、没有云端。源码在 `src/`，`node tools/build.mjs` 把界面、逻辑、图标、样式内联回一个 `index.html`；配上宿主壳后发布成**单个 exe（`SoloChatHost.exe`）**，托管 DLL、WebView2 加载器、页面统统嵌进这一个文件。拷到任何一台 Win10/11 机器，双击即用。
 
@@ -19,15 +19,15 @@
 
 模式切换条在四个模式中的中心坐标固定；切换模式、切换会话、新建会话时，Work 打开的「网页」侧边栏会自动收起，不会串到下一个会话。
 
-### Plan / Write / Yolo
+### Plan / Write / Free
 
-Work、Agent、Soul 顶栏都有执行权限选择，权限随会话保存：
+Work、Agent、Soul 的输入框内部最左侧有执行权限切换，权限随会话保存：
 
 - **Plan**：只读规划，只允许读文件/列目录/搜索/浏览器读取与智能体等扩展；写文件、补丁、cmd/git/python、crawl/download 会被拦截，并明确显示“未运行”。
 - **Write**：全部扩展可用；普通文件写入直接应用，`cmd`、`git`、Python 每次执行前弹确认（可点击「运行」或按 Enter；Esc 取消）。
-- **Yolo**：全部扩展与命令免确认，直接用；仍会报告退出码、失败和未验证项。
+- **Free**：原名 Yolo，全部扩展与命令免确认，直接用；仍会报告退出码、失败和未验证项。
 
-旧配置 `ask / auto / readonly` 会自动迁移到 `Write / Yolo / Plan`，不需要手动改。
+旧配置 `ask / auto / readonly / yolo` 会自动迁移到 `Write / Free / Plan`，不需要手动改。
 
 ### 模式设置 / 工具设置
 
@@ -36,7 +36,7 @@ Work、Agent、Soul 顶栏都有执行权限选择，权限随会话保存：
 - **模式设置**：按 Chat / Work / Agent / Soul 四块配置上下文条数、上下文字符；Work 另有 VFS 文件数、总量、单文件和工具轮次上限；Agent / Soul 各有工具轮次。
 - **工具设置**：crawl 单次页数、web / browser-read 正文上限、fs-read / fs-write 上限、Work 控制台行数/字符/结果回灌/沙箱超时、grep 命中数、子智能体暂存文件与容量。改完立即生效，不需要重启。
 
-模式栏已移到输入框最左侧；空态只保留标题、说明和模板/最近会话，不再有第二套模式条。
+基础模式条回到空态原位置（Chat / Work / Agent / Soul 固定居中，不再放入输入框）；输入框内部最左侧只放 Plan / Write / Free 权限切换。
 
 Agent 没有 Work 的 VFS 文件/总量配额（它直接操作真实工作区），但有工具轮次、单文件读写上限、结果截断、diff 预览和工作区外写入确认，这些在「模式设置 / 工具设置」里调整；宿主单文件硬上限提升到 4MB，页面侧默认仍是 256KB。
 
@@ -108,7 +108,7 @@ Soul 输入区保持极简：不显示附件、联网、生图等 SVG 图标；�
 
 ## Android 版
 
-`dist/SoloChat-Android-0.4.9.apk`（478,806 字节，versionCode 27；项目自有 keystore 签名）
+`dist/SoloChat-Android-0.4.10.apk`（479,862 字节，versionCode 28；项目自有 keystore 签名）
 
 - 悬浮球截屏提问、截图队列、半屏回答弹窗、Markdown 渲染、继续对话、分屏锁。
 - 截图只在内存中，发送时 Base64 直传模型；不写相册、不经过中转服务器。
@@ -186,7 +186,7 @@ node tools/build-android.mjs  # 注入 Android assets
 
 ## 版本与发布
 
-- 当前版本 **v0.4.9**；桌面 `APP_VER` / FileVersion **0.4.9.0**；Android `versionCode 27`。
+- 当前版本 **v0.4.10**；桌面 `APP_VER` / FileVersion **0.4.10.0**；Android `versionCode 28`。
 - 版本策略：每次发布末位 **+0.0.1**；未经明确同意不增加 0.1 级版本。
 - 扩展仓库与主应用仓库分开提交；主应用发布前同步 `dist/plugins/` 与 `dist/packages/`。
 - GitHub：[`tsgqjxhn/SoloChat`](https://github.com/tsgqjxhn/SoloChat)
@@ -196,11 +196,11 @@ node tools/build-android.mjs  # 注入 Android assets
 
 | 项目 | 当前值 |
 |---|---|
-| 桌面 exe | `dist/SoloChatHost.exe` **3,520,512 字节**（v0.4.9，FileVersion 0.4.9.0），单文件 |
-| 主产物 | `index.html` **1,337,395 字节 / 22,926 行** |
-| 源码 | `src/` **19 个文件 / 1,337,467 字节** |
+| 桌面 exe | `dist/SoloChatHost.exe` **3,531,776 字节**（v0.4.10，FileVersion 0.4.10.0），单文件 |
+| 主产物 | `index.html` **1,348,524 字节 / 22,923 行** |
+| 源码 | `src/` **19 个文件 / 1,348,596 字节** |
 | 宿主源码 | `host/Program.cs` **205,349 字节 / 3,854 行** |
-| Android APK | `dist/SoloChat-Android-0.4.9.apk` **478,806 字节**（versionCode 27） |
+| Android APK | `dist/SoloChat-Android-0.4.10.apk` **479,862 字节**（versionCode 28） |
 
 ## 数据存储
 

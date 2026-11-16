@@ -1121,7 +1121,7 @@ var WORK = (function(){
   var stMap = {};
   /* v0.4.1：Soul 下 Work 只执行 Work 专属操作，共享操作交给 FS，避免重复执行 */
   var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
-  /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Yolo 全部免确认 */
+  /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Free 全部免确认 */
   var PLAN_DENY_WORK = ['vfs-write','run','patch','download','play','crawl','extract'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
   /* v1.29.4 重写：目标 / 工具 / 路由 / 纪律 / 输出 五段，保留全部工具与既有约定 */
@@ -1376,7 +1376,7 @@ var WORK = (function(){
       }
       var c = calls[done++];
       if (permForSid(sid0) === 'plan' && PLAN_DENY_WORK.indexOf(c.op) >= 0){
-        add('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先给出方案，切到 Write / Yolo 再执行。', { op: c.op, ok: false, brief: 'Plan 只读' });
+        add('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先给出方案，切到 Write / Free 再执行。', { op: c.op, ok: false, brief: 'Plan 只读' });
         next(); return;
       }
       /* v0.4.0：扩展系统 —— 关闭的内置工具直接拒绝；技能懒加载；自定义工具走 EXT.runTool */

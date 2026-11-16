@@ -46,7 +46,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.9';
+var APP_VER = 'v0.4.10';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -165,7 +165,7 @@ var DEF_CFG = {
   persona: '',                  // v0.6.0：当前选中的配方 id
   autoRoute: false,   // v1.13：默认关——手动选了模式就别被自动路由改掉
   planGate: true,     // v1.29.0：本会话第一次写入先手动确认一次（之后自动写入）
-  permMode: 'write',  // v0.4.7：plan 只读规划 / write 全部工具、命令需确认 / yolo 全部工具且免确认
+  permMode: 'write',  // v0.4.10：plan 只读规划 / write 全部工具、命令需确认 / free 全部工具且免确认（旧名 yolo）
   sub: {},                       // v1.2：每个基础模式当前选中的子模式 { chat, work, agent }
   subLv: {},                     // v1.2：更深一层的选项，键为 '模式:子模式'（如 chat:think → max）
   sbHidden: true,                // v1.3：会话侧边栏默认收起，按钮 / Ctrl+B 打开
@@ -586,7 +586,7 @@ function loadCfg(){
   try {
     var _oldPerm = cfg.permMode;
     cfg.permMode = normPerm(cfg.permMode);
-    if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'yolo'; // 旧版 planGate=false 等同意免确认
+    if (_oldPerm === 'ask' && cfg.planGate === false) cfg.permMode = 'free'; // 旧版 planGate=false 等同意免确认
     applyLimitCfg(cfg.mode);
   } catch (e) {}
   if (_migChanged){ try { setTimeout(function(){ try { saveCfg(); } catch (e) {} }, 0); } catch (e) {} } // 迁移只跑一次：标记必须落盘
@@ -965,12 +965,12 @@ function sessMode(s){
   var g = groupOfSession(s);
   return (s && s.mode) || (g && g.mode) || (S.cfg && S.cfg.mode) || 'chat';
 }
-/* v0.4.7：执行权限 —— plan 只读 / write 全部工具但命令确认 / yolo 全部免确认。
-   旧值 ask→write、auto→yolo、readonly→plan；旧配置不会把权限重置。 */
+/* v0.4.10：执行权限 —— plan 只读 / write 全部工具但命令确认 / free 全部免确认（Free，旧值 yolo）。
+   旧值 ask→write、auto/yolo→free、readonly→plan；旧配置不会把权限重置。 */
 function normPerm(v){
   v = String(v || '').toLowerCase();
   if (v === 'plan' || v === 'readonly' || v === 'read') return 'plan';
-  if (v === 'yolo' || v === 'auto' || v === 'full') return 'yolo';
+  if (v === 'free' || v === 'yolo' || v === 'auto' || v === 'full') return 'free';
   return 'write';
 }
 function sessPerm(s){
@@ -2519,9 +2519,9 @@ var NET = (function(){
     if (S.cfg.mode === 'work') sys += '\n\n' + WORK.protocol;
     var _pm = permForSid(session && session.id);
     if (S.cfg.mode !== 'chat'){
-      sys += '\n\n【执行权限：' + (_pm === 'plan' ? 'Plan 只读规划' : (_pm === 'yolo' ? 'Yolo 免确认' : 'Write 命令确认')) + '】';
-      if (_pm === 'plan') sys += ' 只能使用只读工具（搜索/网页读取/文件读取/列目录/智能体与扩展的只读能力）；禁止写文件、补丁、cmd/git/python、vfs-write、run、crawl、download。先给出可执行计划，等用户切到 Write 或 Yolo 再落地。';
-      else if (_pm === 'yolo') sys += ' 所有工具与命令都允许直接执行，不再弹用户确认；仍要如实报告退出码、失败与未验证项，禁止把没做的事写成完成。';
+      sys += '\n\n【执行权限：' + (_pm === 'plan' ? 'Plan 只读规划' : (_pm === 'free' ? 'Free 免确认' : 'Write 命令确认')) + '】';
+      if (_pm === 'plan') sys += ' 只能使用只读工具（搜索/网页读取/文件读取/列目录/智能体与扩展的只读能力）；禁止写文件、补丁、cmd/git/python、vfs-write、run、crawl、download。先给出可执行计划，等用户切到 Write 或 Free 再落地。';
+      else if (_pm === 'free') sys += ' 所有工具与命令都允许直接执行，不再弹用户确认；仍要如实报告退出码、失败与未验证项，禁止把没做的事写成完成。';
       else sys += ' 所有扩展工具都可用；cmd、git、python 每次执行前会弹确认，用户拒绝就停下换方案，不要原样重试；写文件在工作区内可直接应用。';
     }
     /* v0.4.7：把用户上下文里的链接和内置浏览器当前页交给模型；不要求用户重复发链接 */

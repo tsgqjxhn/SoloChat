@@ -79,7 +79,19 @@ function holdBusy(d, sid){
     var extra = el('div', { class: 'e-extra' });
     wrap.appendChild(core); wrap.appendChild(extra);
     $empty.appendChild(wrap);
-    /* v0.4.8：模式切换移到输入框最左侧，空态不再创建/固定模式条 */
+    /* v0.4.10：模式切换恢复空态原位置（Plan/Write/Free 在输入框内部） */
+    var modes = el('div', { class: 'e-modes e-modes-fixed' });
+    var seg = el('div', { class: 'seg seg-sm', id: 'seg-mode',
+      title: '模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格' });
+    [['chat', 'Chat', 'i-logo', 1], ['work', 'Work', 'i-work', 0], ['agent', 'Agent', 'i-agent', 1], ['soul', 'Soul', 'i-user', 1]].forEach(function(t){
+      var b = el('button', { type: 'button', 'data-mode': t[0] });
+      b.appendChild(icon(t[2], 'seg-ic' + (t[3] ? ' fill' : '')));
+      b.appendChild(document.createTextNode(t[1]));
+      if ((S.cfg.mode || 'chat') === t[0] && !S.cfg.persona) b.classList.add('on');
+      seg.appendChild(b);
+    });
+    modes.appendChild(seg);
+    $empty.appendChild(modes);
     if (MODE && MODE.mountUI) MODE.mountUI();
     function bigIcon(name, fill){
       var ic = icon(name, fill ? 'fill' : '');
@@ -118,7 +130,7 @@ function holdBusy(d, sid){
     if (S.cfg.mode === 'agent'){ // v2.9.1：工作区选择在模式选择「下侧」
       core.appendChild(bigIcon('agent', true));
       core.appendChild(el('h1', { text: 'Agent：真实文件工具' }));
-      core.appendChild(el('div', { class: 'e-mode-desc', text: '在授权文件夹里读写代码、运行命令 / Python / Git；按 Plan / Write / Yolo 控制执行权限。' }));
+      core.appendChild(el('div', { class: 'e-mode-desc', text: '在授权文件夹里读写代码、运行命令 / Python / Git；按 Plan / Write / Free 控制执行权限。' }));
       extra.appendChild(el('button', {
         id: 'btn-ws', class: 'e-ws' + (ws ? ' on' : ''), type: 'button',
         title: '选择工作区文件夹：本次会话中 AI 只能读写该文件夹内的文件（开始后不可更改）'
@@ -521,13 +533,13 @@ function sendMessage(){
       _nb.click(); UI.toast('已撤销最近一次写入');
       return;
     }
-    if (cmd === '/perm'){ /* v0.4.7：Plan 只读 / Write 命令确认 / Yolo 免确认 */
+    if (cmd === '/perm'){ /* v0.4.7：Plan 只读 / Write 命令确认 / Free 免确认 */
       var _pv = text.slice(5).trim().toLowerCase();
       $input.value = ''; $input.style.height = ''; UI.autosize();
-      var _okv = ['plan', 'write', 'yolo', 'ask', 'auto', 'readonly'];
-      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm plan|write|yolo（当前 ' + permNow() + '）', true); return; }
+      var _okv = ['plan', 'write', 'free', 'ask', 'auto', 'readonly'];
+      if (_okv.indexOf(_pv) < 0){ UI.toast('用法：/perm plan|write|free（当前 ' + permNow() + '）', true); return; }
       setPerm(_pv); renderComposerCtl();
-      UI.toast('执行权限已设为 ' + ({ plan: 'Plan 只读', write: 'Write 命令确认', yolo: 'Yolo 免确认' })[normPerm(_pv)]);
+      UI.toast('执行权限已设为 ' + ({ plan: 'Plan 只读', write: 'Write 命令确认', free: 'Free 免确认' })[normPerm(_pv)]);
       return;
     }
     if (cmd === '/status'){ /* v0.3.84：当前会话/工作区/权限状态（对标 Devin 的会话状态栏） */
@@ -1715,11 +1727,14 @@ function sendMessage(){
   }
   var _cmodeBtn = $('#btn-cmode');
   if (_cmodeBtn) _cmodeBtn.addEventListener('click', function(e){ e.stopPropagation(); openChipPop(); });
-  var _permSel0 = $('#sel-perm');
-  if (_permSel0) _permSel0.addEventListener('change', function(){
-    setPerm(_permSel0.value);
-    try { renderComposerCtl(); } catch (e) {}
-    UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', yolo: 'Yolo · 全部免确认' }[_permSel0.value] || _permSel0.value));
+  var _permSel0 = $('#perm-switch'); /* v0.4.10：权限切换在输入框内部最左侧 */
+  if (_permSel0) _permSel0.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('button[data-perm]');
+    if (!b) return;
+    var v = b.getAttribute('data-perm');
+    setPerm(v);
+    try { renderComposerCtl(); } catch (x) {}
+    UI.toast('执行权限：' + ({ plan: 'Plan · 只读规划', write: 'Write · 命令需确认', free: 'Free · 全部免确认' }[normPerm(v)] || v));
   });
 
   document.addEventListener('click', function(e){
@@ -1755,11 +1770,13 @@ function sendMessage(){
     var mdName = $('#tb-mode-name');
     if (mdName) mdName.textContent = (S.cfg.mode === 'work') ? 'Work' : (S.cfg.mode === 'agent' ? 'Agent' : (S.cfg.mode === 'soul' ? 'Soul' : 'Chat'));
     var _isSoul = (S.cfg.mode || 'chat') === 'soul';
-    var _permSel = $('#sel-perm');
+    var _permSel = $('#perm-switch');
     if (_permSel){
-      _permSel.value = permNow();
       _permSel.style.display = (_mNow === 'chat') ? 'none' : '';
-      _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', yolo: 'Yolo 全部工具、免确认' }[permNow()] || '');
+      var _pbs = _permSel.querySelectorAll('[data-perm]');
+      for (var _pi = 0; _pi < _pbs.length; _pi++)
+        _pbs[_pi].classList.toggle('on', _pbs[_pi].getAttribute('data-perm') === permNow());
+      _permSel.title = '执行权限：' + ({ plan: 'Plan 只读规划', write: 'Write 全部工具、命令需确认', free: 'Free 全部工具、免确认' }[permNow()] || '');
     }
     /* v0.4.8：模式切换固定在输入区最左侧；状态在这里统一同步 */
     var _segMode = $('#seg-mode');

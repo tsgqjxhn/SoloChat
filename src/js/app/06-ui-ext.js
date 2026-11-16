@@ -991,7 +991,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     var fModel = mark(modelSelect(d.model || '', '跟随分组 / 全局'), 'model');
     var fPerm = mark((function(){
       var ps = el('select', { class: 'f-in' });
-      [['plan', 'Plan · 只读规划'], ['write', 'Write · 命令确认'], ['yolo', 'Yolo · 全部免确认']].forEach(function(o){
+      [['plan', 'Plan · 只读规划'], ['write', 'Write · 命令确认'], ['free', 'Free · 全部免确认']].forEach(function(o){
         ps.appendChild(el('option', { value: o[0], text: o[1], selected: (normPerm(d.perm || S.cfg.permMode) === o[0]) ? '' : null }));
       });
       return ps;
@@ -1009,7 +1009,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
         field('模型', fModel, '空=跟随分组 / 全局；会话值优先')
       ]),
       el('div', { class: 'f-grid' }, [
-        field('执行权限', fPerm, 'Plan 只读 / Write 命令确认 / Yolo 全免确认')
+        field('执行权限', fPerm, 'Plan 只读 / Write 命令确认 / Free 全免确认')
       ]),
       el('div', { class: 'f-grid' }, [
         field('temperature', fTemp, '0~2；留空=跟随'),

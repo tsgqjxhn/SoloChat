@@ -3,11 +3,11 @@ var FS = (function(){
   /* v2.2：工具循环状态按会话隔离（切走后仍在后台推进，互不干扰） */
   var stMap = {};
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false }); }
-  /* v0.4.7：Plan / Write / Yolo 的共用操作白名单与确认策略 */
+  /* v0.4.10：Plan / Write / Free 的共用操作白名单与确认策略 */
   var PLAN_DENY = ['fs-write','fs-edit','patch','cmd','git','python','vfs-write','run','crawl','download','extract'];
   function planDenied(op, sid){ return permForSid(sid) === 'plan' && PLAN_DENY.indexOf(op) >= 0; }
   function askRun(title, text, okText, sid){
-    if (permForSid(sid) === 'yolo') return Promise.resolve(true); // Yolo：连命令确认也跳过
+    if (permForSid(sid) === 'free') return Promise.resolve(true); // Free：连命令确认也跳过
     return UI.confirmBox({ title: title, text: text, okText: okText || '运行', danger: true });
   }
   /* v1.29.4 重写：目标 → 工具 → 循环 → 边界 → 输出，去掉重复与口头禅 */
@@ -104,7 +104,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       return '';
     }
     S._riskyWrites = {};
-    /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Yolo 全部免确认 */
+    /* v0.4.7：Plan 只读；Write 全部工具但命令确认；Free 全部免确认 */
     var permMode = permForSid(msg.sid);
     try { applyLimitCfg(sessMode(sessionById(msg.sid))); } catch (e) {}
     if (permMode === 'plan'){
@@ -116,7 +116,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       if (writes.length || _blocked.length){
         var _planN = writes.length + _blocked.length;
         var _planMsg = '> 📋 Plan 只读：本轮 ' + _planN + ' 个写入/执行操作未运行' +
-          (_blocked.length ? '（' + _blocked.slice(0, 6).join('、') + '）' : '') + '。先给出计划，切到 Write / Yolo 再落地。';
+          (_blocked.length ? '（' + _blocked.slice(0, 6).join('、') + '）' : '') + '。先给出计划，切到 Write / Free 再落地。';
         try { msg.content = String(msg.content || '') + '\n\n' + _planMsg; DB.putMessage(msg); UI.repaintMsg(msg.id); } catch (e) {}
         writes = [];
         UI.toast('Plan 只读：已拦截 ' + _planN + ' 个操作', true);
@@ -125,14 +125,14 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     /* v0.3.47：fs-edit 也在计划门禁之内（它同样是写盘）；v0.4.7 Write 不再拦截普通写入 */
   var gated = false;
   if (permMode === 'write' && S.cfg.fsAutoWrite === false) gated = writes.length > 0;
-    if ((S.cfg.fsAutoWrite !== false || permMode === 'yolo') && !gated)
+    if ((S.cfg.fsAutoWrite !== false || permMode === 'free') && !gated)
       for (i = 0; i < writes.length; i++){
-        if (isOutside(writes[i].path) && permMode !== 'yolo') continue;
+        if (isOutside(writes[i].path) && permMode !== 'free') continue;
         var why = riskyWrite(writes[i].path);
-        if (why && permMode !== 'yolo'){ S._riskyWrites[writes[i].path] = why; continue; }
+        if (why && permMode !== 'free'){ S._riskyWrites[writes[i].path] = why; continue; }
         auto.push(writes[i]);
       }
-    if (Object.keys(S._riskyWrites).length && permMode !== 'yolo')
+    if (Object.keys(S._riskyWrites).length && permMode !== 'free')
       UI.toast('有 ' + Object.keys(S._riskyWrites).length + ' 个写入需要确认（' + Object.keys(S._riskyWrites).map(function(k){ return S._riskyWrites[k]; })[0] + '）');
       if (gated){
         try { D('gated'); } catch (e) {}
@@ -196,7 +196,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
       }
       var c = reads[done++];
       if (planDenied(c.op, sid0)){
-        parts.push('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先把方案写清楚，切到 Write / Yolo 再执行。');
+        parts.push('[plan] 当前是 Plan 只读规划：不允许 ' + c.op + '。先把方案写清楚，切到 Write / Free 再执行。');
         next(); return;
       }
       if (c.op === 'skill'){
@@ -474,7 +474,7 @@ function scan(content){ /* 扫描 fs-* 围栏（与 MD 渲染器同款约定；�
     var ws = (function(sid){ try { var ss = sessionById(sid); return (ss && ss.workspace) || curWs(); } catch (e) { return curWs(); } })(msg && msg.sid);
     if (btn){ btn.disabled = true; btn.textContent = '写入中…'; }
     var ask = Promise.resolve(true);
-    if (outside && permForSid(msg.sid) !== 'yolo'){
+    if (outside && permForSid(msg.sid) !== 'free'){
       var lines = (String(block.body).match(/\n/g) || []).length + 1;
       ask = UI.confirmBox({
         title: '工作区外写入确认',

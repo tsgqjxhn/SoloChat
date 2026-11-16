@@ -54,11 +54,6 @@
       <div id="tb-title">SoloChat</div>
       <div id="tb-c">
         <div id="tb-mode"><span id="tb-mode-name">Chat</span></div>
-        <select id="sel-perm" class="sel-mini sel-perm" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Yolo 全部免确认">
-          <option value="plan">Plan</option>
-          <option value="write">Write</option>
-          <option value="yolo">Yolo</option>
-        </select>
         <select id="sel-model" class="sel-mini" title="切换模型"></select>
         <select id="sel-think" class="sel-mini sel-think" title="思考程度（Default 不传输思考字段）"></select>
         <button class="icon-btn" id="btn-dual" title="双开：左右两栏各用一个模型，同时回答同一个问题（仅 Chat）"><svg class="ic"><use href="#i-dual"/></svg></button>
@@ -86,14 +81,6 @@
           <!-- v1.1.6：附件缩略图放进输入框所在的中间列，默认显示在输入框上方。 -->
           <div id="chips"></div>
           <div class="czone cz-l">
-            <div id="composer-mode" class="composer-mode">
-              <div class="seg seg-sm" id="seg-mode" title="模式：Chat 常规对话 / Work 沙箱任务（产物进工作区，长任务也可连续执行）/ Agent 真实文件工具 / Soul 长期记忆与人格">
-                <button type="button" class="on" data-mode="chat" title="Chat：通用推理与写作"><svg class="ic seg-ic fill"><use href="#i-logo"/></svg><span>Chat</span></button>
-                <button type="button" data-mode="work" title="Work：虚拟沙箱"><svg class="ic seg-ic"><use href="#i-work"/></svg><span>Work</span></button>
-                <button type="button" data-mode="agent" title="Agent：真实文件工具"><svg class="ic seg-ic fill"><use href="#i-agent"/></svg><span>Agent</span></button>
-                <button type="button" data-mode="soul" title="Soul：长期记忆与人格"><svg class="ic seg-ic fill"><use href="#i-user"/></svg><span>Soul</span></button>
-              </div>
-            </div>
             <button id="btn-m-settings" class="icon-btn m-set-btn" data-m="settings" title="设置"><svg class="ic"><use href="#i-gear"/></svg></button>
             <button id="btn-soul-profile" class="icon-btn" type="button" title="Soul 人格设置（脸 / 性格 / 声音 / 能力 / 记忆 / 身体）"><span class="sp-face">🌙</span></button>
             <button id="btn-attach" class="icon-btn" title="添加图片/文本/文档（docx xlsx pptx pdf rtf，可粘贴/拖放；文档解析与扫描版 PDF 的 OCR 引擎可在设置中配置）"><svg class="ic"><use href="#i-clip"/></svg></button>
@@ -111,7 +98,7 @@
             <button id="btn-more" class="icon-btn" title="更多：/ 提示词库 · @ 导入历史"><svg class="ic"><use href="#i-plus"/></svg></button>
           </div>
           <div class="cwrap">
-            <div class="cbox"><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
+            <div class="cbox"><div id="perm-switch" class="seg perm-switch" style="display:none" title="执行权限：Plan 只读规划 / Write 全部工具、命令确认 / Free 全部免确认"><button type="button" data-perm="plan">Plan</button><button type="button" data-perm="write">Write</button><button type="button" data-perm="free">Free</button></div><button id="btn-cmode" class="cmode" type="button"></button><textarea id="input" rows="1" placeholder="输入消息，Enter 发送 · Esc 停止 · / 提示词 · @ 导入历史"></textarea><button id="btn-send" class="icon-btn" title="发送 (Enter)"><svg class="ic"><use href="#i-send"/></svg></button></div>
             <div class="czone cz-r" id="ctx-ring" title="上下文占用"><svg viewBox="0 0 36 36" class="ctxsvg"><circle class="ctx-bg" cx="18" cy="18" r="15.5"/><circle class="ctx-fg" cx="18" cy="18" r="15.5"/></svg><span class="ctx-num">--</span></div>
           </div>
           <div class="czone cz-r2">

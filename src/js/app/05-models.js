@@ -779,7 +779,7 @@ function buildSettings(){
   var pgRow = el('div', { class: 'f-row' });
   (function(){
   var pmSel = el('select', { class: 'f-in' });
-  [['plan', 'Plan（只读规划：不写文件、不跑命令）'], ['write', 'Write（全部工具；cmd / git / Python 需确认）'], ['yolo', 'Yolo（全部工具与命令免确认，危险）']].forEach(function(o){
+  [['plan', 'Plan（只读规划：不写文件、不跑命令）'], ['write', 'Write（全部工具；cmd / git / Python 需确认）'], ['free', 'Free（全部工具与命令免确认，危险）']].forEach(function(o){
     pmSel.appendChild(el('option', { value: o[0], text: o[1], selected: (permNow() === o[0]) ? '' : null }));
   });
   pmSel.addEventListener('change', function(){ setPerm(pmSel.value); });
