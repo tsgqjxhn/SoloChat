@@ -1,15 +1,15 @@
 {
   "schema": "solochat-plugin-market/1",
   "name": "SoloChat 插件市场",
-  "version": "1.0.0",
-  "updated": "2026-11-02",
+  "version": "1.1.0",
+  "updated": "2026-11-16",
   "home": "https://github.com/tsgqjxhn/SoloChat/tree/ext/plugins",
   "raw": "https://raw.githubusercontent.com/tsgqjxhn/SoloChat/ext/plugins/",
   "plugins": [
     {
       "id": "repo-insight",
       "name": "仓库速览",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "desc": "给一个 GitHub 仓库地址，输出定位、活跃度与关键文件导读",
       "author": "SoloChat",
       "license": "MIT",
@@ -30,7 +30,7 @@
     {
       "id": "release-notes",
       "name": "更新日志",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "desc": "拉最近的 Release，按「新增 / 修复 / 破坏性变更」写成人话更新日志",
       "author": "SoloChat",
       "license": "MIT",
@@ -50,7 +50,7 @@
     {
       "id": "weather-brief",
       "name": "出行简报",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "desc": "查城市天气，给一份能直接照着出门的简报（穿衣 / 伞 / 通风）",
       "author": "SoloChat",
       "license": "MIT",

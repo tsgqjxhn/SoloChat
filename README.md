@@ -3,6 +3,8 @@
 SoloChat 的扩展包集合。每个 `plugins/<id>` 就是一个可以直接导入的扩展包：
 `manifest.json` + `skills/` + `tools/` + `agents/` + `prompts/`。
 
+**格式以 [`docs/扩展规范.md`](docs/扩展规范.md) 为准。** v1 清单用 `items[]` 声明文件，用 `config` 声明 baseURL、API Key、modelId、搜索轮数等包级配置；字段会自动显示在 SoloChat 扩展卡片齿轮里，并按 `{{key}}` 注入。
+
 ## 安装
 
 **方式一：导入文件夹（推荐）**
@@ -23,9 +25,9 @@ SoloChat 的扩展包集合。每个 `plugins/<id>` 就是一个可以直接导�
 
 | id | 名称 | 版本 | 内容 | 需要联网 |
 |---|---|---|---|---|
-| `repo-insight` | 仓库速览 | 1.0.0 | 工具 1 · 技能 1 · 提示词 1 | 是（GitHub API） |
-| `release-notes` | 更新日志 | 1.0.0 | 工具 1 · 技能 1 · 智能体 1 · 提示词 1 | 是（GitHub API） |
-| `weather-brief` | 出行简报 | 1.0.0 | 工具 1 · 技能 1 · 提示词 1 | 是（wttr.in） |
+| `repo-insight` | 仓库速览 | 1.1.0 | 工具 1 · 技能 1 · 提示词 1 | 是（GitHub API） |
+| `release-notes` | 更新日志 | 1.1.0 | 工具 1 · 技能 1 · 智能体 1 · 提示词 1 | 是（GitHub API） |
+| `weather-brief` | 出行简报 | 1.1.0 | 工具 1 · 技能 1 · 提示词 1 | 是（wttr.in） |
 
 机器可读索引见 [`index.json`](index.json)。
 
@@ -60,6 +62,8 @@ SoloChat 的扩展包集合。每个 `plugins/<id>` 就是一个可以直接导�
   市场里不允许出现可执行代码（JS/shell），应用侧也不会执行。
 - 只读类 API 优先；需要密钥的服务不放进市场，改为让用户自己填。
 - 智能体的工具白名单在 `tools` 里显式列出，越权调用会被调度器拦下。
+- v1 清单用 `items[]`；旧的 `skills/tools/agents/prompts` 数组仍然兼容，但新插件请用 `items[]`。
+- 包级配置写在 `manifest.json` 的 `config`；条目级配置写在 `items[].config`、工具 JSON 的 `config` 或 frontmatter 的 `config`。`apiKey` 必须用 `"type": "password", "secret": true`。
 - 提交前请跑 `node scripts/validate.mjs`（本地校验，零依赖）。
 
 ## 提交新插件

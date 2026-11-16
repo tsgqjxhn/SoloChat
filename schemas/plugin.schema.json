@@ -1,12 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/tsgqjxhn/SoloChat/Plugin/schemas/plugin.schema.json",
-  "title": "SoloChat 扩展包 manifest",
+  "title": "SoloChat 扩展包 manifest（v1）",
+  "description": "v1 使用 items[] 声明条目、config 声明包级配置；旧的 skills/tools/agents/prompts 数组仍兼容。完整语义见 docs/扩展规范.md。",
   "type": "object",
-  "required": [
-    "name",
-    "version"
-  ],
+  "required": ["name", "version"],
   "additionalProperties": true,
   "properties": {
     "name": {
@@ -19,37 +17,124 @@
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+"
     },
-    "desc": {
-      "type": "string"
-    },
-    "author": {
-      "type": "string"
-    },
-    "license": {
-      "type": "string"
-    },
-    "skills": {
+    "desc": { "type": "string" },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "requires": {
       "type": "array",
+      "description": "前置运行时插件 id，例如 python-3.11；当前由宿主/应用按可用性提示",
+      "items": { "type": "string" }
+    },
+    "config": {
+      "type": "array",
+      "description": "包级配置；包内所有条目继承，值按 {{key}} 注入",
+      "items": { "$ref": "#/$defs/configField" }
+    },
+    "items": {
+      "type": "array",
+      "description": "v1 条目清单",
       "items": {
-        "type": "string"
+        "type": "object",
+        "required": ["kind", "file"],
+        "additionalProperties": true,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["skill", "tool", "agent", "prompt"]
+          },
+          "file": {
+            "type": "string",
+            "description": "相对包根的文件路径"
+          },
+          "config": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/configField" }
+          }
+        }
       }
     },
-    "tools": {
+    "mcp": {
       "type": "array",
+      "description": "MCP 服务器；只支持写在 manifest，不支持 mcp/ 目录",
       "items": {
-        "type": "string"
+        "type": "object",
+        "required": ["url"],
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "url": { "type": "string" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "tools": { "type": "array", "items": { "type": "object" } },
+          "config": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/configField" }
+          }
+        }
       }
     },
-    "agents": {
+    "skills": { "$ref": "#/$defs/legacyList" },
+    "tools": { "$ref": "#/$defs/legacyList" },
+    "agents": { "$ref": "#/$defs/legacyList" },
+    "prompts": { "$ref": "#/$defs/legacyList" }
+  },
+  "$defs": {
+    "legacyList": {
       "type": "array",
+      "description": "v0.4.12 及之前的旧格式；新包请用 items[]",
       "items": {
-        "type": "string"
+        "anyOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["file"],
+            "properties": {
+              "file": { "type": "string" },
+              "path": { "type": "string" },
+              "config": { "type": "array", "items": { "$ref": "#/$defs/configField" } }
+            }
+          }
+        ]
       }
     },
-    "prompts": {
-      "type": "array",
-      "items": {
-        "type": "string"
+    "configField": {
+      "type": "object",
+      "required": ["key"],
+      "additionalProperties": true,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+        },
+        "label": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["text", "password", "url", "model", "number", "select", "boolean", "textarea"]
+        },
+        "scope": { "type": "string", "enum": ["item", "package"] },
+        "required": { "type": "boolean" },
+        "secret": { "type": "boolean" },
+        "default": {},
+        "def": {},
+        "placeholder": { "type": "string" },
+        "hint": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {},
+                  "label": { "type": "string" }
+                }
+              }
+            ]
+          }
+        },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number" }
       }
     }
   }

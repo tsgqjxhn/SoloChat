@@ -20,12 +20,33 @@ plugins/<id>/
   "desc": "一句话说明",
   "author": "你的名字",
   "license": "MIT",
-  "skills": ["skills/foo.md"],
-  "tools": ["tools/bar.json"],
-  "agents": ["agents/baz.md"],
-  "prompts": ["prompts/qux.md"]
+  "config": [
+    {
+      "key": "baseURL",
+      "label": "服务地址",
+      "type": "url",
+      "scope": "package",
+      "required": false,
+      "default": "https://api.example.com/v1"
+    },
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password",
+      "secret": true,
+      "required": false
+    }
+  ],
+  "items": [
+    { "kind": "skill", "file": "skills/foo.md" },
+    { "kind": "tool", "file": "tools/bar.json" },
+    { "kind": "agent", "file": "agents/baz.md" },
+    { "kind": "prompt", "file": "prompts/qux.md" }
+  ]
 }
 ```
+
+`config` 是包级配置，包内所有条目继承；条目自己需要配置时，在 `items[].config`、工具 JSON 的 `config` 或 frontmatter 的 `config` 里写同样的字段数组。字段类型、`scope`、`secret` 规则见 [`docs/扩展规范.md`](docs/扩展规范.md)。
 
 ## 正文 frontmatter
 
