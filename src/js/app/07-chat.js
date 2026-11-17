@@ -631,7 +631,7 @@ function sendMessage(){
     if (cmd === '/skills'){ /* v0.3.77：看当前模式可用的技能（对标 OpenHands 的技能清单） */
       $input.value = ''; $input.style.height = ''; UI.autosize();
       var _sk = []; try { _sk = EXT.skillNames(S.cfg.mode) || []; } catch (e) { _sk = []; }
-      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'], soul: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'grep', 'glob', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
+      var _sk = ({ chat: ['ask', 'web', 'search'], work: ['vfs-write', 'vfs-list', 'vfs-read', 'vfs-grep', 'vfs-stat', 'run', 'preview', 'web', 'crawl', 'search', 'browser-read', 'browser-act', 'ask'], agent: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search', 'sub', 'agent'], soul: ['fs-read', 'fs-list', 'fs-write', 'fs-edit', 'grep', 'glob', 'vfs-read', 'vfs-grep', 'vfs-stat', 'cmd', 'git', 'python', 'browser', 'browser-read', 'browser-act', 'web', 'search'] })[S.cfg.mode || 'chat'] || []; // v0.3.77：技能库可能为空，改成列「本模式可用的内置工具围栏」
       if (!_sk.length){ UI.toast('当前模式没有可用工具', true); return; }
       UI.toast('本模式可用工具 ' + _sk.length + ' 个：' + _sk.join(', ') + '（用三反引号 + 工具名调用）');
     }
@@ -768,7 +768,8 @@ function sendMessage(){
       var kind = (a.doc || DOC_EXT[ext]) ? '文档提取文本'
         : (a.isText ? '文本'
         : (/^image\//.test(mime) ? '图片' : '文件'));
-      return { id: a.id, name: a.name, mime: mime, size: a.origSize || (a.blob && a.blob.size) || a.size || 0, kind: kind };
+      /* 文本附件标记为 external：工作区只存外部引用，不复制全文；旧 refs 无此字段时触发迁移 */
+      return { id: a.id, name: a.name, mime: mime, size: a.origSize || (a.blob && a.blob.size) || a.size || 0, kind: kind, external: !!a.isText };
     });
     var userMsg = {
       id: uuid(), sid: s.id, role: 'user', content: text.slice(0, LIMITS.MSG_TEXT),
@@ -1136,6 +1137,40 @@ function sendMessage(){
       });
     }).then(function(){ return true; }, function(){ return false; });
   }
+  /* v3.0：文本附件不再把正文复制进 VFS（会被 1MB 上限截断）。
+     只写一条引用记录：attachmentId + 原始字节数 + 4KB 预览；
+     全文由 vfs-read / vfs-grep 按需从 attachments 表读取。 */
+  var VFS_PREVIEW_CHARS = 4 * 1024;
+  function writeTextAttachmentRef(sid, path, r, text){
+    var cs = (typeof sessionById === 'function') ? sessionById(sid) : null;
+    var mode = (cs && cs.mode) || S.cfg.mode || 'chat';
+    var full = String(text == null ? '' : text);
+    /* Agent / 有真实工作区的 Soul 仍落真实磁盘（保持原行为，不受 VFS 1MB 限制） */
+    if ((mode === 'agent' || mode === 'soul') && cs && cs.workspace && NET.fs){
+      return NET.fs('write', path, truncBytes(full, 240 * 1024), cs.workspace)
+        .then(function(){ return true; }, function(){ return false; });
+    }
+    var size = (r && r.size) || 0;
+    var preview = full.slice(0, VFS_PREVIEW_CHARS);
+    return DB.workfsBySid(sid).then(function(fs){
+      var total = 0, old = null, i;
+      for (i = 0; i < fs.length; i++){
+        /* 二进制原文件不计入文本配额；引用记录按原始 size 计入（任务要求） */
+        total += (fs[i].binary ? 0 : (fs[i].size || 0));
+        if (fs[i].path === path) old = fs[i];
+      }
+      if (!old && fs.length >= LIMITS.VFS_FILES_MAX) throw new Error('文件数已达上限 ' + LIMITS.VFS_FILES_MAX);
+      var oldSize = (old && !old.binary) ? (old.size || 0) : 0;
+      if (total - oldSize + size > LIMITS.VFS_TOTAL_MAX)
+        throw new Error('会话工作区总量超过 ' + Math.round(LIMITS.VFS_TOTAL_MAX / 1024 / 1024) + 'MB');
+      return DB.workfsPut({
+        id: sid + '|' + path, sid: sid, path: path, content: '', size: size, ts: Date.now(),
+        vers: (old && old.vers ? old.vers.slice() : []),
+        attachmentId: (r && r.id) || '', mime: (r && r.mime) || '',
+        external: true, preview: preview
+      });
+    }).then(function(){ return true; }, function(){ return false; });
+  }
   function importAttachmentsToWorkspace(sid, refs, fileTexts, allMsgs){
     if (!sid || !refs || !refs.length) return Promise.resolve();
     var byId = {}, byName = {};
@@ -1162,7 +1197,8 @@ function sendMessage(){
         var tp = uniq('attachments/' + wsSafeName(r.name), r.id);
         r.path = tp; r.rawPath = '';
         if (ft) ft.path = tp;
-        writes.push({ path: tp, body: text });
+        /* 只写引用记录（content 为空 + attachmentId + 预览），不复制全文进 VFS */
+        writes.push({ path: tp, textRef: true, ref: r, preview: text });
         return;
       }
       /* 二进制原文件（图片/PDF/PPT/DOCX/XLSX/未知格式）原样入工作区 */
@@ -1191,16 +1227,17 @@ function sendMessage(){
       }
       if (r.path && !seen[r.path]){
         seen[r.path] = 1;
-        lines.push('- ' + r.path + '（' + (r.rawPath ? '可读文本 / 说明' : (r.kind || '文本')) + '，' + r.name + '）');
+        lines.push('- ' + r.path + '（' + (r.rawPath ? '可读文本 / 说明' : (r.kind === '文本' ? '文本全文（可用 vfs-grep / vfs-read 检索）' : (r.kind || '文本'))) + '，' + r.name + '）');
       }
     });
     if (lines.length){
       writes.push({ path: 'attachments/00-附件清单.md',
-        body: '# 工作区附件清单\n\n本会话上传的附件已自动导入工作区（原文件原样保存）。文本内容读 .md/.txt；图片/原文件用右侧预览/下载。\n\n' + lines.join('\n') + '\n' });
+        body: '# 工作区附件清单\n\n本会话上传的附件已自动导入工作区（原文件原样保存）。文本内容读 .md/.txt；大文本先用 vfs-stat 看大小，再 vfs-grep 定位或 vfs-read 按 offset 分段读；要在整份附件上跑脚本时用 ```py（完整正文会带进临时目录）。图片/原文件用右侧预览/下载。\n\n' + lines.join('\n') + '\n' });
     }
     var chain = Promise.resolve();
     writes.forEach(function(w){
       chain = chain.then(function(){
+        if (w.textRef) return writeTextAttachmentRef(sid, w.path, w.ref, w.preview);
         return w.binary ? writeAttachmentBinary(sid, w.path, w.ref) : workspaceWrite(sid, w.path, w.body);
       });
     });
@@ -1214,7 +1251,7 @@ function sendMessage(){
         var kind = (a.doc || DOC_EXT[ext]) ? '文档提取文本'
           : (/^image\//.test(a.mime || '') ? '图片'
           : ((a.text != null || /^text\//.test(a.mime || '') || TEXT_EXT[ext]) ? '文本' : '文件'));
-        return { id: a.id, name: a.name, mime: a.origMime || a.mime || '', size: a.origSize || a.size || 0, kind: kind, text: a.text || '' };
+        return { id: a.id, name: a.name, mime: a.origMime || a.mime || '', size: a.origSize || a.size || 0, kind: kind, text: a.text || '', external: kind === '文本' };
       });
     });
   }
@@ -1252,6 +1289,9 @@ function sendMessage(){
         if (!r) return false;
         if (!r.path) return true;
         var k = r.kind || '';
+        /* 0.4.14 之前的文本附件只有旧的 content 截断副本：即使 path 存在也重新 hydrate，
+           用 external 引用覆盖旧 VFS 记录，旧会话才能读到全文 */
+        if (k === '文本' && r.external !== true) return true;
         return (k === '图片' || k === '文件' || k === '文档提取文本') && !r.rawPath;
       });
       if (needTexts || needRefs) jobs.push(hydrateOneAttachment(m, msgs));

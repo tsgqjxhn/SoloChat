@@ -467,7 +467,7 @@ var MD = (function(){
     var codes = [];
     /* v1.14：围栏首行可以带参数（```vfs-write index.html / ```fs-read src/a.js / ```run js）。
        以前正则只认「```lang + 换行」，带参数的围栏整块漏判，原文连 ``` 一起糊在正文里。 */
-    var TOOL_LANG = /^(crawl|run|vfs-write|vfs-list|vfs-read|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|python|fs-[a-z-]+)$/i;
+    var TOOL_LANG = /^(crawl|run|vfs-write|vfs-list|vfs-read|vfs-grep|vfs-stat|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|python|fs-[a-z-]+)$/i;
     src = src.replace(/```([A-Za-z0-9+#-]*)[ \t]*([^\n]*)\n([\s\S]*?)```/g, function(m, lang, arg, code){
       var a = String(arg || '').trim(), body = code.replace(/\n+$/, '');
       if (a && TOOL_LANG.test(lang)) body = a + '\n' + body;   /* 参数并进体首行，工具卡片照旧读首行 */
@@ -575,7 +575,7 @@ var MD = (function(){
         if (c.lang && c.lang.indexOf('fs-') === 0){ html += fsCard(c); i++; continue; } /* 文件工具卡片（v1.1） */
         var _rk = crKind(c.lang);
         /* v3.0 #12：运行/写文件/补丁/预览围栏 → 工具卡片 */
-        if (/^(run|vfs-write|vfs-list|vfs-read|patch|preview|web|crawl|search|play|download|get|browser|python)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
+        if (/^(run|vfs-write|vfs-list|vfs-read|vfs-grep|vfs-stat|patch|preview|web|crawl|search|play|download|get|browser|python)$/.test(c.lang || '')){ html += toolCard(c); i++; continue; } // v0.2.2：web/search 也是工具调用，用卡片而不是代码块
         /* v3.0 #20：代码块工具条（运行 / 复制 / 下载 / 换行） */
         /* v3.0 #25：可选行号——逐行包 span，复制时仍是纯文本；P1：9 种语言高亮 */
         var _ln = !!S.cfg.lineNo, _bc = c.code, _hl = HL.run(c.lang || '', c.code);
@@ -744,9 +744,9 @@ var MD = (function(){
     var lang = c.lang || '', code = c.code || '';
     var head = code.split('\n')[0] || '';
     var line1 = (code.split('\n')[1] || '').slice(0, 0);
-    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', 'vfs-read': '读取虚拟文件', patch: '应用补丁', preview: '预览', web: '抓取网页', crawl: '批量抓取', search: '联网搜索', play: '打开播放', download: '下载视频', get: '抓取文件', browser: '打开内置浏览器', python: '运行 Python' }[lang] || lang;
+    var title = { run: '运行', 'vfs-write': '写入虚拟文件', 'vfs-list': '列目录', 'vfs-read': '读取虚拟文件', 'vfs-grep': '检索虚拟文件', 'vfs-stat': '虚拟文件信息', patch: '应用补丁', preview: '预览', web: '抓取网页', crawl: '批量抓取', search: '联网搜索', play: '打开播放', download: '下载视频', get: '抓取文件', browser: '打开内置浏览器', python: '运行 Python' }[lang] || lang;
     var meta = '';
-    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'vfs-read' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get' || lang === 'browser' || lang === 'python'){
+    if (lang === 'vfs-write' || lang === 'patch' || lang === 'vfs-list' || lang === 'vfs-read' || lang === 'vfs-grep' || lang === 'vfs-stat' || lang === 'web' || lang === 'search' || lang === 'play' || lang === 'download' || lang === 'get' || lang === 'browser' || lang === 'python'){
       meta = head.trim();
     } else if (lang === 'run'){
       meta = head.trim().slice(0, 80);
@@ -869,7 +869,7 @@ function diff(oldT, newT){ /* 行级简易 diff：公共前后缀+中段替换�
     return out.join('');
   }
   /* v1.28.4：围栏自检 —— 未闭合 / 参数为空要说出来，别静默丢掉 */
-  var TOOL_RE = /^(crawl|run|vfs-write|vfs-list|vfs-read|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|python|fs-[a-z-]+)$/i;
+  var TOOL_RE = /^(crawl|run|vfs-write|vfs-list|vfs-read|vfs-grep|vfs-stat|patch|preview|web|search|play|download|get|browser|skill|agent|sub|suball|python|fs-[a-z-]+)$/i;
   /* v1.1.10：fs-* / vfs-write / patch 的路径写在围栏下一行也是合法格式，
      旧规则把它们误报成「缺少参数」。只保留确实要求围栏同行带参数的网搜/代理类。 */
   var ARG_REQ = /^(agent|sub|web|search|get|browser|play|download|skill)$/i;

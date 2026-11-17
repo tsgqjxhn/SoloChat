@@ -1125,7 +1125,7 @@ var WORK = (function(){
   /* v2.2：循环状态按会话隔离 */
   var stMap = {};
   /* v0.4.1：Soul 下 Work 只执行 Work 专属操作，共享操作交给 FS，避免重复执行 */
-  var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
+  var SOUL_OPS = ['vfs-write', 'vfs-list', 'vfs-read', 'vfs-grep', 'vfs-stat', 'run', 'preview', 'patch', 'py', 'extract', 'download', 'play', 'shot'];
   /* v0.4.7：Plan 只读；Write 全部工具、命令确认；Free 全部免确认 */
   var PLAN_DENY_WORK = ['vfs-write','run','patch','download','play','crawl','extract'];
   function stOf(sid){ sid = sid || S.sid; return stMap[sid] || (stMap[sid] = { turns: 0, cancel: false, t0: 0, errStreak: 0, lastErr: '' }); }
@@ -1136,7 +1136,7 @@ var WORK = (function(){
     '```browser-read [URL] —— 读应用内浏览器当前页（或先打开 URL）：回标题 + 正文 + 链接；JS 渲染、点过「加载更多」的页面用这个。\n' +
     '```browser-act click #more —— 操作页面：click 选择器 / type 选择器 | 文本 / scroll 像素 / wait 选择器或毫秒 / back / forward。\n' +
     '```extract <url|-> --items ".item" --fields "name:.title,price:.price" [--next "#more"] [--pages 3] [--dedupe name] [--out games.csv] —— 按选择器抓字段并落 CSV。\n' +
-    '```py —— 临时沙箱跑 Python（工作区文本文件自动带进去，改动的文件写回）；例：读 games.csv → 清洗 → 写 clean.csv。\n' +
+    '```py —— 临时沙箱跑 Python（本会话工作区的文本与完整附件自动带进去，改动的文件写回）；例：读 games.csv → 清洗 → 写 clean.csv。\n' +
     '```web URL —— 抓网页正文（纯文本，超长截断）；SPA、登录墙、强反爬常只给空壳，那就换 search。\n' +
     '```search 查询词 —— 联网检索，回标题+链接+摘要。\n' +
     '```nav JSON —— 航海图：{"type":"bearing","heading":45,"trueBearing":120,"target":"灯塔A"}；\n' +
@@ -1154,7 +1154,9 @@ var WORK = (function(){
     '```run 类型(html/svg/js/css/c) —— 沙箱内跑代码，回控制台与报错；沙箱无网，别在 run 里写抓取代码。\n' +
     '```vfs-write 相对路径 —— 体为完整文件内容，写进本会话工作区（单文件上限见设置 → 模式设置，默认 1MB）。\n' +
     '```vfs-list —— 列工作区。\n' +
-    '```vfs-read 相对路径 —— 读文本文件原文；上传附件的提取文本在 attachments/ 下（.md/.txt），超过约 6KB 截断；图片/PDF/Office 原文件只回元数据，不能按文本读。\n' +
+    '```vfs-read 相对路径 [--offset=N] [--limit=N] —— 读文本文件；单次默认/最多 64KB 字符，长文件按 offset 分段读（被截断时结果会给出下一次的 offset）；图片/PDF/Office 原文件只回元数据，不能按文本读。\n' +
+    '```vfs-grep 相对路径 正则 [--max=N] [--before=N] [--after=N] [--page=N] [--case] —— 在单个文本文件里按行全文检索（大附件也能搜到后半段）；回 路径:行号 + 前后上下文，只回片段。\n' +
+    '```vfs-stat 相对路径 —— 看大小/字符数/是否为完整附件/预览是否截断；先 stat 再决定 grep 还是分段 read。\n' +
     '```patch 相对路径 —— 体为 unified diff（@@ 简版）；小改用 patch，比整文件重写省 token。\n' +
     '```preview 相对路径 —— 在右侧面板打开产物自检。\n' +
     '```play URL —— 应用内播放窗口打开视频；视频站禁止被 iframe 内嵌，别把播放器塞进 html 产物。\n' +
@@ -1165,7 +1167,7 @@ var WORK = (function(){
     '纪律：绝不回答「我无法访问网络」——先调工具，只有工具真的失败才回报原因（附失败输出要点）。\n' +
     '输出：结论在前；有产物给「文件清单 + 怎么打开/运行」；有失败给「失败原因 + 建议下一步」。';
   function scan(content){ /* 扫描 run/vfs-* 围栏（参数=体首行）；容忍 \r\n */
-    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|extract|py|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
+    var re = /```(run|preview|patch|web|crawl|shot|search|play|download|get|extract|py|browser-read|browser-act|browser|time|calc|json|http|skill|suball|sub|agent|vfs-(?:write|list|read|grep|stat))(?:[ \t]*\r?\n|[ \t]+)([\s\S]*?)```/g, out = [], m;
     while ((m = re.exec(content || ''))){
       var nl = m[2].indexOf('\n');
       out.push({ op: m[1], arg: (nl >= 0 ? m[2].slice(0, nl) : m[2]).trim(), body: nl >= 0 ? m[2].slice(nl + 1) : '' });
@@ -1238,6 +1240,86 @@ var WORK = (function(){
     while (pos < src.length) out.push(src[pos++]);
     if (!hit) throw new Error('缺少 @@ 定位行');
     return out.join('\n');
+  }
+  /* ==== v3.0：大文本附件的全文读取 ====
+     文本附件在 VFS 里只存 attachmentId + size + 4KB 预览；全文始终在 attachments 表。
+     这里按需取 blob 解码，不把整本书复制进工作区，也不塞进工具结果。 */
+  function decodeBytes(buf){
+    if (!buf) return '';
+    var u8 = (typeof Uint8Array !== 'undefined' && buf instanceof Uint8Array) ? buf : new Uint8Array(buf);
+    var utf = '';
+    try { utf = new TextDecoder('utf-8').decode(u8); } catch (e) { utf = ''; }
+    var bad = (utf.match(/\uFFFD/g) || []).length;
+    /* 替换字符比例明显偏高 → 多半是 GBK/GB18030 文本，换编码再试一次 */
+    if (bad && bad / Math.max(1, utf.length) > 0.002){
+      try {
+        var gbk = new TextDecoder('gbk').decode(u8);
+        var bad2 = (gbk.match(/\uFFFD/g) || []).length;
+        if (gbk && bad2 < bad) return gbk;
+      } catch (e) {}
+    }
+    return utf;
+  }
+  function blobText(blob){
+    if (!blob) return Promise.resolve('');
+    if (typeof blob.arrayBuffer === 'function'){
+      return blob.arrayBuffer().then(function(ab){ return decodeBytes(ab); });
+    }
+    if (typeof blob.text === 'function') return blob.text();
+    return new Promise(function(res, rej){
+      try {
+        var fr = new FileReader();
+        fr.onload = function(){ res(String(fr.result == null ? '' : fr.result)); };
+        fr.onerror = function(){ rej(fr.error || new Error('读取失败')); };
+        fr.readAsText(blob);
+      } catch (e) { rej(e); }
+    });
+  }
+  function loadVfsText(f){
+    if (!f) return Promise.resolve({ text: '', hasFull: false, bytes: 0 });
+    var fallback = { text: String(f.content || ''), hasFull: false, bytes: f.size || 0 };
+    if (!f.attachmentId || !DB.getAttachment) return Promise.resolve(fallback);
+    return DB.getAttachment(f.attachmentId).then(function(a){
+      var src = a && (a.rawBlob || a.blob);
+      if (!src) return fallback;
+      return blobText(src).then(function(t){
+        return { text: String(t == null ? '' : t), hasFull: true, bytes: src.size || (f.size || 0) };
+      });
+    }).then(function(x){ return x; }, function(){ return fallback; });
+  }
+  function readFullText(f){ return loadVfsText(f).then(function(x){ return x.text; }); }
+  /* vfs-read 参数：--offset / --limit 可出现在路径前后；路径本身允许带空格 */
+  function parseReadArg(arg){
+    var s = String(arg || '').trim(), m, offset = 0, limit = 0;
+    m = /(^|\s)--offset(?:=|\s+)(\d+)(?=\s|$)/.exec(s);
+    if (m){ offset = parseInt(m[2], 10) || 0; s = s.slice(0, m.index) + s.slice(m.index + m[0].length); }
+    m = /(^|\s)--limit(?:=|\s+)(\d+)(?=\s|$)/.exec(s);
+    if (m){ limit = parseInt(m[2], 10) || 0; s = s.slice(0, m.index) + s.slice(m.index + m[0].length); }
+    return { path: s.trim(), offset: Math.max(0, offset), limit: Math.max(0, limit) };
+  }
+  /* vfs-grep 参数：路径首 token；其余 token 里抽选项，剩下的按空格拼回正则（pattern 可含空格） */
+  function parseGrepArg(arg){
+    var s = String(arg || '').trim();
+    var m = /^(\S+)(?:\s+([\s\S]*))?$/.exec(s);
+    if (!m) return null;
+    var path = m[1], toks = String(m[2] || '').split(/\s+/), pat = [];
+    var opt = { max: 100, before: 1, after: 1, page: 1, cs: false };
+    function put(k, v){ opt[k] = parseInt(v, 10) || 0; }
+    for (var i = 0; i < toks.length; i++){
+      var t = toks[i], mm;
+      if (!t) continue;
+      if (t === '--case'){ opt.cs = true; continue; }
+      if ((mm = /^--(max|before|after|page)=(\d+)$/.exec(t))){ put(mm[1], mm[2]); continue; }
+      if (/^--(max|before|after|page)$/.test(t) && i + 1 < toks.length && /^\d+$/.test(toks[i + 1])){
+        put(t.slice(2), toks[++i]); continue;
+      }
+      pat.push(t);
+    }
+    opt.max = Math.max(1, Math.min(200, opt.max || 100));
+    opt.before = Math.max(0, Math.min(20, opt.before));
+    opt.after = Math.max(0, Math.min(20, opt.after));
+    opt.page = Math.max(1, opt.page || 1);
+    return { path: path, pattern: pat.join(' '), opt: opt };
   }
   /* VFS 写入：配额校验 → IndexedDB（id = sid + '|' + path，覆盖写） */
   function vfsWrite(sid, path, body){
@@ -1369,7 +1451,13 @@ var WORK = (function(){
       var body = parts.join('\n\n');
       if (extra) body += '\n\n' + extra;
       if (!/^\[(run-result|vfs|web|search|preview|play|download|get|extract|py|browser-read|browser-act)\]/.test(body)) body = '[run-result]\n' + body;
-      note(body.slice(0, LIMITS.WORK_RESULT_CHARS), sid0, events, imgs);
+      /* v3.1：保留总量上限，但截断必须可见 —— 末尾追加下一次怎么接着读，不静默丢内容 */
+      var cap = LIMITS.WORK_RESULT_CHARS || 65536;
+      if (body.length > cap){
+        var notice = '\n…（工具结果超过 ' + body.length + ' 字符，已截断；用 vfs-read --offset 或 vfs-grep --page 继续）';
+        body = body.slice(0, Math.max(0, cap - notice.length)) + notice;
+      }
+      note(body, sid0, events, imgs);
     }
     (function next(){
       if (w0.cancel){ UI.holdBusy(-1, sid0); return; } // v0.3.0：取消也要归还 busy，否则 S.pend 永久 >0
@@ -1579,14 +1667,18 @@ var WORK = (function(){
       if (c.op === 'vfs-list'){
         DB.workfsBySid(sid0).then(function(fs){
           fs.sort(function(a, b){ return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
-          var lines = fs.map(function(f){ return f.path + '（' + sizeFmt(f.size || 0) + (f.binary ? '，原文件/二进制' : '') + '）'; });
+          var lines = fs.map(function(f){
+            var tag = f.binary ? '，原文件/二进制' : (f.external ? '，全文（附件）' : '');
+            return f.path + '（' + sizeFmt(f.size || 0) + tag + '）';
+          });
           add('[vfs] 工作区文件（' + fs.length + ' 项）' + (lines.length ? '\n```\n' + lines.join('\n') + '\n```' : '（空）'), { op: 'list', n: fs.length, ok: true });
         }).then(next);
         return;
       }
-      /* v1.1.21：读工作区文件（附件提取文本 / 产物原文） */
+      /* v1.1.21 / v3.0：读工作区文件（附件全文按 offset 分段；普通产物仍读 content） */
       if (c.op === 'vfs-read'){
-        var rp = normPath(c.arg);
+        var rdArg = parseReadArg(c.arg);
+        var rp = normPath(rdArg.path);
         if (!rp){ add('[vfs] 读取失败：路径无效（用相对路径，不许 ..）', { op: 'read', ok: false, brief: '路径无效' }); next(); return; }
         DB.workfsBySid(sid0).then(function(fs){
           var f = null;
@@ -1597,11 +1689,117 @@ var WORK = (function(){
               { op: 'read', path: f.path, ok: true, binary: true });
             return;
           }
-          var txt = String(f.content || '');
-          var cut = txt.slice(0, LIMITS.WORK_WEB_CHARS);
-          add('[vfs] ' + f.path + '（' + sizeFmt(f.size || 0) + (txt.length > cut.length ? '，已截断，共 ' + txt.length + ' 字' : '，全文') + '）\n```\n' + cut + '\n```',
-            { op: 'read', path: f.path, ok: true });
-        }).then(next);
+          return readFullText(f).then(function(txt){
+            txt = String(txt == null ? '' : txt);
+            /* v3.1：单次读取不能把外层工具结果预算吃满，留 1KB 给头部/下一次偏移提示 */
+            var cap = Math.max(1024, Math.min(LIMITS.WORK_WEB_CHARS || 65536, 65536, (LIMITS.WORK_RESULT_CHARS || 65536) - 1024));
+            var lim = rdArg.limit > 0 ? Math.min(rdArg.limit, cap) : cap;
+            var off = Math.min(rdArg.offset, txt.length);
+            var seg = txt.slice(off, off + lim);
+            var eof = off + seg.length >= txt.length;
+            var head = '[vfs] ' + f.path + '（总 ' + txt.length + ' 字符 / ' + sizeFmt(f.size || (new Blob([txt]).size)) +
+              '，offset ' + off + '，limit ' + lim + '，' + (eof ? '已到尾部' : '未到尾部') + '）';
+            if (!eof) head += '\n下一次：vfs-read ' + f.path + ' --offset=' + (off + seg.length) + ' --limit=' + lim;
+            add(head + '\n```\n' + seg + '\n```',
+              { op: 'read', path: f.path, ok: true, chars: txt.length, offset: off, limit: lim, eof: eof });
+          });
+        }).catch(function(e){ add('[vfs] 读取失败：' + (e && e.message || e), { op: 'read', path: rp, ok: false, brief: '读取失败' }); })
+          .then(next);
+        return;
+      }
+      /* v3.0：单个文本文件全文正则检索（大附件只回命中片段） */
+      if (c.op === 'vfs-grep'){
+        var gArg = parseGrepArg(c.arg);
+        var gPath = normPath(gArg && gArg.path);
+        if (!gArg || !gPath){ add('[vfs] 检索失败：用法 vfs-grep <相对路径> <正则>', { op: 'grep', ok: false, brief: '参数无效' }); next(); return; }
+        if (!gArg.pattern){ add('[vfs] 检索失败：缺少正则（vfs-grep ' + gPath + ' 关键词）', { op: 'grep', path: gPath, ok: false, brief: '缺正则' }); next(); return; }
+        var gRe;
+        try { gRe = new RegExp(gArg.pattern, gArg.opt.cs ? '' : 'i'); }
+        catch (e){ add('[vfs] 正则有误：' + (e && e.message || e), { op: 'grep', path: gPath, ok: false, brief: '正则错误' }); next(); return; }
+        DB.workfsBySid(sid0).then(function(fs){
+          var f = null;
+          for (var i = 0; i < fs.length; i++) if (fs[i].path === gPath) f = fs[i];
+          if (!f){ add('[vfs] 文件不存在：' + gPath + '（先用 vfs-list 看工作区路径）', { op: 'grep', path: gPath, ok: false, brief: '文件不存在' }); return; }
+          if (f.binary){
+            add('[vfs] ' + f.path + '（原文件/二进制，不能按文本检索）', { op: 'grep', path: f.path, ok: false, binary: true, brief: '二进制' });
+            return;
+          }
+          return readFullText(f).then(function(txt){
+            var lines = String(txt == null ? '' : txt).split(/\r?\n/);
+            var hits = [];
+            for (var i = 0; i < lines.length; i++){ if (gRe.test(lines[i])) hits.push(i); }
+            var opt = gArg.opt;
+            var pages = Math.max(1, Math.ceil(hits.length / opt.max));
+            var page = Math.min(opt.page, pages);
+            var from = (page - 1) * opt.max;
+            var pageHits = hits.slice(from, from + opt.max);
+            var hitSet = {};
+            for (var q = 0; q < hits.length; q++) hitSet[hits[q]] = 1;
+            /* v3.1：给输出做预算（外层结果上限 - 1KB），按行装，超出就停并标注截断；
+               不能等 finish() 静默截掉尾部，否则模型会以为这页就这么多。 */
+            var budget = Math.max(1024, (LIMITS.WORK_RESULT_CHARS || 65536) - 1024);
+            var headGuess = '[vfs] grep ' + f.path + '（命中 ' + hits.length + ' 行，第 ' + page + '/' + pages +
+              ' 页，每页 ' + opt.max + ' 条，本次显示 ' + pageHits.length + ' 条）';
+            var used = headGuess.length + 9 + 96; /* 代码围栏 + 截断提示预留 */
+            var out = [], last = -1, shown = 0, truncated = false, h = 0;
+            for (; h < pageHits.length; h++){
+              var idx = pageHits[h];
+              if (idx <= last){ shown++; continue; }
+              var s0 = Math.max(0, idx - opt.before), e0 = Math.min(lines.length - 1, idx + opt.after);
+              var hitShown = false, hitCut = false;
+              for (var j = s0; j <= e0; j++){
+                if (j <= last) continue;
+                var mark = hitSet[j] ? ':' : '-';
+                var line = f.path + ':' + (j + 1) + mark + ' ' + String(lines[j] || '').slice(0, 400);
+                if (used + line.length + 1 > budget){ hitCut = true; break; }
+                out.push(line); used += line.length + 1; last = j;
+                if (j === idx) hitShown = true;
+              }
+              if (hitShown) shown++;
+              if (hitCut){ truncated = true; break; }
+            }
+            if (h < pageHits.length) truncated = true;
+            var head = '[vfs] grep ' + f.path + '（命中 ' + hits.length + ' 行，第 ' + page + '/' + pages +
+              ' 页，每页 ' + opt.max + ' 条，本次显示 ' + shown + ' 条）';
+            if (!hits.length) head += '\n没有匹配：/' + gArg.pattern + '/';
+            if (truncated) head += '\n本页输出已截断，下一页用 --page=' + Math.min(pages, page + 1) +
+              (page >= pages ? '（或减小 --max/--before/--after）' : '');
+            add(head + (out.length ? '\n```\n' + out.join('\n') + '\n```' : ''),
+              { op: 'grep', path: f.path, ok: true, hits: hits.length, page: page, pages: pages, shown: shown, truncated: truncated });
+          });
+        }).catch(function(e){ add('[vfs] 检索失败：' + (e && e.message || e), { op: 'grep', path: gPath, ok: false, brief: '检索失败' }); })
+          .then(next);
+        return;
+      }
+      /* v3.0：文件元数据（大小 / 字符数 / 是否完整附件 / 预览是否截断） */
+      if (c.op === 'vfs-stat'){
+        var stPath = normPath(String(c.arg || '').trim());
+        if (!stPath){ add('[vfs] 用法：vfs-stat <相对路径>', { op: 'stat', ok: false, brief: '参数无效' }); next(); return; }
+        DB.workfsBySid(sid0).then(function(fs){
+          var f = null;
+          for (var i = 0; i < fs.length; i++) if (fs[i].path === stPath) f = fs[i];
+          if (!f){ add('[vfs] 文件不存在：' + stPath + '（先用 vfs-list 看工作区路径）', { op: 'stat', path: stPath, ok: false, brief: '文件不存在' }); return; }
+          var base = '[vfs] ' + f.path + '\n- 大小：' + sizeFmt(f.size || 0) +
+            (f.mime ? '（' + f.mime + '）' : '') +
+            '\n- 类型：' + (f.binary ? '二进制（原文件）' : (f.external ? '文本（全文来自附件）' : '文本（工作区正文）')) +
+            '\n- 附件引用：' + (f.attachmentId ? '有（attachmentId）' : '无') +
+            '\n- external：' + (f.external ? '是' : '否') +
+            '\n- binary：' + (f.binary ? '是' : '否');
+          if (f.binary){
+            add(base, { op: 'stat', path: f.path, ok: true, external: !!f.external, binary: true, bytes: f.size || 0 });
+            return;
+          }
+          return loadVfsText(f).then(function(x){
+            var chars = x.text.length;
+            var preview = String(f.preview || '');
+            var trunc = preview ? (chars > preview.length) : false;
+            add(base + '\n- 完整附件：' + (x.hasFull ? '有（可读全文）' : '无（仅工作区正文/预览）') +
+              '\n- 字符数：' + chars +
+              '\n- 预览：' + (preview ? (preview.length + ' 字符' + (trunc ? '（已截断）' : '（未截断）')) : '无'),
+              { op: 'stat', path: f.path, ok: true, external: !!f.external, binary: false, bytes: x.bytes || f.size || 0, chars: chars });
+          });
+        }).catch(function(e){ add('[vfs] 读取文件信息失败：' + (e && e.message || e), { op: 'stat', path: stPath, ok: false, brief: '读取失败' }); })
+          .then(next);
         return;
       }
       /* ---- v0.2.8：任意 URL → 磁盘（图片/PDF/Office/压缩包/音视频都能存；文档顺手抽文本）---- */
@@ -1670,24 +1868,56 @@ var WORK = (function(){
       }
       /* ---- v1.29（P4）：读当前应用内浏览器页面（渲染后的 DOM + 链接） ---- */
       if (c.op === 'py'){
-        var pyCode = String(c.body || '');
+        /* v3.2：无空行的 ```py 围栏会被 scan 放进 arg（body 为空），这里把首行拼回去 */
+        var pyCode = String((c.arg ? c.arg + '\n' : '') + (c.body || '')).trim();
         if (!pyCode.trim()){ add('[py] 代码为空', { op: 'py', ok: false, brief: '代码为空' }); next(); return; }
         if (!NET.bridge || !NET.bridge.runtime){ add('[py] 需要 exe 宿主，并先在插件市场安装 Python 3.11 运行时', { op: 'py', ok: false, brief: '无运行时' }); next(); return; }
-        UI.confirmBox({ title: '在临时沙箱运行 Python？', text: '会把本会话工作区的文本文件带进去，跑完把改动写回。\n\n' + pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''), okText: '运行', danger: true })
-          .then(function(ok){
+        UI.confirmBox({
+          title: '在临时沙箱运行 Python？',
+          text: '会把本会话工作区的文本（包括完整附件）带进临时目录；跑完把有改动的文件写回工作区（写回仍受 VFS 单文件 1MB 限制）。\n\n' +
+            pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''),
+          okText: '运行', danger: true
+        }).then(function(ok){
             if (!ok){ add('[py] 用户取消了本次执行', { op: 'py', ok: false, brief: '已取消' }); next(); return; }
-            var pt0 = Date.now();
+            var pt0 = Date.now(), pySkipped = [], pyFailed = [];
+            var PY_FILE_MAX = 32 * 1024 * 1024, PY_TOTAL_MAX = 48 * 1024 * 1024;
             DB.workfsBySid(sid0).then(function(list){
-              var files = {};
-              (list || []).forEach(function(f){
-                if (f && !f.binary && f.content != null && String(f.content).length < 200000) files[f.path] = String(f.content);
+              var items = (list || []).filter(function(f){ return f && !f.binary; });
+              /* v3.1：文本附件全文在 attachments 表里，先全部读出来（Promise.all）再送进沙箱 */
+              return Promise.all(items.map(function(f){
+                if (f.external && f.attachmentId && typeof loadVfsText === 'function'){
+                  return loadVfsText(f).then(function(x){
+                    return { f: f, text: String(x && x.text != null ? x.text : '') };
+                  }, function(e){ return { f: f, err: e }; });
+                }
+                return { f: f, text: String(f.content == null ? '' : f.content) };
+              })).then(function(rows){
+                var files = {}, total = 0;
+                rows.forEach(function(row){
+                  if (row.err){
+                    pyFailed.push(row.f.path + '（' + ((row.err && row.err.message) || row.err) + '）');
+                    return;
+                  }
+                  var txt = String(row.text == null ? '' : row.text);
+                  if (txt.length > PY_FILE_MAX){
+                    pySkipped.push(row.f.path + '（' + txt.length + ' 字符，超过单文件 32MB）');
+                    return;
+                  }
+                  if (total + txt.length > PY_TOTAL_MAX){
+                    pySkipped.push(row.f.path + '（本次总量超过 48MB）');
+                    return;
+                  }
+                  files[row.f.path] = txt; total += txt.length;
+                });
+                return NET.bridge.runtime('run', { runtimeId: 'python-3.11', op: 'sandbox', code: pyCode, files: files, timeoutMs: 60000 });
               });
-              return NET.bridge.runtime('run', { runtimeId: 'python-3.11', op: 'sandbox', code: pyCode, files: files, timeoutMs: 60000 });
             }).then(function(r){
               var out = '[py] 退出码 ' + ((r && r.code) == null ? '?' : r.code) + '（' + (Date.now() - pt0) + 'ms）' +
                 (r && r.timeout ? ' · 超时（>60s）' : '') +
                 (r && r.stdout ? '\nSTDOUT:\n' + String(r.stdout).slice(0, 4000) : '') +
                 (r && r.stderr ? '\nSTDERR:\n' + String(r.stderr).slice(0, 3000) : '');
+              if (pySkipped.length) out += '\n跳过（过大）：' + pySkipped.join('；');
+              if (pyFailed.length) out += '\n跳过（读取失败）：' + pyFailed.join('；');
               var fs = (r && r.files) || {}, names = Object.keys(fs);
               var ps = names.map(function(k){ return vfsWrite(sid0, k, fs[k]); });
               Promise.all(ps).then(function(){
@@ -1695,7 +1925,12 @@ var WORK = (function(){
                 add(out, { op: 'py', ok: !(r && r.code), ms: Date.now() - pt0, brief: '退出码 ' + ((r && r.code) == null ? '?' : r.code) });
                 next();
               }, function(e){ add(out + '\n写回失败：' + ((e && e.message) || e), { op: 'py', ok: false, brief: '写回失败' }); next(); });
-            }, function(e){ add('[py] 执行失败：' + ((e && e.message) || e), { op: 'py', ok: false, brief: '失败' }); next(); });
+            }, function(e){
+              var failTxt = '[py] 执行失败：' + ((e && e.message) || e);
+              if (pySkipped.length) failTxt += '\n跳过（过大）：' + pySkipped.join('；');
+              if (pyFailed.length) failTxt += '\n跳过（读取失败）：' + pyFailed.join('；');
+              add(failTxt, { op: 'py', ok: false, brief: '失败' }); next();
+            });
           });
         return;
       }

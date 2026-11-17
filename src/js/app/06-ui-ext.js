@@ -1222,7 +1222,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     updateEmpty();
   }
   /* v0.2.1：工具卡片 —— 「运行 js / 写入 x.mjs / 抓取 URL / 搜索 q」一行一条，点开才看原始输出 */
-  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', download: '下载', get: '抓取', read: '读取' };
+  var TOOL_LABEL = { run: '运行', write: '写入', patch: '打补丁', list: '列目录', preview: '预览', web: '抓取', search: '搜索', play: '播放', download: '下载', get: '抓取', read: '读取', grep: '检索', stat: '文件信息' };
   function toolEvents(m){
     if (m.tools && m.tools.length) return m.tools;
     var out = [], lines = String(m.content || '').split('\n');
@@ -1407,7 +1407,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       'grep': '搜索文件', 'glob': '匹配文件', 'cmd': '运行命令', 'git': '运行 Git', 'python': '运行 Python',
       'browser': '打开网页', 'browser-read': '读取网页', 'browser-act': '操作网页',
       'web': '抓取网页', 'crawl': '批量抓取', 'search': '搜索', 'get': '下载', 'run': '运行沙箱',
-      'vfs-write': '写入文件', 'vfs-read': '读取文件', 'vfs-list': '列工作区',
+      'vfs-write': '写入文件', 'vfs-read': '读取文件', 'vfs-list': '列工作区', 'vfs-grep': '检索文件', 'vfs-stat': '文件信息',
       'preview': '预览', 'play': '播放', 'download': '下载', 'extract': '提取', 'py': 'Python',
       'shot': '截图', 'agent': '智能体', 'sub': '子智能体', 'suball': '并行智能体', 'skill': '技能'
     })[op] || op;
