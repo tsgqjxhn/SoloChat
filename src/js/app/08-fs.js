@@ -1394,7 +1394,20 @@ function importFiles(list){
     function get(rel){
       var enc;
       try { enc = segPath(rel); } catch (e){ return Promise.reject(e); }
-      return NET.raw({ url: base + enc, method: 'GET', timeout: 15000 }).then(function(r){
+      var url = base + enc;
+      /* 本地市场（同源 static 文件）直接 fetch；远端仍走 NET.raw（宿主桥可绕 CORS） */
+      var sameOrigin = false;
+      try { sameOrigin = (new URL(url, location.href)).origin === location.origin; } catch(e2){}
+      if (sameOrigin){
+        return fetch(url, { cache: 'no-store' }).then(function(r){
+          if (!r || !r.ok) throw E('HTTP ' + (r && r.status) + '：' + rel);
+          return r.text().then(function(t){
+            if (t.length > 512000) throw E('文件过大：' + rel);
+            return t;
+          });
+        });
+      }
+      return NET.raw({ url: url, method: 'GET', timeout: 15000 }).then(function(r){
         if (!r || r.status < 200 || r.status >= 300) throw E('HTTP ' + (r && r.status) + '：' + rel);
         var t = String(r.text || '');
         if (t.length > 512000) throw E('文件过大：' + rel);
@@ -1418,6 +1431,11 @@ function importFiles(list){
           var f = typeof it === 'string' ? it : (it && (it.file || it.path));
           if (f && rels.indexOf(f) < 0) rels.push(f);
         });
+      });
+      /* v1 规范：条目统一写在 items[]（kind 区分类型） */
+      (man.items || []).forEach(function(it){
+        var f = it && it.file;
+        if (f && rels.indexOf(f) < 0) rels.push(f);
       });
       if (rels.length > 40) throw E('清单条目过多（' + rels.length + '）');
       var files = [mk('manifest.json', mtxt)];

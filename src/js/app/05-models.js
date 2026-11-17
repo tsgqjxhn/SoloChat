@@ -583,7 +583,7 @@ function buildSettings(){
 
       /* —— 文档解析（v1.4；v1.5 增加 OCR 引擎；v1.5.1 由独立页并入本页） —— */
       p.appendChild(acc('文档解析', function(b){
-        b.appendChild(svcBar('parse', '解析配置组'));
+        b.appendChild(svcBar('parse'));
         var oc = c.ocr || (c.ocr = Object.assign({}, DEF_CFG.ocr));
         var dpCk = el('input', { type: 'checkbox', 'data-cfg': 'docParse' });
         dpCk.checked = !!c.docParse;
@@ -688,7 +688,7 @@ function buildSettings(){
       }, false));
 
       p.appendChild(acc('在线搜索', function(b){
-        b.appendChild(svcBar('search', '搜索配置组'));
+        b.appendChild(svcBar('search'));
         var psel = el('select', { 'data-cfg': 'searchProvider', class: 'f-in' });
         [['none', '不启用'],
            ['perplexity', 'Perplexity Search'],

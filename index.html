@@ -2304,6 +2304,15 @@ var Vault = {
       (cfg.presets || []).forEach(function(p){ if (p.id === cfg.activePreset) act = p; });
       if (act) cfg.apiKey = act.apiKey || ''; // 顶层 apiKey 镜像活跃预置
       self.hydrated = true; // Issue 14: 密钥回读完成，此后允许 persist
+      /* v0.4.6：首次启用配置组时，旧版扁平 Key 还没有按组存；归给当前组，避免切换后被空值覆盖 */
+      try {
+        var sp = SVC.active('search'), pp = SVC.active('parse');
+        if (sp && !sp.searchKey && cfg.searchKey) sp.searchKey = cfg.searchKey;
+        if (pp && cfg.ocr){
+          pp.ocr = pp.ocr || {};
+          OCR_KEYS.forEach(function(k){ if (!pp.ocr[k] && cfg.ocr[k]) pp.ocr[k] = cfg.ocr[k]; });
+        }
+      } catch (e) {}
       /* v0.4.6：搜索/解析组 Key 回读后，把活跃组重新镜像到扁平字段（启动时 active 组才是真源） */
       try { if (typeof SVC !== 'undefined' && SVC.reapplyActive) SVC.reapplyActive(); } catch (e) {}
     }).catch(function(e){ self.hydrated = false; try { console.warn('保险库回读失败，本次不写回密钥', e); } catch (e2) {} }); // v0.3.11：失败时不能再置 true，否则 saveCfg 会用空 key 覆盖保险库
@@ -10296,7 +10305,7 @@ function buildSettings(){
 
       /* —— 文档解析（v1.4；v1.5 增加 OCR 引擎；v1.5.1 由独立页并入本页） —— */
       p.appendChild(acc('文档解析', function(b){
-        b.appendChild(svcBar('parse', '解析配置组'));
+        b.appendChild(svcBar('parse'));
         var oc = c.ocr || (c.ocr = Object.assign({}, DEF_CFG.ocr));
         var dpCk = el('input', { type: 'checkbox', 'data-cfg': 'docParse' });
         dpCk.checked = !!c.docParse;
@@ -10401,7 +10410,7 @@ function buildSettings(){
       }, false));
 
       p.appendChild(acc('在线搜索', function(b){
-        b.appendChild(svcBar('search', '搜索配置组'));
+        b.appendChild(svcBar('search'));
         var psel = el('select', { 'data-cfg': 'searchProvider', class: 'f-in' });
         [['none', '不启用'],
            ['perplexity', 'Perplexity Search'],
@@ -19137,7 +19146,20 @@ function importFiles(list){
     function get(rel){
       var enc;
       try { enc = segPath(rel); } catch (e){ return Promise.reject(e); }
-      return NET.raw({ url: base + enc, method: 'GET', timeout: 15000 }).then(function(r){
+      var url = base + enc;
+      /* 本地市场（同源 static 文件）直接 fetch；远端仍走 NET.raw（宿主桥可绕 CORS） */
+      var sameOrigin = false;
+      try { sameOrigin = (new URL(url, location.href)).origin === location.origin; } catch(e2){}
+      if (sameOrigin){
+        return fetch(url, { cache: 'no-store' }).then(function(r){
+          if (!r || !r.ok) throw E('HTTP ' + (r && r.status) + '：' + rel);
+          return r.text().then(function(t){
+            if (t.length > 512000) throw E('文件过大：' + rel);
+            return t;
+          });
+        });
+      }
+      return NET.raw({ url: url, method: 'GET', timeout: 15000 }).then(function(r){
         if (!r || r.status < 200 || r.status >= 300) throw E('HTTP ' + (r && r.status) + '：' + rel);
         var t = String(r.text || '');
         if (t.length > 512000) throw E('文件过大：' + rel);
@@ -19161,6 +19183,11 @@ function importFiles(list){
           var f = typeof it === 'string' ? it : (it && (it.file || it.path));
           if (f && rels.indexOf(f) < 0) rels.push(f);
         });
+      });
+      /* v1 规范：条目统一写在 items[]（kind 区分类型） */
+      (man.items || []).forEach(function(it){
+        var f = it && it.file;
+        if (f && rels.indexOf(f) < 0) rels.push(f);
       });
       if (rels.length > 40) throw E('清单条目过多（' + rels.length + '）');
       var files = [mk('manifest.json', mtxt)];

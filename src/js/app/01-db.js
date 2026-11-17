@@ -700,6 +700,15 @@ var Vault = {
       (cfg.presets || []).forEach(function(p){ if (p.id === cfg.activePreset) act = p; });
       if (act) cfg.apiKey = act.apiKey || ''; // 顶层 apiKey 镜像活跃预置
       self.hydrated = true; // Issue 14: 密钥回读完成，此后允许 persist
+      /* v0.4.6：首次启用配置组时，旧版扁平 Key 还没有按组存；归给当前组，避免切换后被空值覆盖 */
+      try {
+        var sp = SVC.active('search'), pp = SVC.active('parse');
+        if (sp && !sp.searchKey && cfg.searchKey) sp.searchKey = cfg.searchKey;
+        if (pp && cfg.ocr){
+          pp.ocr = pp.ocr || {};
+          OCR_KEYS.forEach(function(k){ if (!pp.ocr[k] && cfg.ocr[k]) pp.ocr[k] = cfg.ocr[k]; });
+        }
+      } catch (e) {}
       /* v0.4.6：搜索/解析组 Key 回读后，把活跃组重新镜像到扁平字段（启动时 active 组才是真源） */
       try { if (typeof SVC !== 'undefined' && SVC.reapplyActive) SVC.reapplyActive(); } catch (e) {}
     }).catch(function(e){ self.hydrated = false; try { console.warn('保险库回读失败，本次不写回密钥', e); } catch (e2) {} }); // v0.3.11：失败时不能再置 true，否则 saveCfg 会用空 key 覆盖保险库

@@ -100,10 +100,20 @@ if (fs.existsSync(PACKAGES_SRC)) {
     }
     if (!man || typeof man !== 'object') return;
 
-    const items = {};
-    ['tools', 'skills', 'agents', 'prompts'].forEach(function (k) {
-      items[k] = Array.isArray(man[k]) ? man[k].length : 0;
-    });
+    const items = { tools: 0, skills: 0, agents: 0, prompts: 0 };
+    if (Array.isArray(man.items) && man.items.length) {
+      /* v1 规范：items[] 里用 kind 标明技能 / 工具 / 智能体 / 提示词 */
+      const kindKey = { tool: 'tools', skill: 'skills', agent: 'agents', prompt: 'prompts' };
+      man.items.forEach(function (it) {
+        const k = it && kindKey[String(it.kind || '')];
+        if (k) items[k]++;
+      });
+    } else {
+      /* 旧格式：四类数组直接取长度 */
+      ['tools', 'skills', 'agents', 'prompts'].forEach(function (k) {
+        items[k] = Array.isArray(man[k]) ? man[k].length : 0;
+      });
+    }
 
     packages.push({
       name: String(man.name || name),
