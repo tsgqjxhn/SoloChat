@@ -459,7 +459,7 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 }
 .md hr{border:0;border-top:1px solid var(--hairline);margin:14px 0}
 .md table{border-collapse:collapse;margin:10px 0;font-size:13px;width:100%}
-.md th,.md td{border:1px solid var(--hairline);padding:5px 10px;text-align:left}
+.md th,.md td{border:1px solid var(--hairline);padding:7px 11px;text-align:left;vertical-align:top;line-height:1.55}
 .md th{background:var(--soft);color:var(--ink);font-weight:600}
 
 /* 文件 Agent 卡片渲染（fs-* 围栏，§5.4） */
@@ -896,8 +896,17 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
 .md .md-task{list-style:none;margin-left:-1.2em}
 .md .md-task input[type="checkbox"]{vertical-align:baseline;margin-right:.35em;position:relative;top:1px}
 .md .md-task.done{color:var(--faint);text-decoration:line-through}
-.md .tb-wrap{overflow-x:auto;margin:10px 0}
-.md .tb-wrap>table{min-width:max-content;margin:0;width:auto}
+.md .tb-wrap{
+  overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0;
+  border:1px solid var(--hairline);border-radius:var(--r-md);background:var(--canvas);
+}
+.md .tb-wrap>table{min-width:max-content;margin:0;width:auto;border:0}
+.md .tb-wrap th:first-child,.md .tb-wrap td:first-child{border-left:0}
+.md .tb-wrap th:last-child,.md .tb-wrap td:last-child{border-right:0}
+.md .tb-wrap tr:first-child th{border-top:0}
+.md .tb-wrap tr:last-child td{border-bottom:0}
+.md .tb-wrap tbody tr:nth-child(even){background:var(--soft)}
+.md .tb-wrap tbody tr:hover{background:var(--card)}
 .md th.ta-c,.md td.ta-c{text-align:center}
 .md th.ta-r,.md td.ta-r{text-align:right}
 .md .fnref{font-size:11px;vertical-align:super;line-height:0}

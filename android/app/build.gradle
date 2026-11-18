@@ -14,8 +14,8 @@ android {
         applicationId "com.solochat.mobile"
         minSdk 26
         targetSdk 34
-        versionCode 34
-        versionName "0.4.16"
+        versionCode 35
+        versionName "0.4.17"
     }
 
     signingConfigs {

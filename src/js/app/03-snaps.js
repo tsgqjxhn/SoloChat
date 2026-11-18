@@ -547,6 +547,14 @@ var MD = (function(){
       var t = line.trim().replace(/^\|/, '').replace(/\|$/, '');
       return t.split('|').map(function(c){ return c.trim(); });
     }
+    /* 表格起点：当前行含 |，且下一行是分隔行（必须含 -）。
+       段落循环与表格分支共用，避免「段落后无空行」时表头被吞进 <p>。 */
+    function isTableStart(idx){
+      return idx >= 0 && idx + 1 < lines.length &&
+        lines[idx].indexOf('|') >= 0 &&
+        /^\|?[\s:|-]+\|?$/.test(lines[idx + 1]) &&
+        lines[idx + 1].indexOf('-') >= 0;
+    }
     while (i < lines.length){
       var line = lines[i];
       var _lt = line.trim();
@@ -667,8 +675,7 @@ var MD = (function(){
         continue;
       }
 
-      if (line.indexOf('|') >= 0 && i + 1 < lines.length &&
-          /^\|?[\s:|-]+\|?$/.test(lines[i + 1]) && lines[i + 1].indexOf('-') >= 0){ /* 表格（P1：对齐 + 横向滚动） */
+      if (isTableStart(i)){ /* 表格（P1：对齐 + 横向滚动） */
         var head = splitRow(line);
         var sepCells = splitRow(lines[i + 1]), aligns = [];
         for (k = 0; k < sepCells.length; k++){
@@ -713,6 +720,8 @@ var MD = (function(){
              !/^(#{1,4}\s|&gt;\s?|\s*([-*+]|\d+\.)\s|\s*(-{3,}|\*{3,})\s*$)/.test(lines[i]) &&
              !/^\uE000\d+\uE000$/.test(lines[i].trim()) &&
              !/^\uE002\d+\uE002$/.test(lines[i].trim())){
+        /* 表格紧贴段落（前面没有空行）时立刻让位给表格分支，表头前的文字仍独立成段 */
+        if (isTableStart(i)) break;
         /* P1：不要把定义列表的术语/解释吞进段落 */
         if (/^:\s+/.test(lines[i]) || (i + 1 < lines.length && /^:\s+/.test(lines[i + 1]) &&
             !/^(#{1,4}\s|&gt;|\s*([-*+]|\d+\.)\s|\s*(-{3,}|\*{3,})\s*$)/.test(lines[i]))) break;
