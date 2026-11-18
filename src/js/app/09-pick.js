@@ -1872,12 +1872,16 @@ var WORK = (function(){
         var pyCode = String((c.arg ? c.arg + '\n' : '') + (c.body || '')).trim();
         if (!pyCode.trim()){ add('[py] 代码为空', { op: 'py', ok: false, brief: '代码为空' }); next(); return; }
         if (!NET.bridge || !NET.bridge.runtime){ add('[py] 需要 exe 宿主，并先在插件市场安装 Python 3.11 运行时', { op: 'py', ok: false, brief: '无运行时' }); next(); return; }
-        UI.confirmBox({
-          title: '在临时沙箱运行 Python？',
-          text: '会把本会话工作区的文本（包括完整附件）带进临时目录；跑完把有改动的文件写回工作区（写回仍受 VFS 单文件 1MB 限制）。\n\n' +
-            pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''),
-          okText: '运行', danger: true
-        }).then(function(ok){
+        /* v3.3：Free 权限下不弹确认（与 FS.askRun 一致）；Write 仍确认，Plan 已在 PLAN_DENY_WORK 拦下 */
+        var pyGate = permForSid(sid0) === 'free'
+          ? Promise.resolve(true)
+          : UI.confirmBox({
+            title: '在临时沙箱运行 Python？',
+            text: '会把本会话工作区的文本（包括完整附件）带进临时目录；跑完把有改动的文件写回工作区（写回仍受 VFS 单文件 1MB 限制）。\n\n' +
+              pyCode.slice(0, 600) + (pyCode.length > 600 ? '\n…' : ''),
+            okText: '运行', danger: true
+          });
+        pyGate.then(function(ok){
             if (!ok){ add('[py] 用户取消了本次执行', { op: 'py', ok: false, brief: '已取消' }); next(); return; }
             var pt0 = Date.now(), pySkipped = [], pyFailed = [];
             var PY_FILE_MAX = 32 * 1024 * 1024, PY_TOTAL_MAX = 48 * 1024 * 1024;

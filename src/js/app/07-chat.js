@@ -3834,12 +3834,13 @@ $('#sidebar').addEventListener('click', function(e){
       DB.workfsBySid(S.sid).then(function(fs){
         for (var i = 0; i < fs.length; i++) if (fs[i].id === fid){
           var f = fs[i], name = f.path.split('/').pop();
-          if (f.binary && f.attachmentId){
+          /* 有 attachmentId 一律读附件原字节（文本/图片/二进制都走这条），不再只看 f.binary */
+          if (f.attachmentId){
             DB.getAttachment(f.attachmentId).then(function(a){
               var src = a && (a.rawBlob || a.blob);
               if (src) ZIP.dl(src, name);
               else UI.toast('原文件已不存在（附件可能已删除）', true);
-            });
+            }, function(e){ UI.toast('读取附件失败：' + (e && e.message || e), true); });
           } else {
             ZIP.dl(new Blob([f.content || ''], { type: 'text/plain;charset=utf-8' }), name);
           }

@@ -145,6 +145,198 @@ function bindWeb(){
   /* v1.13：Agent 的工作区 = 用户选中的真实文件夹（列目录 / 查看 / 删除） */
   function agentRoot(){ var cs = (typeof curSession === 'function') ? curSession() : null; return (cs && cs.workspace) || ''; }
   function agentRel(p){ return agentPath ? (agentPath + '/' + p) : p; }
+  function isBinName(name){
+    var m = /\.([a-z0-9]+)$/i.exec(String(name || ''));
+    var x = m ? m[1].toLowerCase() : '';
+    return /^(png|jpe?g|gif|webp|bmp|ico|tiff?|pdf|pptx?|docx?|xlsx?|zip|rar|7z|gz|tar|mp3|wav|flac|mp4|mov|webm|mkv|exe|dll|so|bin)$/i.test(x);
+  }
+  /* v3.4：工作区文件编辑器（Work 沙箱 / Agent 真实目录共用外壳）——不用原生 prompt */
+  function openWsEditor(opt){
+    var box = $('#rn-ws-view');
+    if (!box) return;
+    var path = String(opt.path || '');
+    box.hidden = false;
+    box.textContent = '';
+    var wrap = el('div', { class: 'ws-edit' });
+    var head = el('div', { class: 'ws-edit-head' });
+    var pathIn = null;
+    if (opt.newPath){
+      pathIn = el('input', { class: 'f-in ws-edit-path', type: 'text', placeholder: '相对路径，例如 notes.md', spellcheck: 'false' });
+      pathIn.value = path;
+      head.appendChild(pathIn);
+    } else {
+      head.appendChild(el('span', { class: 'ws-edit-name', text: path, title: path }));
+    }
+    if (opt.note) head.appendChild(el('span', { class: 'hint', text: opt.note }));
+    var closeBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '关闭' });
+    head.appendChild(closeBtn);
+    wrap.appendChild(head);
+    if (opt.notice) wrap.appendChild(el('div', { class: 'ws-edit-notice', text: opt.notice }));
+    var ta = el('textarea', { class: 'ws-edit-body', spellcheck: 'false' });
+    ta.value = String(opt.text == null ? '' : opt.text);
+    if (opt.readonly) ta.readOnly = true;
+    wrap.appendChild(ta);
+    var errEl = el('div', { class: 'ws-edit-err' });
+    errEl.hidden = true;
+    var actions = el('div', { class: 'ws-edit-actions' });
+    var saveBtn = el('button', { class: 'btn btn-primary rn-mini', type: 'button', text: '保存' });
+    var cancelBtn = el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '取消' });
+    if (opt.readonly) saveBtn.disabled = true;
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    wrap.appendChild(errEl);
+    wrap.appendChild(actions);
+    box.appendChild(wrap);
+    function close(){ box.hidden = true; box.textContent = ''; }
+    function fail(msg){ errEl.hidden = false; errEl.textContent = msg; }
+    if (opt.error) fail(String(opt.error));
+    closeBtn.addEventListener('click', close);
+    cancelBtn.addEventListener('click', close);
+    saveBtn.addEventListener('click', function(){
+      var p = (pathIn ? String(pathIn.value || '').trim() : path);
+      if (!p){ fail('路径不能为空'); return; }
+      saveBtn.disabled = true;
+      errEl.hidden = true;
+      Promise.resolve().then(function(){ return opt.onSave(p, ta.value); }).then(function(){
+        close();
+      }, function(e){
+        saveBtn.disabled = false;
+        fail('保存失败：' + ((e && e.message) || e));
+        UI.toast('保存失败：' + ((e && e.message) || e), true);
+      });
+    });
+  }
+  /* Work 沙箱：编辑 / 新建 / 删除 */
+  function workEdit(path, isNew){
+    var sid = (typeof S !== 'undefined' && S.sid) || null;
+    if (!sid) return;
+    if (isNew){
+      openWsEditor({
+        path: 'notes.md', newPath: true, note: '新建 · 沙箱工作区', text: '',
+        onSave: function(p, text){
+          if (typeof WORK === 'undefined' || !WORK.vfsWrite) return Promise.reject(new Error('工作区不可用'));
+          return WORK.vfsWrite(sid, p, text).then(function(r){
+            UI.toast('已保存 ' + ((r && r.path) || p));
+            renderWs();
+          });
+        }
+      });
+      return;
+    }
+    DB.workfsBySid(sid).then(function(fs){
+      var f = null, i;
+      for (i = 0; i < fs.length; i++) if (fs[i].path === path) f = fs[i];
+      if (!f){ UI.toast('文件不存在（可能已删除）：' + path, true); renderWs(); return; }
+      if (f.binary){ UI.toast('二进制文件不能当文本编辑：' + path, true); return; }
+      var ext = !!(f.external || f.attachmentId);
+      var size = Number(f.size || 0) || String(f.content || '').length;
+      if (ext && size > LIMITS.VFS_FILE_MAX){
+        /* 大附件：仍打开编辑器，但只读载入前 PV_TEXT_MAX 字符，不能整文件保存 */
+        var bigNotice = '大附件只读预览：只能看，不能在工作区面板里整文件保存；用 vfs-grep/vfs-read 查看，或让 AI 分段修改后新建文件。';
+        pvTextOf(f).then(function(text){
+          var full = String(text == null ? '' : text);
+          var cut = full.length > PV_TEXT_MAX;
+          openWsEditor({
+            path: path, note: sizeFmt(size) + ' · 外部附件', readonly: true,
+            text: cut ? full.slice(0, PV_TEXT_MAX) : full,
+            notice: bigNotice + (cut ? '（已载入前 ' + PV_TEXT_MAX + ' 字符，共 ' + full.length + ' 字符）' : '')
+          });
+        }, function(e){
+          openWsEditor({
+            path: path, note: sizeFmt(size) + ' · 外部附件', readonly: true, text: '',
+            notice: bigNotice,
+            error: '读取失败：' + ((e && e.message) || e)
+          });
+        });
+        return;
+      }
+      pvTextOf(f).then(function(text){
+        var full = String(text == null ? '' : text);
+        if (ext && new Blob([full]).size > LIMITS.VFS_FILE_MAX){
+          var cut = full.length > PV_TEXT_MAX;
+          openWsEditor({
+            path: path, note: sizeFmt(size) + ' · 外部附件', readonly: true,
+            text: cut ? full.slice(0, PV_TEXT_MAX) : full,
+            notice: '大附件只读预览：只能看，不能在工作区面板里整文件保存；用 vfs-grep/vfs-read 查看，或让 AI 分段修改后新建文件。' +
+              (cut ? '（已载入前 ' + PV_TEXT_MAX + ' 字符，共 ' + full.length + ' 字符）' : '')
+          });
+          return;
+        }
+        openWsEditor({
+          path: path, note: sizeFmt(size) + ' · ' + (ext ? '外部附件（全文）' : '沙箱文件'),
+          text: full,
+          onSave: function(np, body){
+            if (typeof WORK === 'undefined' || !WORK.vfsWrite) return Promise.reject(new Error('工作区不可用'));
+            return WORK.vfsWrite(sid, np, body).then(function(r){
+              UI.toast('已保存 ' + ((r && r.path) || np));
+              renderWs();
+            });
+          }
+        });
+      }, function(e){
+        openWsEditor({
+          path: path, note: sizeFmt(size), readonly: true, text: '',
+          notice: '读取失败：' + ((e && e.message) || e)
+        });
+      });
+    }, function(e){
+      UI.toast('读取工作区失败：' + ((e && e.message) || e), true);
+    });
+  }
+  function workDel(path){
+    var sid = (typeof S !== 'undefined' && S.sid) || null;
+    if (!sid) return;
+    UI.confirmBox({ title: '删除文件', text: '从沙箱工作区删除 ' + path + ' ？不可撤销。', okText: '删除', danger: true }).then(function(ok){
+      if (!ok) return;
+      DB.workfsDel(sid, path).then(function(){
+        var vb = $('#rn-ws-view');
+        if (vb){ vb.hidden = true; vb.textContent = ''; }
+        UI.toast('已删除 ' + path);
+        renderWs();
+      }, function(e){ UI.toast('删除失败：' + ((e && e.message) || e), true); });
+    });
+  }
+  /* Agent 真实工作区：编辑 / 新建 */
+  function editAgent(name, isNew){
+    var root = agentRoot(); if (!root) return;
+    var path = isNew ? agentRel('notes.md') : agentRel(name);
+    if (isNew){
+      openWsEditor({
+        path: path, newPath: true, note: '新建 · 真实工作区', text: '',
+        onSave: function(p, text){
+          return NET.fs('write', p, text, root).then(function(){
+            UI.toast('已保存 ' + p);
+            renderWs();
+          });
+        }
+      });
+      return;
+    }
+    NET.fs('read', path, '', root).then(function(raw){
+      var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
+      var txt = String((r && r.text) || '');
+      var size = (r && r.size) || txt.length;
+      openWsEditor({
+        path: path, note: sizeFmt(size) + ' · 真实工作区', text: txt,
+        onSave: function(np, body){
+          return NET.fs('write', np, body, root).then(function(){
+            UI.toast('已保存 ' + np);
+            renderWs();
+          });
+        }
+      });
+    }, function(err){
+      var msg = '读取失败：' + path + '\n' + ((err && err.message) || err);
+      var box = $('#rn-ws-view'); if (!box) return;
+      box.hidden = false; box.textContent = '';
+      box.appendChild(el('div', { class: 'vfs-row' }, [
+        el('span', { class: 't', text: path, title: path }),
+        el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '关闭', 'data-ag-close': '1' })
+      ]));
+      box.appendChild(el('pre', { class: 'ag-pre', text: msg }));
+      UI.toast('读不了：' + ((err && err.message) || err), true);
+    });
+  }
   function renderAgentWs(){
     var list = $('#rn-ws-list'), cnt = $('#rn-ws-count');
     if (!list) return;
@@ -161,6 +353,7 @@ function bindWeb(){
       el('span', { class: 't', text: '/' + (agentPath || ''), title: root })
     ]);
     if (agentPath) head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '↑ 上级', 'data-ag-up': '1' }));
+    head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '新建', 'data-ag-new': '1', title: '在真实工作区新建文本文件' }));
     head.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '刷新', 'data-ag-refresh': '1' }));
     list.appendChild(head);
     NET.fs('list', agentPath || '', '', root).then(function(raw){
@@ -176,6 +369,7 @@ function bindWeb(){
         if (e.d) kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '进入', 'data-ag-dir': e.n }));
         else {
           kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '查看', 'data-ag-view': e.n }));
+          if (!isBinName(e.n)) kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '编辑', 'data-ag-edit': e.n }));
           kids.push(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '删除', 'data-ag-del': e.n }));
         }
         list.appendChild(el('div', { class: 'vfs-row' }, kids));
@@ -189,8 +383,7 @@ function bindWeb(){
     var path = agentRel(name), box = $('#rn-ws-view');
     if (!box) return;
     /* v1.1.22：二进制原文件不要按 UTF-8 读成乱码；文本看同名 .md 提取文件 */
-    var _ax = extOf(name);
-    if (/^(png|jpe?g|gif|webp|bmp|ico|tiff?|pdf|pptx?|docx?|xlsx?|zip|rar|7z|gz|tar|mp3|wav|flac|mp4|mov|webm|mkv|exe|dll|so|bin)$/i.test(_ax)){
+    if (isBinName(name)){
       box.hidden = false; box.textContent = '';
       box.appendChild(el('div', { class: 'vfs-row' }, [
         el('span', { class: 't', text: path, title: path }),
@@ -202,14 +395,28 @@ function bindWeb(){
     NET.fs('read', path, '', root).then(function(raw){
       var r = raw; try { r = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { r = {}; }
       var txt = String((r && r.text) || '');
+      var _sz = (r && r.size) || txt.length;
+      box.hidden = false;
+      box.textContent = '';
+      box.appendChild(el('div', { class: 'vfs-row' }, [
+        el('span', { class: 't', text: path, title: path + '（' + sizeFmt(_sz) + '）' }),
+        el('span', { class: 'hint', text: sizeFmt(_sz) }),
+        el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '关闭', 'data-ag-close': '1' })
+      ]));
+      box.appendChild(el('pre', { class: 'ag-pre', text: txt.slice(0, 200000) +
+        (txt.length > 200000 ? '\n\n…（只显示前 200000 字符，共 ' + txt.length + ' 字符）' : '') }));
+    }, function(err){
+      /* v3.3：读取失败要在面板里说清，而不是只弹一条 toast */
+      var msg = '读取失败：' + path + '\n' + ((err && err.message) || err);
       box.hidden = false;
       box.textContent = '';
       box.appendChild(el('div', { class: 'vfs-row' }, [
         el('span', { class: 't', text: path, title: path }),
         el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '关闭', 'data-ag-close': '1' })
       ]));
-      box.appendChild(el('pre', { class: 'ag-pre', text: txt.slice(0, 200000) }));
-    }, function(err){ UI.toast('读不了：' + (err && err.message || err), true); });
+      box.appendChild(el('pre', { class: 'ag-pre', text: msg }));
+      UI.toast('读不了：' + ((err && err.message) || err), true);
+    });
   }
   function agentDel(name){
     var root = agentRoot(); if (!root) return;
@@ -240,6 +447,12 @@ function bindWeb(){
       cnt.title = fs.length ? (fs.length + ' 个文件 · ' + sizeFmt(_tot)) : '';
     }
       list.textContent = '';
+      var wsHead = el('div', { class: 'vfs-row ws-head' }, [
+        el('span', { class: 't', text: '沙箱工作区' })
+      ]);
+      wsHead.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '新建', 'data-vnew': 'work', title: '在沙箱工作区新建文本文件' }));
+      wsHead.appendChild(el('button', { class: 'btn btn-ghost rn-mini', type: 'button', text: '刷新', 'data-vrefresh': '1' }));
+      list.appendChild(wsHead);
       if (!fs.length){
         list.appendChild(el('div', { class: 'hint', text: '沙箱工作区还没有文件。AI 用 ```vfs-write 写入（或回复里的 html/svg/js/css/md 代码块）后会自动出现在这里。' }));
         return;
@@ -252,16 +465,22 @@ function bindWeb(){
           el('span', { class: 't', text: f.path, title: f.path }),
           el('span', { class: 'hint', text: sizeFmt(f.size || 0) })
         ];
+        /* v3.3：文本附件只存引用，标清楚预览/下载读的是附件全文 */
+        if (!f.binary && (f.external || f.attachmentId))
+          rowKids.push(el('span', { class: 'hint', text: '全文（附件）', title: '全文存于附件库；预览与下载都会读完整内容' }));
         if (k !== 'src')
           rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '预览', 'data-vpv': f.path }));
         else
           rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '查看', 'data-vpv': f.path }));
         if (crKind(ext))
           rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '运行', 'data-vrun': f.path, title: '在沙箱运行该文件，控制台输出见下方终端' }));
+        if (!f.binary)
+          rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '编辑', 'data-vedit': f.path, title: '在工作区面板里编辑这个文本文件' }));
         rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '下载', 'data-vdl': f.id, title: '下载该文件' }));
         /* v3.0 #15：有历史版本时给「回滚」入口 */
         if (f.vers && f.vers.length)
           rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '版本 ' + f.vers.length, 'data-vver': f.path, title: '回滚到上一个版本' }));
+        rowKids.push(el('button', { class: 'btn btn-ghost rn-mini', text: '删除', 'data-vdel': f.path, title: '从沙箱工作区删除该文件' }));
         return el('div', { class: 'vfs-row' + (pv && pv.sid === sid && pv.path === f.path ? ' pv-on' : '') }, rowKids);
       }
       var groups = {}, order = [];
@@ -325,6 +544,56 @@ function bindWeb(){
   function pvExt(path){ var m = /\.([a-z0-9]+)$/i.exec(String(path || '')); return m ? m[1].toLowerCase() : ''; }
   function pvKind(path){ var e = pvExt(path);
     return (e === 'html' || e === 'htm') ? 'html' : (e === 'svg' ? 'svg' : ((e === 'md' || e === 'markdown') ? 'md' : 'src')); }
+  /* v3.3：文本附件在 VFS 里只有 attachmentId 引用（content 为空），预览/运行都按需读全文。
+     20MB 附件不能在渲染里整段处理：预览只取前 20 万字符。 */
+  var PV_TEXT_MAX = 200000;
+  function pvDecode(buf){
+    var u8 = (typeof Uint8Array !== 'undefined' && buf instanceof Uint8Array) ? buf : new Uint8Array(buf);
+    var utf = '';
+    try { utf = new TextDecoder('utf-8').decode(u8); } catch (e) { utf = ''; }
+    var bad = (utf.match(/\uFFFD/g) || []).length;
+    /* 替换字符比例偏高 → 多半是 GBK/GB18030，换编码再试一次 */
+    if (bad && bad / Math.max(1, utf.length) > 0.002){
+      try {
+        var gbk = new TextDecoder('gbk').decode(u8);
+        if (gbk && (gbk.match(/\uFFFD/g) || []).length < bad) return gbk;
+      } catch (e) {}
+    }
+    return utf;
+  }
+  function pvBlobText(blob){
+    if (!blob) return Promise.resolve('');
+    if (typeof blob.arrayBuffer === 'function')
+      return blob.arrayBuffer().then(function(ab){ return pvDecode(ab); });
+    if (typeof blob.text === 'function') return blob.text();
+    return new Promise(function(res, rej){
+      try {
+        var fr = new FileReader();
+        fr.onload = function(){ res(String(fr.result == null ? '' : fr.result)); };
+        fr.onerror = function(){ rej(fr.error || new Error('读取失败')); };
+        fr.readAsText(blob);
+      } catch (e) { rej(e); }
+    });
+  }
+  /* 有 attachmentId 就读附件原字节；没有引用才退回 VFS 里存的 content */
+  function pvTextOf(f){
+    if (!f) return Promise.resolve('');
+    if (f.attachmentId && DB.getAttachment){
+      return DB.getAttachment(f.attachmentId).then(function(a){
+        var src = a && (a.rawBlob || a.blob);
+        if (!src) return String(f.content || '');
+        return pvBlobText(src).then(function(t){ return String(t == null ? '' : t); });
+      }).then(function(t){ return t; }, function(){ return String(f.content || ''); });
+    }
+    return Promise.resolve(String(f.content || ''));
+  }
+  /* 预览显示窗口：超出部分不渲染，只提示总长度 */
+  function pvWindow(text){
+    var t = String(text == null ? '' : text);
+    if (t.length <= PV_TEXT_MAX) return { text: t, cut: false, total: t.length };
+    return { text: t.slice(0, PV_TEXT_MAX) + '\n\n…（预览只显示前 ' + PV_TEXT_MAX + ' 字符，共 ' + t.length + ' 字符；用 vfs-read 分段或在聊天中检索）',
+             cut: true, total: t.length };
+  }
   function pvResolve(dir, rel){ /* 相对路径 → VFS 规范路径（禁逃逸根） */
     rel = String(rel || '').split('#')[0].split('?')[0];
     if (!rel) return null;
@@ -370,10 +639,10 @@ function bindWeb(){
       'table{border-collapse:collapse}td,th{border:1px solid ' + tok('--hairline', '#23252a') + ';padding:5px 9px}img,video{max-width:100%;height:auto}' +
       '.md-media{display:inline-block;max-width:100%}</style>';
   }
-  function pvDoc(f, fs){ /* 生成预览文档（注入 CSP + console 桥 + 导航桥） */
+  function pvDoc(f, fs, fullText){ /* 生成预览文档（注入 CSP + console 桥 + 导航桥） */
     var kind = pvKind(f.path), dir = f.path.indexOf('/') >= 0 ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
     var head = '<meta charset="utf-8">' + PV_CSP + BRIDGE.replace('__SC_NONCE__', JSON.stringify(String(curNonce || ''))) + PVNAV;
-    var content = f.content || '';
+    var content = (fullText == null ? (f.content || '') : String(fullText));
     if (kind === 'svg')
       return '<!doctype html><html><head>' + head + '</head><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:' + tok('--code-bg','#0f1011') + ';color:' + tok('--code-ink','#f7f8f8') + '">' + content + '</body></html>';
     if (kind === 'md')
@@ -438,24 +707,39 @@ function bindWeb(){
         pvBarSync();
         return;
       }
-      if (pvKind(pv.path) === 'src'){ /* 非可渲染文本：源码视图 */
-        frame.style.display = 'none'; srcEl.hidden = false;
-        var _ext = pvExt(pv.path);
-        var _bin = /^(png|jpe?g|gif|webp|bmp|ico|tiff?|pdf|pptx?|docx?|xlsx?|zip|rar|7z|gz|tar|mp3|wav|flac|mp4|mov|webm|mkv|exe|dll|so|bin)$/i.test(_ext);
-        if (_bin){
-          srcEl.className = 'rn-src';
-          srcEl.textContent = '「.' + _ext + '」暂不支持在侧栏预览。\n\n请点工具栏的「下载」保存到本地后打开。';
-          statusEl.textContent = '不支持预览';
+      /* v3.3：文本/源码一律读全文（外部附件只存 attachmentId），预览只处理显示窗口 */
+      var _isExt = !!(f.attachmentId || f.external);
+      pvTextOf(f).then(function(text){
+        if (!pv || pv.sid !== entry.sid || pv.path !== entry.path) return; /* 已切走：丢弃迟到的读取 */
+        var win = pvWindow(text);
+        var _k = pvKind(entry.path);
+        /* 顶部「下载」拿全文，不受预览窗口截断影响 */
+        cur = { kind: _k === 'src' ? (pvExt(entry.path) || 'txt') : _k,
+                code: win.text,
+                blob: new Blob([String(text == null ? '' : text)], { type: f.mime || 'text/plain;charset=utf-8' }) };
+        if (_k === 'src'){ /* 非可渲染文本：源码视图 */
+          frame.style.display = 'none'; srcEl.hidden = false;
+          var _ext = pvExt(pv.path);
+          var _bin = /^(png|jpe?g|gif|webp|bmp|ico|tiff?|pdf|pptx?|docx?|xlsx?|zip|rar|7z|gz|tar|mp3|wav|flac|mp4|mov|webm|mkv|exe|dll|so|bin)$/i.test(_ext);
+          if (_bin){
+            srcEl.className = 'rn-src';
+            srcEl.textContent = '「.' + _ext + '」暂不支持在侧栏预览。\n\n请点工具栏的「下载」保存到本地后打开。';
+            statusEl.textContent = '不支持预览';
+            pvBarSync();
+            return;
+          }
+          var _doc = /^(txt|text|log|csv|tsv|md|markdown)$/i.test(_ext);
+          srcEl.className = 'rn-src' + (_doc ? ' is-doc' : '');
+          srcEl.textContent = win.text;
+          statusEl.textContent = _isExt ? '全文（附件）' : (_doc ? '文本' : '源码');
           pvBarSync();
           return;
         }
-        var _doc = /^(txt|text|log|csv|tsv)$/i.test(_ext);
-        srcEl.className = 'rn-src' + (_doc ? ' is-doc' : '');
-        srcEl.textContent = f.content || '';
-        statusEl.textContent = _doc ? '文本' : '源码';
-        return;
-      }
-      frame.srcdoc = pvDoc(f, fs);
+        /* md/svg/html：只对显示窗口渲染，避免 20MB 全文做 MD.render */
+        frame.srcdoc = pvDoc(f, fs, win.text);
+        statusEl.textContent = _isExt ? '全文（附件）' : '预览';
+        pvBarSync();
+      });
     });
   }
   function previewTo(sid, path, push){
@@ -486,10 +770,17 @@ function bindWeb(){
       cur = { kind: pvExt(path) || 'txt', code: f.content || '' };
       curNonce = uuid();
       killFrame();
-      srcEl.hidden = false; srcEl.textContent = f.content || '';
+      srcEl.hidden = false; srcEl.textContent = '';
       frame.style.display = 'none'; emptyEl.hidden = true;
       statusEl.textContent = '源码 · ' + path;
       kindEl.textContent = pvExt(path) || 'txt';
+      /* v3.3：外部附件只有 attachmentId，必须读全文（同样只显示前 20 万字符） */
+      pvTextOf(f).then(function(text){
+        if (!bound) return;
+        var win = pvWindow(text);
+        cur = { kind: pvExt(path) || 'txt', code: win.text };
+        srcEl.textContent = win.text;
+      });
     });
   }
   /* AI 改写了当前预览的文件 → 自动刷新（防抖；Work 执行期间由 capFinish 后恢复） */
@@ -578,10 +869,16 @@ function bindWeb(){
     /* v0.2.5：顶部分栏切换 */
     var wsList = $('#rn-ws-list');
     if (wsList) wsList.addEventListener('click', function(e){
-      var t = e.target.closest('[data-ag-dir],[data-ag-view],[data-ag-del],[data-ag-up],[data-ag-refresh],[data-ag-pick],[data-ag-close]');
+      var t = e.target.closest('[data-ag-dir],[data-ag-view],[data-ag-del],[data-ag-up],[data-ag-refresh],[data-ag-pick],[data-ag-close],[data-ag-edit],[data-ag-new],[data-vedit],[data-vdel],[data-vnew],[data-vrefresh]');
       if (!t) return;
       if (t.hasAttribute('data-ag-pick')){ UI.pickWorkspace && UI.pickWorkspace(); return; }
       if (t.hasAttribute('data-ag-close')){ var vb = $('#rn-ws-view'); if (vb) vb.hidden = true; return; }
+      if (t.hasAttribute('data-ag-new')){ editAgent('', true); return; }
+      if (t.hasAttribute('data-ag-edit')){ editAgent(t.getAttribute('data-ag-edit'), false); return; }
+      if (t.hasAttribute('data-vnew')){ workEdit('', true); return; }
+      if (t.hasAttribute('data-vrefresh')){ renderWs(); return; }
+      if (t.hasAttribute('data-vedit')){ workEdit(t.getAttribute('data-vedit'), false); return; }
+      if (t.hasAttribute('data-vdel')){ workDel(t.getAttribute('data-vdel')); return; }
       if (t.hasAttribute('data-ag-up')){
         var parts = agentPath.split('/'); parts.pop(); agentPath = parts.join('/'); renderWs(); return;
       }
@@ -820,7 +1117,12 @@ function fitSide(){
       var f = null, i;
       for (i = 0; i < fs.length; i++) if (fs[i].path === path) f = fs[i];
       if (!f){ UI.toast('文件不存在（可能已删除）：' + path, true); return; }
-      run(kind, f.content || '');
+      if (f.binary){ UI.toast('二进制文件不支持运行：' + path, true); return; }
+      /* external 文本在 VFS 里 content 为空：先读附件全文再跑，不能拿空串顶替 */
+      return pvTextOf(f).then(function(text){
+        if (!String(text || '')){ UI.toast('文件内容为空或读取失败：' + path, true); return; }
+        run(kind, text);
+      });
     });
   }
 

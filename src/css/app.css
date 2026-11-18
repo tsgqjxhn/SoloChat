@@ -425,6 +425,26 @@ body.rn-dragging iframe{pointer-events:none} /* 拖动时 iframe 不抢指针 */
 .vfs-row{display:flex;align-items:center;gap:6px;padding:3px 10px;min-height:26px}
 .vfs-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:12px;color:var(--body)}
 .vfs-row .hint{flex:none;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+/* v3.4：工作区文件编辑器（Work 沙箱 / Agent 真实目录共用；颜色全部走主题变量） */
+.ws-head .t{color:var(--ink);font-weight:600}
+.ws-edit{display:flex;flex-direction:column;gap:6px;padding:8px 10px}
+.ws-edit-head{display:flex;align-items:center;gap:6px;min-width:0}
+.ws-edit-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--font-mono);font-size:12px;color:var(--body)}
+.ws-edit-head .hint{flex:none;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.ws-edit-path{flex:1;min-width:0;height:27px;padding:0 8px;border-radius:var(--r-sm);outline:none;
+  border:1px solid var(--hairline);background:var(--canvas);color:var(--ink);
+  font-family:var(--font-mono);font-size:12px}
+.ws-edit-path:focus{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+.ws-edit-body{width:100%;min-height:180px;max-height:42vh;resize:vertical;padding:8px 10px;outline:none;
+  border-radius:var(--r-md);border:1px solid var(--hairline);background:var(--canvas);color:var(--ink);
+  font-family:var(--font-mono);font-size:12px;line-height:1.55}
+.ws-edit-body:focus{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+.ws-edit-body[readonly]{background:var(--soft);color:var(--muted);cursor:not-allowed}
+.ws-edit-notice{font-size:11.5px;line-height:1.55;color:var(--warning)}
+.ws-edit-err{font-size:11.5px;line-height:1.55;color:var(--danger)}
+.ws-edit-err[hidden]{display:none}
+.ws-edit-actions{display:flex;justify-content:flex-end;gap:6px}
 /* 终端输出：深色代码面（两种主题下都保持暗底），文字用 --code-ink 保证对比度 */
 #rn-out{flex:1;overflow:auto;padding:6px 10px;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--code-ink);background:var(--code-bg)}
 #rn-out .rn-ln{display:block}
