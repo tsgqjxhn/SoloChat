@@ -16,7 +16,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6df6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E">
 <!-- v2.3：放行 https 图片/视频直链（回答内嵌图/视频）。仍禁 http（宿主为 https 源，混合内容必被拦）、禁 frame/插件 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src *; font-src 'self'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; media-src data: blob: https:; connect-src * data:; font-src 'self'; form-action 'none'; base-uri 'none'">
 <title>SoloChat · AI 对话</title>
 <script>
 /* 防闪烁：首帧前定主题 */
@@ -1679,7 +1679,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.17';
+var APP_VER = 'v0.4.18';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1850,6 +1850,7 @@ var DEF_CFG = {
   temperature: 0.7, maxTokens: 0, systemPrompt: '',      // maxTokens: 0=不限制输出（不传 max_tokens）
   timeout: { connect: 0, first: 0, idle: 0 },   // v1.1.24：0 = 不限制
   shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
+    shotAsk: 'Alt+A',
     showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' },
   wsClosed: {},                 // 侧栏项目折叠状态 {工作区路径: 1}
   pinnedWs: {},                 // 置顶项目 {工作区路径: 1}
@@ -4523,7 +4524,7 @@ function fetchStream(opt){
       if (sp){ delete bridge.pend[d.id]; d.message ? sp.reject(new Error(d.message)) : sp.resolve(d.data); }
       return;
     }
-    if (d.t === 'quick.ask'){ UI.quickAsk(d.text); return; }
+    if (d.t === 'quick.ask'){ UI.quickAsk(d.text, d.image); return; }
       if (d.t === 'quick.cmd'){ UI.quickCmd(d.cmd); return; } // 小窗按钮：文件/联网/Agent/新建/设置
       if (d.t === 'open.web'){
         /* v1.1.9：主页面里的 target=_blank / window.open → 右侧「网页」侧栏，而不是系统浏览器 */
@@ -9691,19 +9692,19 @@ var UI = (function(){
     if (!NET.bridge.ok) return;
     NET.bridge.send({ t: 'quickbar', show: QB_READY && !!S.cfg.quickbar, theme: resolvedTheme() });
   }
-  /* 全局热键绑定下发宿主（四路：快速条 / 显示主窗 / 新建会话 / 临时会话） */
+  /* 全局热键绑定下发宿主（五路：快速条 / 截图提问 / 显示主窗 / 新建会话 / 临时会话） */
   function notifyHotkey(){
     if (!NET.bridge.ok) return;
     var sc = S.cfg.shortcuts || {};
     NET.bridge.send({ t: 'hotkey', combo: sc.quickbar || '',
-      combos: { showMain: sc.showMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
+      combos: { shotAsk: sc.shotAsk || '', showMain: sc.showMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
   }
   var qa = null; // 快速提问同步标记 {sid, last}
   var quickPending = false; // 快速条提问先于建会话：sendMessage 内建会话后再补 sid，保证小窗收到流式回复
   function stripFs(t){ /* 小窗同步用：剥掉工具围栏（fs-*、run、vfs-*），避免原始标记直接显示成乱码 */
     return String(t || '').replace(/```(?:fs-(?:read|list|write|done|rej)|run|preview|python|vfs-(?:write|list|read))[ \t]*\r?\n[\s\S]*?```/g, '〔工具执行中…〕');
   }
-  function quickAsk(text){
+  function quickAsk(text, image){
     text = (text || '').trim();
     if (!text) return;
     /* v0.4.2：小窗固定 Chat 模式（弹窗里的模式切换已取消） */
@@ -9716,13 +9717,37 @@ var UI = (function(){
       return;
     }
     if (!NET.isMock() && !S.cfg.baseURL){ openSettings(); toast('请先在设置中填写接口地址与 API Key', true); return; }
-    /* 默认新对话（v1.4.1 用户要求）：不续聊当前会话；当前会话已开始或带文件夹时先回草稿态（无文件夹） */
-    var cs = curSession();
-    if (cs && (S.msgs.length || cs.workspace)) { newDraft(); S.pendWs = ''; }
-    quickPending = true; // 留在 sendMessage 建会话后绑定 qa.sid（首条消息 curSession() 为 null）
-    $input.value = text;
-    autosize();
-    sendMessage();
+    function go(){
+      /* 默认新对话（v1.4.1 用户要求）：不续聊当前会话；当前会话已开始或带文件夹时先回草稿态（无文件夹） */
+      var cs = curSession();
+      if (cs && (S.msgs.length || cs.workspace)) { newDraft(); S.pendWs = ''; }
+      quickPending = true; // 留在 sendMessage 建会话后绑定 qa.sid（首条消息 curSession() 为 null）
+      $input.value = text;
+      autosize();
+      sendMessage();
+    }
+    if (!image){ go(); return; }
+    /* 宿主 Alt+A 截图提问：data URL → Blob → 复用 compressImage → 走现有 S.pendAtts 管线 */
+    if (typeof image !== 'string' || image.slice(0, 5) !== 'data:'){ toast('截图数据无效，已取消发送', true); return; }
+    fetch(image).then(function(r){
+      if (!r.ok) throw new Error('fetch ' + r.status);
+      return r.blob();
+    }).then(function(src){
+      if (!src || !/^image\//.test(src.type || '')) throw new Error('not image');
+      return compressImage(src).then(function(c){ return { c: c, size: src.size }; });
+    }).then(function(r){
+      if (S.sending){ toast('正在生成中，截图提问已取消', true); return; }
+      var blob = r.c.blob;
+      S.pendAtts.push({
+        id: uuid(), name: 'screenshot-' + Date.now() + '.jpg', blob: blob, w: r.c.w, h: r.c.h,
+        url: URL.createObjectURL(blob), rawBlob: blob, origSize: r.size, origMime: 'image/jpeg'
+      });
+      renderChips();
+      go();
+    }).catch(function(e){
+      try { console.error('[quickAsk image]', e); } catch (x) {}
+      toast('截图处理失败，已取消发送', true);
+    });
   }
   /* 小窗按钮 → 页面动作（文件/联网/Agent/新建/设置），宿主 quick.cmd 中转 */
   function quickCmd(cmd){
@@ -11040,7 +11065,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     page('keys', '快捷键', function(p){
       var defs = [['newSession', '新建会话（应用内）'], ['search', '搜索会话'], ['theme', '切换明暗主题'],
         ['sidebar', '固定 / 收起侧栏'],
-        ['quickbar', '快速输入条（全局）'], ['showMain', '显示主窗口（全局）'],
+        ['quickbar', '快速输入条（全局）'], ['shotAsk', '截图提问（全局）'], ['showMain', '显示主窗口（全局）'],
         ['newGlobal', '新建会话（全局）'], ['tempGlobal', '新建临时会话（全局）']];
       var sc = S.cfg.shortcuts || {};
       defs.forEach(function(d){
@@ -17668,6 +17693,7 @@ $('#sidebar').addEventListener('click', function(e){
     }
     else if (m === 'reset-keys'){
       setCfg({ shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
+        shotAsk: 'Alt+A',
         showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' } });
       notifyHotkey();
       UI.openSettings();
@@ -17996,7 +18022,7 @@ $('#sidebar').addEventListener('click', function(e){
       S.cfg.shortcuts[wasKey] = rc;
       saveCfg();
       S.recKey = null;
-      if (wasKey === 'quickbar' || wasKey === 'showMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') notifyHotkey();
+      if (wasKey === 'quickbar' || wasKey === 'shotAsk' || wasKey === 'showMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') notifyHotkey();
 UI.openSettings(); // 重建以刷新显示
     try { var _nbs = document.querySelectorAll('button[data-sp]'); for (var _ni = 0; _ni < _nbs.length; _ni++){ if (/快捷键/.test(_nbs[_ni].textContent || '')){ _nbs[_ni].click(); break; } } } catch (e) {} // v0.3.66：重建后回到快捷键页，别把用户踢回第一页
       return;

@@ -3959,6 +3959,7 @@ $('#sidebar').addEventListener('click', function(e){
     }
     else if (m === 'reset-keys'){
       setCfg({ shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
+        shotAsk: 'Alt+A',
         showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' } });
       notifyHotkey();
       UI.openSettings();
@@ -4287,7 +4288,7 @@ $('#sidebar').addEventListener('click', function(e){
       S.cfg.shortcuts[wasKey] = rc;
       saveCfg();
       S.recKey = null;
-      if (wasKey === 'quickbar' || wasKey === 'showMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') notifyHotkey();
+      if (wasKey === 'quickbar' || wasKey === 'shotAsk' || wasKey === 'showMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') notifyHotkey();
 UI.openSettings(); // 重建以刷新显示
     try { var _nbs = document.querySelectorAll('button[data-sp]'); for (var _ni = 0; _ni < _nbs.length; _ni++){ if (/快捷键/.test(_nbs[_ni].textContent || '')){ _nbs[_ni].click(); break; } } } catch (e) {} // v0.3.66：重建后回到快捷键页，别把用户踢回第一页
       return;

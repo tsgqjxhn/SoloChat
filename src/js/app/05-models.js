@@ -978,7 +978,7 @@ p.appendChild(field('直连例外', cfgInput('proxyDirect', 'text', 'models.dev,
     page('keys', '快捷键', function(p){
       var defs = [['newSession', '新建会话（应用内）'], ['search', '搜索会话'], ['theme', '切换明暗主题'],
         ['sidebar', '固定 / 收起侧栏'],
-        ['quickbar', '快速输入条（全局）'], ['showMain', '显示主窗口（全局）'],
+        ['quickbar', '快速输入条（全局）'], ['shotAsk', '截图提问（全局）'], ['showMain', '显示主窗口（全局）'],
         ['newGlobal', '新建会话（全局）'], ['tempGlobal', '新建临时会话（全局）']];
       var sc = S.cfg.shortcuts || {};
       defs.forEach(function(d){

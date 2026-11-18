@@ -1717,19 +1717,19 @@ var UI = (function(){
     if (!NET.bridge.ok) return;
     NET.bridge.send({ t: 'quickbar', show: QB_READY && !!S.cfg.quickbar, theme: resolvedTheme() });
   }
-  /* 全局热键绑定下发宿主（四路：快速条 / 显示主窗 / 新建会话 / 临时会话） */
+  /* 全局热键绑定下发宿主（五路：快速条 / 截图提问 / 显示主窗 / 新建会话 / 临时会话） */
   function notifyHotkey(){
     if (!NET.bridge.ok) return;
     var sc = S.cfg.shortcuts || {};
     NET.bridge.send({ t: 'hotkey', combo: sc.quickbar || '',
-      combos: { showMain: sc.showMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
+      combos: { shotAsk: sc.shotAsk || '', showMain: sc.showMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
   }
   var qa = null; // 快速提问同步标记 {sid, last}
   var quickPending = false; // 快速条提问先于建会话：sendMessage 内建会话后再补 sid，保证小窗收到流式回复
   function stripFs(t){ /* 小窗同步用：剥掉工具围栏（fs-*、run、vfs-*），避免原始标记直接显示成乱码 */
     return String(t || '').replace(/```(?:fs-(?:read|list|write|done|rej)|run|preview|python|vfs-(?:write|list|read))[ \t]*\r?\n[\s\S]*?```/g, '〔工具执行中…〕');
   }
-  function quickAsk(text){
+  function quickAsk(text, image){
     text = (text || '').trim();
     if (!text) return;
     /* v0.4.2：小窗固定 Chat 模式（弹窗里的模式切换已取消） */
@@ -1742,13 +1742,37 @@ var UI = (function(){
       return;
     }
     if (!NET.isMock() && !S.cfg.baseURL){ openSettings(); toast('请先在设置中填写接口地址与 API Key', true); return; }
-    /* 默认新对话（v1.4.1 用户要求）：不续聊当前会话；当前会话已开始或带文件夹时先回草稿态（无文件夹） */
-    var cs = curSession();
-    if (cs && (S.msgs.length || cs.workspace)) { newDraft(); S.pendWs = ''; }
-    quickPending = true; // 留在 sendMessage 建会话后绑定 qa.sid（首条消息 curSession() 为 null）
-    $input.value = text;
-    autosize();
-    sendMessage();
+    function go(){
+      /* 默认新对话（v1.4.1 用户要求）：不续聊当前会话；当前会话已开始或带文件夹时先回草稿态（无文件夹） */
+      var cs = curSession();
+      if (cs && (S.msgs.length || cs.workspace)) { newDraft(); S.pendWs = ''; }
+      quickPending = true; // 留在 sendMessage 建会话后绑定 qa.sid（首条消息 curSession() 为 null）
+      $input.value = text;
+      autosize();
+      sendMessage();
+    }
+    if (!image){ go(); return; }
+    /* 宿主 Alt+A 截图提问：data URL → Blob → 复用 compressImage → 走现有 S.pendAtts 管线 */
+    if (typeof image !== 'string' || image.slice(0, 5) !== 'data:'){ toast('截图数据无效，已取消发送', true); return; }
+    fetch(image).then(function(r){
+      if (!r.ok) throw new Error('fetch ' + r.status);
+      return r.blob();
+    }).then(function(src){
+      if (!src || !/^image\//.test(src.type || '')) throw new Error('not image');
+      return compressImage(src).then(function(c){ return { c: c, size: src.size }; });
+    }).then(function(r){
+      if (S.sending){ toast('正在生成中，截图提问已取消', true); return; }
+      var blob = r.c.blob;
+      S.pendAtts.push({
+        id: uuid(), name: 'screenshot-' + Date.now() + '.jpg', blob: blob, w: r.c.w, h: r.c.h,
+        url: URL.createObjectURL(blob), rawBlob: blob, origSize: r.size, origMime: 'image/jpeg'
+      });
+      renderChips();
+      go();
+    }).catch(function(e){
+      try { console.error('[quickAsk image]', e); } catch (x) {}
+      toast('截图处理失败，已取消发送', true);
+    });
   }
   /* 小窗按钮 → 页面动作（文件/联网/Agent/新建/设置），宿主 quick.cmd 中转 */
   function quickCmd(cmd){

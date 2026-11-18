@@ -133,6 +133,7 @@ namespace SoloChatHost
         const int HOTKEY_SHOW = 0x5C2;    // 显示主窗
         const int HOTKEY_NEW = 0x5C3;     // 新建会话
         const int HOTKEY_TEMP = 0x5C4;    // 新建临时会话
+        const int HOTKEY_SHOT = 0x5C5;    // 截图提问（Alt+A）
         readonly Dictionary<int, bool> hotRegs = new Dictionary<int, bool>();
         readonly ConcurrentDictionary<string, CancellationTokenSource> inflight =
             new ConcurrentDictionary<string, CancellationTokenSource>();
@@ -408,13 +409,19 @@ namespace SoloChatHost
             catch (Exception ex) { Log("memtarget err: " + ex.Message); }
         }
 
-        /* ---- 全局热键：四路（快速条 / 显示主窗 / 新建会话 / 临时会话），组合键由页面 cfg 下发 ---- */
-        public void ApplyHotkey(string combo) { ApplyHotkeys(combo, null, null, null); }
+        /* ---- 全局热键：五路（快速条 / 截图提问 / 显示主窗 / 新建会话 / 临时会话），组合键由页面 cfg 下发 ---- */
+        public void ApplyHotkey(string combo) { ApplyHotkeys(combo, null, null, null, null); }
 
         public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess)
         {
+            ApplyHotkeys(quick, showMain, newSess, tempSess, null);
+        }
+
+        public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess, string shotAsk)
+        {
             hotHwnd = Handle;
             ApplyOne(HOTKEY_ID, quick, "quickbar");
+            ApplyOne(HOTKEY_SHOT, shotAsk, "shotAsk");
             ApplyOne(HOTKEY_SHOW, showMain, "showMain");
             ApplyOne(HOTKEY_NEW, newSess, "newSession");
             ApplyOne(HOTKEY_TEMP, tempSess, "tempSession");
@@ -578,6 +585,7 @@ namespace SoloChatHost
                     lastHotTick = now;
                     int hid = (int)m.WParam.ToInt64();
                     if (hid == HOTKEY_ID) { if (quickBar != null) quickBar.Toggle(); }
+                    else if (hid == HOTKEY_SHOT) { if (quickBar != null) quickBar.CaptureAndSummon(); }
                     else if (hid == HOTKEY_SHOW) ShowMainWindow();
                     else if (hid == HOTKEY_NEW) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"new\"}");
                     else if (hid == HOTKEY_TEMP) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"temp\"}");
@@ -904,15 +912,17 @@ namespace SoloChatHost
             else if (t == "hotkey")
                     {
                         string combo = root.TryGetProperty("combo", out JsonElement cEl) ? cEl.GetString() : "";
-                        string hShow = "", hNew = "", hTemp = "";
+                        string hShow = "", hNew = "", hTemp = "", hShot = "";
                         if (root.TryGetProperty("combos", out JsonElement hcs) && hcs.ValueKind == JsonValueKind.Object)
                         {
+                            if (hcs.TryGetProperty("shotAsk", out JsonElement e0)) hShot = e0.GetString() ?? "";
                             if (hcs.TryGetProperty("showMain", out JsonElement e1)) hShow = e1.GetString() ?? "";
                             if (hcs.TryGetProperty("newSession", out JsonElement e2)) hNew = e2.GetString() ?? "";
                             if (hcs.TryGetProperty("tempSession", out JsonElement e3)) hTemp = e3.GetString() ?? "";
                         }
+                        if (hShot.Length == 0 && root.TryGetProperty("shotAsk", out JsonElement eTop)) hShot = eTop.GetString() ?? "";
                         var f = this;
-                        BeginInvoke((Action)(() => f.ApplyHotkeys(combo, hShow, hNew, hTemp)));
+                        BeginInvoke((Action)(() => f.ApplyHotkeys(combo, hShow, hNew, hTemp, hShot)));
                     }
                     else if (t == "quickbar")
                     {
@@ -3273,14 +3283,18 @@ namespace SoloChatHost
         readonly Label hint;        // 占位提示（叠在输入框上）
         readonly RichTextBox answer;   // RTF 渲染，不出现裸 Markdown
         readonly Panel pad;
-        readonly Panel tools;          // 左侧 46×50，只放联网开关
+        readonly Panel tools;          // 左侧 46（带截图 92），联网开关 + 截图缩略图
         readonly Panel sendPad;        // 右侧 46×50，放发送键
         readonly Button bWeb, bSend;
+        readonly PictureBox thumb;     // 截图缩略图（32×32，点击移除）
         readonly Button clearBtn;      // 回答区右侧「清空」
         readonly Panel ansPanel;       // 回答区容器（Dock Bottom）
         const string PH = "问点什么…   Enter 发送 · Esc 收起";
+        const string PH_SHOT = "问截图里的内容…   Enter 发送 · Esc 收起";
         bool ph = true, webOn, focusIn, webHot, sendHot, darkMode;
         string lastAns = "";
+        string shotDataUrl = "";       // 截图 JPEG data URL（只在内存；发送后保留，隐藏/点缩略图才清）
+        Image shotThumb;               // 缩略图（32×32）
         readonly ToolTip tip = new ToolTip();
 
         public QuickBarForm(MainForm main)
@@ -3326,13 +3340,24 @@ namespace SoloChatHost
                 else if (e.KeyCode == Keys.Escape) { RequestHide(); }
             };
 
-            /* —— 左侧：只保留联网搜索一个开关 —— */
+            /* —— 左侧：联网开关 + 截图缩略图（有截图时整块加宽到 92） —— */
             tools = new Panel { Dock = DockStyle.Left, Width = 46 };
+            thumb = new PictureBox
+            {
+                Bounds = new Rectangle(7, 9, 32, 32),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Cursor = Cursors.Hand,
+                Visible = false,
+                BackColor = Color.Transparent
+            };
+            thumb.Click += (s, e) => ClearShot();
+            tip.SetToolTip(thumb, "点击移除截图");
             bWeb = RoundButton();
             bWeb.Bounds = new Rectangle(7, 8, 32, 32);
             bWeb.Click += (s, e) => Cmd("web");
             bWeb.MouseEnter += (s, e) => { webHot = true; PaintState(); };
             bWeb.MouseLeave += (s, e) => { webHot = false; PaintState(); };
+            tools.Controls.Add(thumb);
             tools.Controls.Add(bWeb);
 
             /* —— 右侧：发送 —— */
@@ -3454,7 +3479,7 @@ namespace SoloChatHost
                 {
                     long lp = m.LParam.ToInt64();
                     var sp = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
-                    var hits = new Control[] { input, bWeb, bSend, clearBtn, answer };
+                    var hits = new Control[] { input, bWeb, bSend, clearBtn, answer, thumb };
                     for (int i = 0; i < hits.Length; i++)
                     {
                         var c = hits[i];
@@ -3514,6 +3539,157 @@ namespace SoloChatHost
             if (!IsDisposed) PaintAnswer(); // 回到初始状态：收起回答区、高度 50
         }
 
+        /* 截图只在内存：点缩略图 / 窗口隐藏 / 截图失败时清掉，避免偷偷带着旧图发出去 */
+        void ClearShot()
+        {
+            shotDataUrl = "";
+            var im = shotThumb;
+            shotThumb = null;
+            try { if (thumb != null) thumb.Image = null; } catch { }
+            if (im != null) { try { im.Dispose(); } catch { } }
+            try { ApplyShotUi(); } catch { }
+        }
+
+        /* 缩略图、工具栏宽度、占位提示随截图状态切换 */
+        void ApplyShotUi()
+        {
+            bool has = shotDataUrl.Length > 0;
+            if (tools != null) tools.Width = has ? 92 : 46;
+            if (bWeb != null) bWeb.Left = has ? 53 : 7;
+            if (thumb != null)
+            {
+                thumb.Visible = has;
+                if (has)
+                {
+                    thumb.Image = shotThumb;
+                    thumb.BringToFront();
+                }
+            }
+            if (hint != null)
+            {
+                hint.Text = has ? PH_SHOT : PH;
+                ph = input.Text.Length == 0;
+                hint.Visible = ph;
+            }
+            PaintState();
+        }
+
+        /* 全局 Alt+A：截光标所在显示器 → 显示快速条（无图时 Alt+Space 的 Toggle/Summon 行为不变） */
+        public void CaptureAndSummon()
+        {
+            string err = null;
+            Bitmap shot = null;
+            try
+            {
+                /* 先收起自己，等一帧再截，避免把快速条本身截进画面 */
+                if (Visible) { Hide(); Application.DoEvents(); Thread.Sleep(120); }
+                var scr = Screen.FromPoint(Cursor.Position);
+                var b = scr.Bounds;
+                shot = new Bitmap(b.Width, b.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(shot))
+                    g.CopyFromScreen(b.Location, Point.Empty, b.Size, CopyPixelOperation.SourceCopy);
+            }
+            catch (Exception ex)
+            {
+                err = ex.Message;
+                if (shot != null) { shot.Dispose(); shot = null; }
+            }
+
+            if (shot == null)
+            {
+                ClearShot();
+                input.Clear();
+                SetPh();
+                Summon();
+                ShowAnswer("截图失败：" + (string.IsNullOrEmpty(err) ? "无法读取屏幕" : err) + "。可重试，或检查系统截屏权限。", true);
+                return;
+            }
+
+            Image th = null;
+            string url = null;
+            try
+            {
+                th = Thumbnail(shot, 32, 32);
+                url = JpegDataUrl(shot, 1800, 82L);
+            }
+            catch (Exception ex) { err = ex.Message; }
+            finally { shot.Dispose(); }
+
+            if (string.IsNullOrEmpty(url))
+            {
+                if (th != null) { try { th.Dispose(); } catch { } }
+                ClearShot();
+                input.Clear();
+                SetPh();
+                Summon();
+                ShowAnswer("截图处理失败：" + (string.IsNullOrEmpty(err) ? "编码失败" : err), true);
+                return;
+            }
+
+            ClearShot(); // 清掉上一张（窗口 Hide 时也可能已经清过）
+            shotDataUrl = url;
+            shotThumb = th;
+            input.Clear();
+            SetPh();
+            ClearAnswer();
+            ApplyShotUi();
+            Summon();
+        }
+
+        static Image Thumbnail(Bitmap src, int w, int h)
+        {
+            var bmp = new Bitmap(w, h);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.FromArgb(32, 32, 32));
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                double sc = Math.Min((double)w / Math.Max(1, src.Width), (double)h / Math.Max(1, src.Height));
+                int dw = Math.Max(1, (int)Math.Round(src.Width * sc)), dh = Math.Max(1, (int)Math.Round(src.Height * sc));
+                g.DrawImage(src, new Rectangle((w - dw) / 2, (h - dh) / 2, dw, dh));
+            }
+            return bmp;
+        }
+
+        /* 发送体积控制：最长边 ~1800、JPEG 质量 0.82 */
+        static string JpegDataUrl(Bitmap src, int maxEdge, long quality)
+        {
+            int w = src.Width, h = src.Height;
+            double sc = Math.Min(1.0, (double)maxEdge / Math.Max(1, Math.Max(w, h)));
+            int tw = Math.Max(1, (int)Math.Round(w * sc)), th = Math.Max(1, (int)Math.Round(h * sc));
+            using (var bmp = new Bitmap(tw, th))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.DrawImage(src, new Rectangle(0, 0, tw, th));
+                }
+                using (var ms = new MemoryStream())
+                {
+                    var codec = JpegCodec();
+                    if (codec != null)
+                    {
+                        using (var ps = new System.Drawing.Imaging.EncoderParameters(1))
+                        {
+                            ps.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
+                            bmp.Save(ms, codec, ps);
+                        }
+                    }
+                    else bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
+                    return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+                }
+            }
+        }
+
+        static System.Drawing.Imaging.ImageCodecInfo JpegCodec()
+        {
+            var all = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders();
+            for (int i = 0; i < all.Length; i++)
+                if (all[i].FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid) return all[i];
+            return null;
+        }
+
         void Cmd(string cmd)
         {
             main.PostRaw(JsonSerializer.Serialize(new { t = "quick.cmd", cmd }));
@@ -3541,6 +3717,7 @@ namespace SoloChatHost
             PaintIcon(bSend, "send", hasText ? Color.White : Faint(), false);
             PaintIcon(clearBtn, "clear", Faint(), false);
             clearBtn.BackColor = surface;
+            if (thumb != null) thumb.BackColor = surface;
             tip.SetToolTip(bWeb, webOn ? "联网搜索：开（点击关闭）" : "联网搜索：关（点击开启）");
             tip.SetToolTip(bSend, "发送（Enter）");
         }
@@ -3571,7 +3748,11 @@ namespace SoloChatHost
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (!Visible && !IsDisposed) main.SaveQuickbarPos(Location); // 消失时记住位置
+            if (!Visible && !IsDisposed && !Disposing)
+            {
+                main.SaveQuickbarPos(Location); // 消失时记住位置
+                ClearShot();                    // 隐藏即丢弃截图（只在内存，不落盘）
+            }
         }
 
         public void Apply(bool show, string theme)
@@ -3806,7 +3987,7 @@ namespace SoloChatHost
         Color Faint()   { return Hx(darkMode ? "#62666d" : "#8e8b82"); }
         Color Lift()    { return Hx(darkMode ? "#141516" : "#e8e0d2"); }
 
-        void SetPh() { ph = true; input.Text = ""; if (hint != null) hint.Visible = true; }
+        void SetPh() { ph = true; input.Text = ""; if (hint != null) { hint.Text = shotDataUrl.Length > 0 ? PH_SHOT : PH; hint.Visible = true; } }
 
         /* 边框：常态 --hairline，聚焦 --primary（对应主界面 .cbox:focus-within） */
         void SyncBorder()
@@ -3837,10 +4018,14 @@ namespace SoloChatHost
         {
             var text = input.Text.Trim();
             if (text.Length == 0) return;
+            var shot = shotDataUrl; // 发送后不清：同一张截图可继续追问
             input.Clear();
             SetPh();
             ShowAnswer("", false); // 收起上一轮回答区
-            main.PostRaw(JsonSerializer.Serialize(new { t = "quick.ask", text }));
+            if (shot.Length > 0)
+                main.PostRaw(JsonSerializer.Serialize(new { t = "quick.ask", text, image = shot }));
+            else
+                main.PostRaw(JsonSerializer.Serialize(new { t = "quick.ask", text }));
         }
 
         void RequestHide()

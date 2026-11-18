@@ -152,7 +152,7 @@ function fetchStream(opt){
       if (sp){ delete bridge.pend[d.id]; d.message ? sp.reject(new Error(d.message)) : sp.resolve(d.data); }
       return;
     }
-    if (d.t === 'quick.ask'){ UI.quickAsk(d.text); return; }
+    if (d.t === 'quick.ask'){ UI.quickAsk(d.text, d.image); return; }
       if (d.t === 'quick.cmd'){ UI.quickCmd(d.cmd); return; } // 小窗按钮：文件/联网/Agent/新建/设置
       if (d.t === 'open.web'){
         /* v1.1.9：主页面里的 target=_blank / window.open → 右侧「网页」侧栏，而不是系统浏览器 */
