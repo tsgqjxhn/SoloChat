@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -28,12 +29,27 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        /* NoActionBar 主题下没有系统返回键，显式给键盘留出空间 */
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         ScrollView sc = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         int p = dp(18);
         box.setPadding(p, p, p, p);
         sc.addView(box);
+
+        /* 顶部显式关闭：不依赖系统返回手势 */
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        Button close = new Button(this);
+        close.setText("✕ 关闭");
+        close.setAllCaps(false);
+        close.setTextSize(14);
+        close.setContentDescription("关闭设置");
+        close.setOnClickListener(v -> finish());
+        topRow.addView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(topRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         box.addView(label("接口地址（Base URL，含 /v1）"));
         final EditText base = input(Prefs.base(this));

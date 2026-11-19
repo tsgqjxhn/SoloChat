@@ -23,6 +23,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -133,6 +134,13 @@ public class BubbleService extends Service {
     }
 
     private void showBubble() {
+        /* 权限可能在运行中被系统收回；没有权限时立刻停服务，绝不让 addView 抛异常崩进程。 */
+        if (!Settings.canDrawOverlays(this)) {
+            android.util.Log.w("SOLO", "bubble add denied: no overlay permission");
+            hideBubble();
+            stopSelf();
+            return;
+        }
         if (bubble != null) { bubble.setVisibility(View.VISIBLE); }
         if (gear != null) { gear.setVisibility(View.VISIBLE); }
         if (bubble != null) return;
@@ -191,8 +199,33 @@ public class BubbleService extends Service {
             return true;
         });
         bubble = v;
-        wm.addView(bubble, lp);
+        if (!addViewSafely(v, lp)) {
+            bubble = null;
+            stopSelf();
+            return;
+        }
         android.util.Log.d("SOLO", "bubble added " + lp.x + "," + lp.y + " size=" + size);
+    }
+
+    /**
+     * 统一挂载 overlay：先查悬浮窗权限，再吞掉 BadTokenException / SecurityException。
+     * 权限缺失（或刚被系统收回）时只记日志并停服务，绝不 FATAL。
+     */
+    private boolean addViewSafely(View v, WindowManager.LayoutParams lp) {
+        if (!Settings.canDrawOverlays(this)) {
+            android.util.Log.w("SOLO", "overlay add denied: no overlay permission");
+            return false;
+        }
+        try {
+            wm.addView(v, lp);
+            return true;
+        } catch (WindowManager.BadTokenException | SecurityException e) {
+            android.util.Log.w("SOLO", "overlay add denied: " + e);
+            return false;
+        } catch (Exception e) {
+            android.util.Log.w("SOLO", "overlay add failed: " + e);
+            return false;
+        }
     }
 
     private void snapEdge(WindowManager.LayoutParams lp) {
@@ -391,7 +424,11 @@ public class BubbleService extends Service {
             startAsk(crop);
         });
         overlay = root;
-        wm.addView(root, overlayParams(true));
+        if (!addViewSafely(root, overlayParams(true))) {
+            overlay = null;
+            stopSelf();
+            return;
+        }
         android.util.Log.d("SOLO", "crop overlay added");
     }
 
@@ -565,7 +602,12 @@ public class BubbleService extends Service {
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.BOTTOM;
         lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN | WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE;
-        wm.addView(root, lp);
+        overlay = root;
+        if (!addViewSafely(root, lp)) {
+            overlay = null;
+            stopSelf();
+            return;
+        }
         android.util.Log.d("SOLO", "ask sheet added");
     }
 
@@ -612,9 +654,19 @@ public class BubbleService extends Service {
         bg.setCornerRadius(dp(20));
         card.setBackground(bg);
 
-        /* 顶部留白：不再显示「回答 / 关闭」 */
-        View topSpace = new View(this);
-        card.addView(topSpace, new LinearLayout.LayoutParams(1, dp(4)));
+        /* 顶部：右上角显式 ×（NoActionBar 浮层没有系统返回，必须能一键关闭） */
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        final TextView x = new TextView(this);
+        x.setText("×");
+        x.setTextSize(24);
+        x.setTextColor(0xFF666666);
+        x.setGravity(Gravity.CENTER);
+        x.setPadding(dp(10), 0, dp(10), dp(4));
+        x.setContentDescription("关闭回答");
+        head.addView(x, new LinearLayout.LayoutParams(dp(44), dp(40)));
+        card.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         ScrollView sc = new ScrollView(this);
         TextView body = new TextView(this);
@@ -706,6 +758,7 @@ public class BubbleService extends Service {
             return false;
         });
         close.setOnClickListener(v -> { session = null; removeOverlay(); showBubble(); });
+        x.setOnClickListener(v -> { session = null; removeOverlay(); showBubble(); });
 
         overlay = root;
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -716,7 +769,11 @@ public class BubbleService extends Service {
                         | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.BOTTOM;
-        wm.addView(root, lp);
+        overlay = root;
+        if (!addViewSafely(root, lp)) {
+            overlay = null;
+            stopSelf();
+        }
     }
 
     private void removeOverlay() {

@@ -19,6 +19,16 @@ public class Prefs {
     public static final String DAV_ENC = "davEnc";
     public static final String DAV_SYNC_PASS = "davSyncPass";
     public static final String BUBBLE = "bubble";
+    public static final String NOTIF_ASKED = "notifAsked";
+    public static final String OVERLAY_ASKED = "overlayAsked";
+
+    /** 是否已经弹过一次通知权限请求（拒绝后不再每次启动骚扰）。 */
+    public static boolean notifAsked(Context c) { return get(c).getBoolean(NOTIF_ASKED, false); }
+
+    /** 是否已经提示过“缺少悬浮窗权限”（只提示一次，避免每次 onPause 都弹）。 */
+    public static boolean overlayAsked(Context c) { return get(c).getBoolean(OVERLAY_ASKED, false); }
+
+    public static void markOverlayAsked(Context c) { get(c).edit().putBoolean(OVERLAY_ASKED, true).apply(); }
 
     public static String davUrl(Context c) { return get(c).getString(DAV_URL, ""); }
     public static String davUser(Context c) { return get(c).getString(DAV_USER, ""); }

@@ -75,7 +75,41 @@ window.__scShare = function(o){
 };
 NET.bridge.init();
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
+/* Android：宿主保险库为空（旧版本升级 / 首次写入前退出）时，用原生 Prefs 里已同步的配置回填，避免重启后输入框空白 */
+function hydrateAndroidCfg(){
+  try {
+    if (!window.__SC_ANDROID__ || !window.AndroidBridge || typeof window.AndroidBridge.getCfg !== 'function') return false;
+    var raw = window.AndroidBridge.getCfg();
+    if (!raw) return false;
+    var o = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+    if (!o) return false;
+    var filled = false;
+    if (!S.cfg.apiKey && o.key){ S.cfg.apiKey = String(o.key); filled = true; }
+    if (!S.cfg.baseURL && o.base) S.cfg.baseURL = String(o.base);
+    if (!S.cfg.currentModel && o.model) S.cfg.currentModel = String(o.model);
+    if (!S.cfg.popupModel && o.popupModel) S.cfg.popupModel = String(o.popupModel);
+    if (filled){ /* 保持 S.cfg 与 active preset 镜像，切预置时不会把回填的 Key 丢掉 */
+      var act = null;
+      (S.cfg.presets || []).forEach(function(p){ if (p.id === S.cfg.activePreset) act = p; });
+      if (act){
+        if (!act.apiKey) act.apiKey = S.cfg.apiKey;
+        if (!act.baseURL && S.cfg.baseURL) act.baseURL = S.cfg.baseURL;
+        if (!act.currentModel && S.cfg.currentModel) act.currentModel = S.cfg.currentModel;
+      }
+    }
+    return filled;
+  } catch (e) { return false; }
+}
+/* Android：退出/切后台时立刻把 300ms debounce 里的配置落盘，防止填完就走丢 Key */
+try {
+  window.addEventListener('pagehide', function(){ try { saveCfg.flush(); } catch (e) {} });
+  document.addEventListener('visibilitychange', function(){
+    try { if (document.visibilityState === 'hidden') saveCfg.flush(); } catch (e) {}
+  });
+} catch (e) {}
+hydrateAndroidCfg(); // 启动早期先回填原生 Prefs 里已同步的配置（保险库若不落定也不会丢 Key）；只填空位，不覆盖
 if (Vault.avail) Vault.hydrate(S.cfg).then(function(){
+  hydrateAndroidCfg(); // 保险库回读后再兜底回填原生已同步的配置
   var fx = [];
   try { fx = sanitizePresetKeys(S.cfg); } catch (e) {}
   saveCfg();

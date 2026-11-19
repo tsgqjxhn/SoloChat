@@ -59,6 +59,7 @@ public class Bridge {
             else if ("savefile".equals(t)) doSaveFile(o);
             else if ("cfg".equals(t)) doCfg(o);
             else if ("bubble".equals(t)) doBubble(o);
+            else if ("secret".equals(t)) doSecret(o);
         } catch (Exception ignored) { }
     }
 
@@ -149,6 +150,55 @@ public class Bridge {
                     .apply();
             android.util.Log.d("SOLO", "cfg synced base=" + base + " model=" + model);
         } catch (Exception ignored) { }
+    }
+
+    /** 密钥保险库：AES/GCM 加密后存本机；回包只带状态/值，不带明文日志。 */
+    private void doSecret(final JSONObject o) {
+        final String id = o.optString("id");
+        pool.execute(() -> {
+            try {
+                String op = o.optString("op", "get");
+                String name = o.optString("name", "");
+                JSONObject d = new JSONObject();
+                d.put("t", "secret.done");
+                d.put("id", id);
+                if ("set".equals(op)) {
+                    VaultStore.set(ctx, name, o.optString("value", ""));
+                    d.put("status", 0);
+                } else if ("get".equals(op)) {
+                    String v = VaultStore.get(ctx, name);
+                    if (v == null) d.put("status", 404);
+                    else { d.put("status", 0); d.put("data", v); }
+                } else {
+                    throw new Exception("未知 op");
+                }
+                push(d);
+            } catch (Exception e) {
+                try {
+                    JSONObject d = new JSONObject();
+                    d.put("t", "secret.error");
+                    d.put("id", id);
+                    d.put("message", String.valueOf(e.getMessage()));
+                    push(d);
+                } catch (Exception ignored) { }
+            }
+        });
+    }
+
+    /** WebView 启动回填用：返回原生侧已同步的连接配置（只给本应用 WebView 用）。 */
+    @JavascriptInterface
+    public String getCfg() {
+        try {
+            android.content.SharedPreferences sp = Prefs.get(ctx);
+            JSONObject o = new JSONObject();
+            o.put("base", sp.getString(Prefs.BASE, ""));
+            o.put("key", sp.getString(Prefs.KEY, ""));
+            o.put("model", sp.getString(Prefs.MODEL, ""));
+            o.put("popupModel", sp.getString(Prefs.POPUP_MODEL, ""));
+            return o.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     /** 网页「通用设置 → 悬浮球截屏提问」开关：存偏好并启动/停止悬浮球服务。 */

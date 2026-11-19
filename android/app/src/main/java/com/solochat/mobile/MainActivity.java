@@ -72,8 +72,9 @@ public class MainActivity extends Activity {
         /* 兜底：个别 ROM 的 onPageFinished 回调不到，2 秒后直接投递待分享内容 */
         web.postDelayed(() -> { pageReady = true; deliverShare(); }, 2000);
 
-        if (Build.VERSION.SDK_INT >= 33
+        if (Build.VERSION.SDK_INT >= 33 && !Prefs.notifAsked(this)
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            Prefs.get(this).edit().putBoolean(Prefs.NOTIF_ASKED, true).apply(); // 只问一次；拒绝后不再每次启动弹
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 9);
         }
         if (Prefs.bubble(this)) ensureOverlay();
@@ -189,7 +190,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (Prefs.bubble(this)) setBubbleVisible(true);
+        /* 没有悬浮窗权限就不能起服务：addView 会抛 BadTokenException 直接崩进程。 */
+        if (Prefs.bubble(this) && Settings.canDrawOverlays(this)) setBubbleVisible(true);
         else stopBubble();
     }
 
@@ -198,10 +200,22 @@ public class MainActivity extends Activity {
     }
 
     private void setBubbleVisible(boolean show) {
+        if (show && !Settings.canDrawOverlays(this)) {
+            toastOverlayMissing();
+            stopBubble();
+            return;
+        }
         try {
             Intent i = new Intent(this, BubbleService.class).setAction(show ? BubbleService.ACTION_SHOW : BubbleService.ACTION_HIDE);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
         } catch (Exception ignored) { }
+    }
+
+    /** 缺少悬浮窗权限时只提示一次，避免每次 onPause 都弹。 */
+    private void toastOverlayMissing() {
+        if (Prefs.overlayAsked(this)) return;
+        Prefs.markOverlayAsked(this);
+        Toast.makeText(this, "未授予「显示在其他应用上层」，悬浮球暂不显示", Toast.LENGTH_LONG).show();
     }
 
     private void ensureOverlay() {
@@ -213,6 +227,10 @@ public class MainActivity extends Activity {
     }
 
     private void startBubble() {
+        if (!Settings.canDrawOverlays(this)) {
+            toastOverlayMissing();
+            return;
+        }
         Intent i = new Intent(this, BubbleService.class).setAction(BubbleService.ACTION_SHOW);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
     }
