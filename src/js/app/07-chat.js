@@ -742,6 +742,7 @@ function sendMessage(){
   }
     if (!NET.isMock() && !S.cfg.baseURL){ quickPending = false; openSettings(); toast('请先配置 Base URL，或填入 mock 试用', true); return; }
     if (!NET.isMock() && !S.cfg.currentModel){ quickPending = false; toast('请先在「设置 → 连接与模型」中选择模型', true); return; }
+    var sendAt = nowMs(); // v2.9：从点击发送开始计时（含附件导入/联网搜索等准备）
 
     /* Chat 不执行工具：本轮勾了工具/插件就显式切到 Work，让扩展围栏真正运行 */
     if ((S.cfg.mode || 'chat') === 'chat' && typeof PICK !== 'undefined' && PICK.restrict()) {
@@ -830,7 +831,7 @@ function sendMessage(){
       $input.value = ''; delete S.drafts[S.sid]; autosize();
       touchSession(text);
       maybeScroll(true);
-      var go = function(block, meta){ startStream(attsData, attsText, block, meta); attsData = null; attsText = null; };
+      var go = function(block, meta){ startStream(attsData, attsText, block, meta, sendAt); attsData = null; attsText = null; };
       if (S.cfg.webSearch && !NET.isMock()){
         /* 开关开着但提供商/Key/地址没配好：不假装联网，明确提示后按普通回答发送 */
         if (!NET.searchReady()){
@@ -852,29 +853,32 @@ function sendMessage(){
     });
   }
 
-  function startStream(attsData, attsText, searchBlock, searchMeta){
+  function startStream(attsData, attsText, searchBlock, searchMeta, sentAt){
     var s = curSession();
     if (!s) return;
+    if (sentAt == null) sentAt = nowMs(); // 重试/编辑等入口没有发送时间 → 从本次调用起算
     hydrateAttachments(S.msgs, function(){
-      runStream(s, S.msgs, attsData, attsText, searchBlock, searchMeta, false);
+      runStream(s, S.msgs, attsData, attsText, searchBlock, searchMeta, false, sentAt);
     });
   }
   /* v2.2：为指定会话发起请求（工具循环在后台会话里续跑时用；显示中的会话走内存 S.msgs） */
-  function startStreamFor(sid, attsData, attsText, searchBlock, searchMeta){
+  function startStreamFor(sid, attsData, attsText, searchBlock, searchMeta, sentAt){
     if (!sid || isSending(sid)) return;
-    if (sid === S.sid){ startStream(attsData, attsText, searchBlock, searchMeta); return; }
+    if (sid === S.sid){ startStream(attsData, attsText, searchBlock, searchMeta, sentAt); return; }
+    if (sentAt == null) sentAt = nowMs(); // 工具续跑等后台入口独立计时
     DB.msgsBySid(sid).then(function(list){
       var s = sessionById(sid);
       if (!s || isSending(sid)) return;
       list.sort(function(a, b){ return a.ts - b.ts; });
       hydrateAttachments(list, function(){
-        runStream(s, list, attsData, attsText, searchBlock, searchMeta, true);
+        runStream(s, list, attsData, attsText, searchBlock, searchMeta, true, sentAt);
       });
     });
   }
   /* bg=true：为后台会话跑流（不动当前内存/DOM）；bg=false：当前显示会话 */
-  function runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, bg){
+  function runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, bg, sentAt){
     if (!s || isSending(s.id)) return;
+    if (sentAt == null) sentAt = nowMs(); // 每次流独立计时，不复用上一条消息的 t0
     var lim = ctxLimitFor(sessModel(s)) || 131072; /* v2.9 / session groups v0.4.2：按会话生效模型的上限判断 */
     var lu = lastUsage(msgs);
     if (lu && lu.p >= lim * 0.8 && msgs.length >= 9 && !S.compacting && (!S.compactTried || Date.now() - S.compactTried > 120000)){
@@ -885,7 +889,7 @@ function sendMessage(){
     /* v0.3.19：压缩是异步的（数秒到数十秒），期间用户可能切走会话；此时不能再按前台续跑，否则气泡会插进当前显示的会话 */
     var nowBg = (s.id !== S.sid); // v0.3.29：回调发生时是否在前台，与原来是否后台无关
     if (ok && !nowBg) toast('摘要完成，继续发送');
-    runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, nowBg);
+    runStream(s, msgs, attsData, attsText, searchBlock, searchMeta, nowBg, sentAt);
       });
       return;
     }
@@ -896,7 +900,7 @@ function sendMessage(){
     };
   try { if (searchMeta && searchMeta.items && searchMeta.items.length) asst.srcs = searchMeta.items.slice(0, 6).map(function(x){ return { t: x.t || x.title || '', u: x.u || x.url || '' }; }); } catch (e) {} // v0.3.32：本轮来源挂到消息上
   try { if (searchMeta && searchMeta.fail) asst.searchFail = true; } catch (e) {}
-    var st = bg ? beginStreamBG(asst, msgs) : beginStream(asst);
+    var st = bg ? beginStreamBG(asst, msgs, sentAt) : beginStream(asst, sentAt);
     notifyBusy(); // v2.2：告知宿主有生成在跑（隐藏/最小化时不要压内存挂起）
     if (!bg){
       if (searchMeta && searchMeta.block){ // 展示联网搜索过程：条数/时长/可展开来源
@@ -997,9 +1001,11 @@ function sendMessage(){
     }
   }
   /* 后台会话流：登记到 S.streams，但不进 S.msgs / 不建 DOM 节点；消息推入该会话的本地 msgs 供下一轮构造上下文 */
-  function beginStreamBG(msg, msgs){
+  function beginStreamBG(msg, msgs, sentAt){
     var st = { sid: msg.sid, msg: msg, node: null, body: null, acc: msg.content || '', rAcc: msg.reasoning || '',
-      rNode: null, rBody: null, aborter: null, handle: null, skel: null, lastLen: -1, lastMD: 0 };
+      rNode: null, rBody: null, aborter: null, handle: null, skel: null, lastLen: -1, lastMD: 0,
+      t0: (sentAt == null ? nowMs() : sentAt),
+      firstAt: null, lastAt: null, firstContentAt: null, lastContentAt: null };
     st.flush = function(){}; // 后台无需渲染
     S.streams[msg.sid] = st;
     msgs.push(msg);
@@ -1315,16 +1321,18 @@ function sendMessage(){
   /* 原地流式：regen/continue 共用 */
   function inPlaceStream(m, i, acc0, ctxMsgs){
     m.status = 'streaming'; m.errMsg = null;
+    delete m.firstMs; delete m.ms; // v2.9：重新生成/继续生成重新计时，先清旧值
     setSending(true);
     /* v2.4：节点可能不在渲染窗口（超出 DOM 窗口/刚被重建）——原来直接 node.querySelector 会抛错 */
     var node = $listNode(m.id), body = node ? node.querySelector('.msg-body') : null;
     if (!node || !body){ renderMsgs(); node = $listNode(m.id); body = node && node.querySelector('.msg-body'); }
     if (!node || !body) return;
-    var q = ['.msg-err', '.msg-acts', '.msg-fold', '.reason', '.msg-srcs'];
+    var q = ['.msg-err', '.msg-acts', '.msg-fold', '.reason', '.msg-srcs', '.msg-dur'];
     for (var qi = 0; qi < q.length; qi++){ var qe = node.querySelector(q[qi]); if (qe) qe.remove(); }
     node.classList.remove('collapsed');
     body.textContent = '';
-    var st = { sid: m.sid, msg: m, node: node, body: body, acc: acc0 || '', rAcc: '', rNode: null, rBody: null, aborter: null, handle: null };
+    var st = { sid: m.sid, msg: m, node: node, body: body, acc: acc0 || '', rAcc: '', rNode: null, rBody: null, aborter: null, handle: null,
+      t0: nowMs(), firstAt: null, lastAt: null, firstContentAt: null, lastContentAt: null };
     st.flush = rafOnce(function(){ streamFrame(st); });
     S.streams[m.sid] = st;
     stream = st; S.streamMsg = m;

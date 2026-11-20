@@ -1485,6 +1485,17 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     }
     return box;
   }
+  function msgDurSpan(m){
+    if (!m) return null;
+    /* 新格式：仅助手消息，首字-结束（如 4.1-5.0s）；流式中不显示 */
+    if (m.role === 'assistant' && m.status !== 'streaming' && m.firstMs != null && m.ms != null){
+      return el('span', { class: 'msg-tokens msg-dur', text: fmtSec(m.firstMs) + '-' + fmtSec(m.ms) + 's',
+        title: '发出→首字 ' + fmtSec(m.firstMs) + 's · 全程 ' + fmtSec(m.ms) + 's' });
+    }
+    /* 旧消息：没有 firstMs 时仍显示原来的总耗时 */
+    if (m.ms != null) return el('span', { class: 'msg-tokens msg-dur', text: fmtSec(m.ms) + 's', title: '本轮耗时 ' + fmtSec(m.ms) + 's' });
+    return null;
+  }
   function msgNode(m){
     /* v0.2.1：工具结果不再以「你」的身份出现 —— 新消息 role=tool，旧数据按 [fs-result]/[run-result] 前缀识别 */
     var workTool = m.role === 'tool' || /^\[run-result\]/.test((m.content || '').trim()); // Work 工具结果 → 紧凑卡片
@@ -1495,7 +1506,7 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       el('span', { class: 'msg-time', text: fmtTime(m.ts) }),
       el('span', { class: 'msg-tokens', text: '~' + (m.tokens || tokEst(m.content)) + ' tok' }),
     ]);
-  if (m.ms) head.appendChild(el('span', { class: 'msg-tokens', text: (m.ms / 1000).toFixed(1) + 's' })); // v0.3.8：本轮耗时
+  var _dur = msgDurSpan(m); if (_dur) head.appendChild(_dur); // v2.9：首字-结束耗时
   if (m.tokIn || m.tokOut) head.appendChild(el('span', { class: 'msg-tokens', text: '↑' + (m.tokIn || 0) + ' ↓' + (m.tokOut || 0), title: '输入 / 输出 token' })); // v0.3.28
   if (m.model) head.appendChild(el('span', { class: 'msg-tokens', text: String(m.model).split('/').pop().slice(0, 24), title: m.model })); // v0.3.21
     if (S.cfg.msgFork !== false && !fsres && m.role !== 'system')
@@ -1688,7 +1699,18 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
     }
     if (dirty) maybeScroll(false);                       // v2.4：无变化不排版、不滚动（滚动卡顿主因）
   }
-  function beginStream(msg){
+  /* v2.9：毫秒级计时；performance.now 不可用时回退 Date.now */
+  function nowMs(){
+    try { if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') return performance.now(); } catch (e) {}
+    return Date.now();
+  }
+  /* 固定一位小数（四舍五入），用于首字/全程秒数 */
+  function fmtSec(ms){
+    var n = Number(ms);
+    if (!isFinite(n) || n < 0) n = 0;
+    return (Math.round(n / 100) / 10).toFixed(1);
+  }
+  function beginStream(msg, sentAt){
     S.msgs.push(msg);
     var node = msgNode(msg);
     $('#msg-list').appendChild(node);
@@ -1697,7 +1719,9 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
       sid: msg.sid, msg: msg, node: node, body: body,
       acc: msg.content || '', rAcc: msg.reasoning || '',
       rNode: null, rBody: null, aborter: null, handle: null,
-      skel: node.querySelector('.skel') || null, lastLen: -1, lastMD: 0, t0: Date.now()
+      skel: node.querySelector('.skel') || null, lastLen: -1, lastMD: 0,
+      t0: (sentAt == null ? nowMs() : sentAt),
+      firstAt: null, lastAt: null, firstContentAt: null, lastContentAt: null
     };
     st.flush = rafOnce(function(){ streamFrame(st); });
     S.streams[msg.sid] = st;              // v2.2：按会话登记
@@ -1757,8 +1781,18 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
   }
   function streamDelta(st, text, isReasoning){
     if (!st) return;
-    if (isReasoning) st.rAcc += text; // 字符串拼接累加，不留 chunk 数组（§5.2.5）
-    else { st.acc += text; st.msg.content = cleanAssistant(st.acc, true); } // v2.2：同步到消息对象；v0.2.1：剥掉 <tool_call>/<analysis> 噪声
+    var deltaAt = nowMs();
+    if (isReasoning){
+      st.rAcc += text; // 字符串拼接累加，不留 chunk 数组（§5.2.5）
+      if (text){ if (st.firstAt == null) st.firstAt = deltaAt; st.lastAt = deltaAt; }
+    } else {
+      st.acc += text; st.msg.content = cleanAssistant(st.acc, true); // v2.2：同步到消息对象；v0.2.1：剥掉 <tool_call>/<analysis> 噪声
+      /* 只有非空正文增量才记首字/末字；仅 reasoning 时用 firstAt/lastAt 兜底 */
+      if (text){
+        if (st.firstContentAt == null) st.firstContentAt = deltaAt;
+        st.lastContentAt = deltaAt;
+      }
+    }
     st.flush();
     if (qa && st.msg.sid === qa.sid && Date.now() - qa.last > 150){ qa.last = Date.now(); if (NET.bridge.ok) NET.bridge.send({ t: 'quick.answer', text: quickText(st.acc) }); } // v2.1：节流 150ms 实时同步到小窗（剥工具围栏 + 未闭合代码围栏临时闭合）
   }
@@ -1777,9 +1811,32 @@ addBox.appendChild(importResult);   /* 自定义导入：结果提示 */
   (function(){ try { var _c = String(msg.content || ''); var _f = (_c.match(/\[fs-result\][^\n]*失败|工具失败|（失败）/g) || []).length; if (_f){ DIAG.toolFail += _f; diagSave(); } var _t = (_c.match(/超时/g) || []).length; if (_t){ DIAG.timeouts += _t; diagSave(); } } catch (e) {} })();
     if (st.rAcc) msg.reasoning = st.rAcc;
     msg.status = status;
-  if (st && st.t0) msg.ms = Date.now() - st.t0; // v0.3.8：本轮耗时（对标 Claude）
+  (function(){ // v2.9：首字 / 结束都按毫秒整数落库；仅 reasoning 时回退到 firstAt/lastAt
+    var endAt = nowMs();
+    var t0 = (st.t0 == null ? endAt : st.t0);
+    var firstAt = st.firstContentAt != null ? st.firstContentAt : (st.firstAt != null ? st.firstAt : endAt);
+    var lastAt = st.lastContentAt != null ? st.lastContentAt : (st.lastAt != null ? st.lastAt : endAt);
+    var firstMs = Math.max(0, Math.round(firstAt - t0));
+    var totalMs = Math.max(firstMs, Math.round(lastAt - t0));
+    msg.firstMs = firstMs;
+    msg.ms = totalMs;
+  })();
   try { if (msg.role === 'assistant' && !msg.model) msg.model = sessModel(sessionById(msg.sid)) || ''; } catch (e) {} // v0.3.21 / session groups v0.4.2：记录是哪个模型答的
   try { var _hd = $('#msg-list') && $listNode(msg.id) && $listNode(msg.id).querySelector('.msg-head'); if (_hd && msg.model && !_hd.querySelector('.msg-model')) { var _ms = document.createElement('span'); _ms.className = 'msg-tokens msg-model'; _ms.textContent = String(msg.model).split('/').pop().slice(0, 24); _ms.title = msg.model; _hd.appendChild(_ms); } } catch (e) {} // v0.3.29：流式建节点时 model 还没赋值，收尾补上
+  try { // v2.9：流式节点头部没有耗时，收尾后原地补上（新格式优先，旧 ms 回退）
+    if (shown && st.node && st.node.isConnected){
+      var _hh = st.node.querySelector('.msg-head');
+      if (_hh){
+        var _oldDur = _hh.querySelector('.msg-dur'); if (_oldDur) _oldDur.remove();
+        var _newDur = msgDurSpan(msg);
+        if (_newDur){
+          var _tk0 = _hh.querySelector('.msg-tokens');
+          if (_tk0 && _tk0.parentNode === _hh) _hh.insertBefore(_newDur, _tk0.nextSibling);
+          else _hh.appendChild(_newDur);
+        }
+      }
+    }
+  } catch (e) {}
     if (errInfo) msg.errMsg = errInfo.msg;
     if (usage && usage.total_tokens) msg.tokens = usage.total_tokens;
   var _uu = (st && st.msg && st.msg.usage) || usage || null; if (_uu){ if (_uu.prompt_tokens) msg.tokIn = _uu.prompt_tokens; if (_uu.completion_tokens) msg.tokOut = _uu.completion_tokens; if (_uu.total_tokens) msg.tokens = _uu.total_tokens; } // v0.3.29：明细在 msg.usage 里
