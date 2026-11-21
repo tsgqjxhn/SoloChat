@@ -1717,12 +1717,12 @@ var UI = (function(){
     if (!NET.bridge.ok) return;
     NET.bridge.send({ t: 'quickbar', show: QB_READY && !!S.cfg.quickbar, theme: resolvedTheme() });
   }
-  /* 全局热键绑定下发宿主（五路：快速条 / 截图提问 / 显示主窗 / 新建会话 / 临时会话） */
+  /* 全局热键绑定下发宿主（六路：快速条 / 截图提问 / 显示主窗 / 显隐主窗 / 新建会话 / 临时会话） */
   function notifyHotkey(){
     if (!NET.bridge.ok) return;
     var sc = S.cfg.shortcuts || {};
     NET.bridge.send({ t: 'hotkey', combo: sc.quickbar || '',
-      combos: { shotAsk: sc.shotAsk || '', showMain: sc.showMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
+      combos: { shotAsk: sc.shotAsk || '', showMain: sc.showMain || '', toggleMain: sc.toggleMain || '', newSession: sc.newGlobal || '', tempSession: sc.tempGlobal || '' } });
   }
   var qa = null; // 快速提问同步标记 {sid, last}
   var quickPending = false; // 快速条提问先于建会话：sendMessage 内建会话后再补 sid，保证小窗收到流式回复

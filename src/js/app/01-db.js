@@ -46,7 +46,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.22';
+var APP_VER = 'v0.4.23';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -220,7 +220,7 @@ var DEF_CFG = {
   timeout: { connect: 0, first: 0, idle: 0 },   // v1.1.24：0 = 不限制
   shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
     shotAsk: 'Alt+A',
-    showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' },
+    showMain: 'Ctrl+Alt+S', toggleMain: 'Ctrl+H', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' },
   wsClosed: {},                 // 侧栏项目折叠状态 {工作区路径: 1}
   pinnedWs: {},                 // 置顶项目 {工作区路径: 1}
   /* session groups v0.4.2：会话分组（必须登记在 DEF_CFG，否则 loadCfg 白名单会丢） */

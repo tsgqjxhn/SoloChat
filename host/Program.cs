@@ -134,6 +134,13 @@ namespace SoloChatHost
         const int HOTKEY_NEW = 0x5C3;     // 新建会话
         const int HOTKEY_TEMP = 0x5C4;    // 新建临时会话
         const int HOTKEY_SHOT = 0x5C5;    // 截图提问（Alt+A）
+        const int HOTKEY_TOGGLE = 0x5C6;  // 显隐主窗（Ctrl+H）
+        bool overlayOn;                   // 悬浮置顶当前状态（供 Ctrl+H 恢复）
+        int overlayOpacity = 100;
+        readonly List<Form> auxTopWindows = new List<Form>(); // 播放窗等随主窗置顶的附属窗口
+        /* 最近一次下发的热键组合：ShowInTaskbar 切换会重建 HWND，必须在新句柄上重新注册 */
+        bool hkApplied;
+        string hkQuick, hkShow, hkNew, hkTemp, hkShot, hkToggle;
         readonly Dictionary<int, bool> hotRegs = new Dictionary<int, bool>();
         readonly ConcurrentDictionary<string, CancellationTokenSource> inflight =
             new ConcurrentDictionary<string, CancellationTokenSource>();
@@ -336,9 +343,18 @@ namespace SoloChatHost
             try
             {
                 int pct = Math.Max(35, Math.Min(100, opacityPct));
+                overlayOn = on;
+                overlayOpacity = pct;
+                IntPtr hwndBefore = Handle;
                 Opacity = Math.Max(0.35, Math.Min(1.0, pct / 100.0));
                 TopMost = on;
                 ShowInTaskbar = !on;
+                /* 应用自身的辅助窗口（网页播放窗等）跟随主窗层级；系统对话框只靠 owner 关系，不强制 TopMost */
+                foreach (var w in auxTopWindows.ToArray())
+                {
+                    try { if (w != null && !w.IsDisposed) w.TopMost = on; }
+                    catch (Exception ex) { Log("overlay aux err: " + ex.Message); }
+                }
                 if (on)
                 {
                     try { EnsureTray(); } catch (Exception ex) { Log("overlay tray err: " + ex.Message); }
@@ -348,6 +364,9 @@ namespace SoloChatHost
                 {
                     SetWindowPos(Handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
+                /* WinForms 切换 ShowInTaskbar 会重建窗口句柄，旧句柄上的全局热键随之失效；
+                   若句柄已变化，用最近一次组合在新句柄上重新注册（含 Ctrl+H 自身）。 */
+                if (hkApplied && Handle != hwndBefore) ReapplyHotkeys();
                 Log("overlay on=" + on + " opacity=" + Opacity.ToString("0.00") + " topmost=" + TopMost + " showintaskbar=" + ShowInTaskbar + " tray=" + (tray != null && tray.Visible));
             }
             catch (Exception ex) { Log("overlay ERR: " + ex.Message); }
@@ -437,22 +456,37 @@ namespace SoloChatHost
             catch (Exception ex) { Log("memtarget err: " + ex.Message); }
         }
 
-        /* ---- 全局热键：五路（快速条 / 截图提问 / 显示主窗 / 新建会话 / 临时会话），组合键由页面 cfg 下发 ---- */
+        /* ---- 全局热键：六路（快速条 / 截图提问 / 显示主窗 / 显隐主窗 / 新建会话 / 临时会话），组合键由页面 cfg 下发 ---- */
         public void ApplyHotkey(string combo) { ApplyHotkeys(combo, null, null, null, null); }
 
         public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess)
         {
-            ApplyHotkeys(quick, showMain, newSess, tempSess, null);
+            ApplyHotkeys(quick, showMain, newSess, tempSess, null, null);
         }
 
         public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess, string shotAsk)
         {
+            ApplyHotkeys(quick, showMain, newSess, tempSess, shotAsk, null);
+        }
+
+        public void ApplyHotkeys(string quick, string showMain, string newSess, string tempSess, string shotAsk, string toggleMain)
+        {
+            hkQuick = quick; hkShow = showMain; hkNew = newSess; hkTemp = tempSess; hkShot = shotAsk; hkToggle = toggleMain;
+            hkApplied = true;
             hotHwnd = Handle;
             ApplyOne(HOTKEY_ID, quick, "quickbar");
             ApplyOne(HOTKEY_SHOT, shotAsk, "shotAsk");
             ApplyOne(HOTKEY_SHOW, showMain, "showMain");
+            ApplyOne(HOTKEY_TOGGLE, toggleMain, "toggleMain");
             ApplyOne(HOTKEY_NEW, newSess, "newSession");
             ApplyOne(HOTKEY_TEMP, tempSess, "tempSession");
+        }
+
+        /* 主窗句柄重建后（悬浮开关切换 ShowInTaskbar）恢复全部全局热键 */
+        void ReapplyHotkeys()
+        {
+            if (!hkApplied) return;
+            ApplyHotkeys(hkQuick, hkShow, hkNew, hkTemp, hkShot, hkToggle);
         }
 
         void ApplyOne(int id, string combo, string key)
@@ -615,6 +649,7 @@ namespace SoloChatHost
                     if (hid == HOTKEY_ID) { if (quickBar != null) quickBar.Toggle(); }
                     else if (hid == HOTKEY_SHOT) { if (quickBar != null) quickBar.CaptureAndSummon(); }
                     else if (hid == HOTKEY_SHOW) ShowMainWindow();
+                    else if (hid == HOTKEY_TOGGLE) ToggleMainWindow();
                     else if (hid == HOTKEY_NEW) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"new\"}");
                     else if (hid == HOTKEY_TEMP) PostRaw("{\"t\":\"quick.cmd\",\"cmd\":\"temp\"}");
                 }
@@ -638,6 +673,29 @@ namespace SoloChatHost
                 Activate();
             }
             catch { }
+        }
+
+        /* Ctrl+H：显隐主窗。隐藏仅 Hide()，进程与托盘保留；恢复时按需重新应用悬浮置顶 */
+        void ToggleMainWindow()
+        {
+            try
+            {
+                if (Visible && WindowState != FormWindowState.Minimized)
+                {
+                    Hide();
+                    try { EnsureTray(); } catch (Exception ex) { Log("toggle tray err: " + ex.Message); }
+                    Log("toggle -> hidden visible=" + Visible + " topmost=" + TopMost + " showintaskbar=" + ShowInTaskbar + " tray=" + (tray != null && tray.Visible));
+                }
+                else
+                {
+                    Show();
+                    if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                    Activate();
+                    if (overlayOn) ApplyOverlay(overlayOn, overlayOpacity);
+                    Log("toggle -> shown visible=" + Visible + " topmost=" + TopMost + " showintaskbar=" + ShowInTaskbar);
+                }
+            }
+            catch (Exception ex) { Log("toggle ERR: " + ex.Message); }
         }
 
         void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -691,11 +749,18 @@ namespace SoloChatHost
                     Width = 1120, Height = 740,
                     StartPosition = FormStartPosition.CenterScreen,
                     BackColor = System.Drawing.Color.FromArgb(18, 18, 18),
-                    Icon = Icon
+                    Icon = Icon,
+                    TopMost = TopMost // 跟随主窗当前悬浮置顶状态
                 };
                 var w2 = new WebView2 { Dock = DockStyle.Fill };
                 f.Controls.Add(w2);
-                f.FormClosed += (a, b) => { try { w2.Dispose(); } catch { } };
+                auxTopWindows.Add(f);
+                f.FormClosed += (a, b) =>
+                {
+                    auxTopWindows.Remove(f);
+                    try { w2.Dispose(); } catch { }
+                    try { f.Dispose(); } catch { }
+                };
                 f.Shown += async (a, b) =>
                 {
                     try
@@ -940,17 +1005,18 @@ namespace SoloChatHost
             else if (t == "hotkey")
                     {
                         string combo = root.TryGetProperty("combo", out JsonElement cEl) ? cEl.GetString() : "";
-                        string hShow = "", hNew = "", hTemp = "", hShot = "";
+                        string hShow = "", hNew = "", hTemp = "", hShot = "", hToggle = "";
                         if (root.TryGetProperty("combos", out JsonElement hcs) && hcs.ValueKind == JsonValueKind.Object)
                         {
                             if (hcs.TryGetProperty("shotAsk", out JsonElement e0)) hShot = e0.GetString() ?? "";
                             if (hcs.TryGetProperty("showMain", out JsonElement e1)) hShow = e1.GetString() ?? "";
+                            if (hcs.TryGetProperty("toggleMain", out JsonElement e4)) hToggle = e4.GetString() ?? "";
                             if (hcs.TryGetProperty("newSession", out JsonElement e2)) hNew = e2.GetString() ?? "";
                             if (hcs.TryGetProperty("tempSession", out JsonElement e3)) hTemp = e3.GetString() ?? "";
                         }
                         if (hShot.Length == 0 && root.TryGetProperty("shotAsk", out JsonElement eTop)) hShot = eTop.GetString() ?? "";
                         var f = this;
-                        BeginInvoke((Action)(() => f.ApplyHotkeys(combo, hShow, hNew, hTemp, hShot)));
+                        BeginInvoke((Action)(() => f.ApplyHotkeys(combo, hShow, hNew, hTemp, hShot, hToggle)));
                     }
                     else if (t == "quickbar")
                     {

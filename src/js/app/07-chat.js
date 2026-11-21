@@ -3490,7 +3490,9 @@ function sendMessage(){
     runSelfCheck: runSelfCheck, storagePanel: storagePanel, purgeOrphans: purgeOrphans,
     exportSnapshot: exportSnapshot, importSnapshot: importSnapshot, cfgSyncOut: cfgSyncOut, cfgSyncImport: cfgSyncImport, doExportDiag: doExportDiag,
     download: download, compressSession: compressSession,
-    applyAccent: applyAccent, applyFontScale: applyFontScale, setGroup: setGroup
+    applyAccent: applyAccent, applyFontScale: applyFontScale, setGroup: setGroup,
+    notifyQuickbar: notifyQuickbar, notifyHotkey: notifyHotkey,
+    quickbarReady: function(){ QB_READY = true; notifyQuickbar(); }
   };
 })();
 /*  */
@@ -3968,8 +3970,8 @@ $('#sidebar').addEventListener('click', function(e){
     else if (m === 'reset-keys'){
       setCfg({ shortcuts: { newSession: 'Ctrl+N', search: 'Ctrl+K', theme: '', sidebar: 'Ctrl+B', quickbar: 'Alt+Space',
         shotAsk: 'Alt+A',
-        showMain: 'Ctrl+Alt+S', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' } });
-      notifyHotkey();
+        showMain: 'Ctrl+Alt+S', toggleMain: 'Ctrl+H', newGlobal: 'Ctrl+Alt+N', tempGlobal: 'Ctrl+Alt+T' } });
+      UI.notifyHotkey();
       UI.openSettings();
     }
     else if (m === 'proxy-test'){ /* v1.5：代理连通性测试（经当前代理访问 gstatic 探测页） */
@@ -4103,7 +4105,7 @@ $('#sidebar').addEventListener('click', function(e){
       if (ck === 'proxy') patch.proxyCustom = 1; // 用户手填代理 → 标记为自定义，迁移不再覆盖
       setCfg(patch);
       saveCfg(); // 修复：通用字段（含代理）改完立即持久化，重启不再回退
-      if (ck === 'quickbar'){ QB_READY = true; notifyQuickbar(); }
+      if (ck === 'quickbar') UI.quickbarReady();
     }
   }
   /* session groups v0.4.2：会话参数控件 —— 会话态写指定会话，草稿态(data-draft=1)写 S.draftCfg */
@@ -4298,7 +4300,7 @@ $('#sidebar').addEventListener('click', function(e){
       S.cfg.shortcuts[wasKey] = rc;
       saveCfg();
       S.recKey = null;
-      if (wasKey === 'quickbar' || wasKey === 'shotAsk' || wasKey === 'showMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') notifyHotkey();
+      if (wasKey === 'quickbar' || wasKey === 'shotAsk' || wasKey === 'showMain' || wasKey === 'toggleMain' || wasKey === 'newGlobal' || wasKey === 'tempGlobal') UI.notifyHotkey();
 UI.openSettings(); // 重建以刷新显示
     try { var _nbs = document.querySelectorAll('button[data-sp]'); for (var _ni = 0; _ni < _nbs.length; _ni++){ if (/快捷键/.test(_nbs[_ni].textContent || '')){ _nbs[_ni].click(); break; } } } catch (e) {} // v0.3.66：重建后回到快捷键页，别把用户踢回第一页
       return;
