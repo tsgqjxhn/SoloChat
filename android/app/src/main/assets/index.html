@@ -869,6 +869,14 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:14px;
 }
 .f-in:focus,.f-row textarea:focus,.f-row select:focus{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+/* 桌面悬浮：透明度滑杆（沿用主题变量，不改布局） */
+.f-range-label{display:flex;align-items:center;gap:10px;font-weight:400}
+.f-range{flex:1;min-width:120px;height:20px;margin:0;background:transparent;accent-color:var(--primary);cursor:pointer}
+.f-range-val{flex:0 0 42px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.f-range::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--hairline)}
+.f-range::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border-radius:50%;background:var(--primary);border:2px solid var(--canvas)}
+.f-range::-moz-range-track{height:4px;border-radius:2px;background:var(--hairline)}
+.f-range::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--primary);border:2px solid var(--canvas)}
 /* v0.5.13：API Key 小眼睛 */
 .pw-wrap{position:relative;display:flex;align-items:center;width:100%}
 .pw-wrap .f-in{padding-right:38px}
@@ -1705,7 +1713,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.21';
+var APP_VER = 'v0.4.22';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +
@@ -1797,6 +1805,8 @@ var DEF_CFG = {
   theme: 'auto',                // auto | light | dark
   stream: true, useBridge: true,
   quickbar: true,               // 任务栏快速输入条（仅宿主环境生效）
+  overlayTop: false,            // 桌面悬浮置顶（TopMost；仅桌面宿主）
+  overlayOpacity: 100,          // 窗口透明度百分比 35–100
   bubble: true,                 // v0.4.0：手机悬浮球截屏提问（关闭后悬浮球和常驻通知一起消失）
   popupModel: '',               // v0.4.0：截图弹窗单独模型；空=跟随当前模型
   webSearch: false,             // 本次会话的联网搜索开关（输入区地球图标）
@@ -10935,6 +10945,34 @@ p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [grpCk, ' 会话列
       p.appendChild(el('div', { class: 'f-row' }, [
         el('label', {}, [qbCk, ' 任务栏快速输入条（Enter 提问，Esc / × 隐藏）'])
       ]));
+      /* 桌面宿主：悬浮置顶 + 窗口透明度（手机端无桌面窗口，不显示） */
+      if (!document.body.classList.contains('m-phone')){
+        var ovTopCk = el('input', { type: 'checkbox', 'data-cfg': 'overlayTop' });
+        ovTopCk.checked = !!c.overlayTop;
+        var ovOp = el('input', { type: 'range', class: 'f-range', min: '35', max: '100', step: '1', 'data-cfg': 'overlayOpacity' });
+        var ovPctVal = Math.max(35, Math.min(100, parseInt(c.overlayOpacity, 10) || 100));
+        ovOp.value = String(ovPctVal);
+        var ovPct = el('span', { class: 'f-range-val', text: ovPctVal + '%' });
+        var syncOverlay = function(){
+          var pct = Math.max(35, Math.min(100, parseInt(ovOp.value, 10) || 100));
+          ovOp.value = String(pct);
+          ovPct.textContent = pct + '%';
+          setCfg({ overlayTop: !!ovTopCk.checked, overlayOpacity: pct });
+          try {
+            if (typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok)
+              NET.bridge.send({ t: 'win', act: 'overlay', on: !!ovTopCk.checked, opacity: pct });
+          } catch (e) {}
+        };
+        ovTopCk.addEventListener('change', syncOverlay);
+        ovOp.addEventListener('input', syncOverlay); // 拖动实时生效
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', {}, [ovTopCk, ' 悬浮置顶（不显示在任务栏）'])
+        ]));
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', { class: 'f-range-label' }, ['窗口透明度 ', ovOp, ' ', ovPct])
+        ]));
+        if (!NET.bridge.ok) p.appendChild(el('div', { class: 'hint', text: '仅桌面宿主生效；网页模式只保存设置。' }));
+      }
       /* v0.4.0：手机端悬浮球开关（桌面无悬浮球，不显示） */
       if (document.body.classList.contains('m-phone')){
         var bbCk = el('input', { type: 'checkbox', 'data-cfg': 'bubble' });
@@ -17911,6 +17949,8 @@ $('#sidebar').addEventListener('click', function(e){
       setCfg({ maxDocMB: clamp(parseInt(v, 10) || 20, 1, 100) });
     } else if (ck === 'maxImgMB'){
       setCfg({ maxImgMB: clamp(parseInt(v, 10) || 10, 1, 100) });
+    } else if (ck === 'overlayOpacity'){
+      setCfg({ overlayOpacity: clamp(parseInt(v, 10) || 100, 35, 100) });
     } else if (ck === 'imgPartial'){
       setCfg({ imgPartial: clamp(parseInt(v, 10) || 0, 0, 3) });
     } else {
@@ -24045,6 +24085,10 @@ window.__scShare = function(o){
   } catch (e) {}
 };
 NET.bridge.init();
+/* 桌面宿主：恢复上次的悬浮置顶 / 透明度（纯网页模式 send 无副作用） */
+try {
+  if (NET.bridge.ok) NET.bridge.send({ t:'win', act:'overlay', on:!!S.cfg.overlayTop, opacity:Number(S.cfg.overlayOpacity)||100 });
+} catch (e) {}
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 /* Android：宿主保险库为空（旧版本升级 / 首次写入前退出）时，用原生 Prefs 里已同步的配置回填，避免重启后输入框空白 */
 function hydrateAndroidCfg(){

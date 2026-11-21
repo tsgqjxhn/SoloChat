@@ -301,9 +301,12 @@ namespace SoloChatHost
 
         [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
 
-        /* 页面顶栏窗控：min / max / close(隐藏到托盘) / drag(HTCAPTION 拖动，双击最大化、支持 Aero Snap) */
-        void WinAct(string act)
+        /* 页面顶栏窗控：min / max / close(隐藏到托盘) / drag(HTCAPTION 拖动，双击最大化、支持 Aero Snap)
+           overlay：桌面悬浮置顶 + 透明度（仅改本窗体，不改进程可见性/文件属性） */
+        void WinAct(string act, bool overlayOn = false, int overlayOpacity = 100)
         {
             if (act == "min") WindowState = FormWindowState.Minimized;
             else if (act == "max")
@@ -323,6 +326,31 @@ namespace SoloChatHost
                 }
                 catch (Exception ex) { Log("open datadir failed: " + ex.Message); }
             }
+            else if (act == "overlay") ApplyOverlay(overlayOn, overlayOpacity);
+        }
+
+        /* 悬浮置顶：TopMost + 透明 + 不在任务栏显示。托盘图标保留，窗口照常可输入。
+           仅调整窗口属性；不隐藏进程、不改进程名、不做反截图/反检测。 */
+        void ApplyOverlay(bool on, int opacityPct)
+        {
+            try
+            {
+                int pct = Math.Max(35, Math.Min(100, opacityPct));
+                Opacity = Math.Max(0.35, Math.Min(1.0, pct / 100.0));
+                TopMost = on;
+                ShowInTaskbar = !on;
+                if (on)
+                {
+                    try { EnsureTray(); } catch (Exception ex) { Log("overlay tray err: " + ex.Message); }
+                    SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+                else
+                {
+                    SetWindowPos(Handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+                Log("overlay on=" + on + " opacity=" + Opacity.ToString("0.00") + " topmost=" + TopMost + " showintaskbar=" + ShowInTaskbar + " tray=" + (tray != null && tray.Visible));
+            }
+            catch (Exception ex) { Log("overlay ERR: " + ex.Message); }
         }
 
         /* 页面 → 宿主的自由消息（快速提问等） */
@@ -968,7 +996,10 @@ namespace SoloChatHost
                     else if (t == "win")
                     {
                         var wAct = root.TryGetProperty("act", out JsonElement wa) ? wa.GetString() : "";
-                        BeginInvoke((Action)(() => WinAct(wAct)));
+                        bool wOn = root.TryGetProperty("on", out JsonElement won) && won.ValueKind == JsonValueKind.True;
+                        int wOp = root.TryGetProperty("opacity", out JsonElement wop) && wop.ValueKind == JsonValueKind.Number
+                            ? wop.GetInt32() : 100;
+                        BeginInvoke((Action)(() => WinAct(wAct, wOn, wOp)));
                     }
                 }
             }
@@ -3967,6 +3998,7 @@ namespace SoloChatHost
 
         const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
         static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         [DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll", CharSet = CharSet.Auto)]

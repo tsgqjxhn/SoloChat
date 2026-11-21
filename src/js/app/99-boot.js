@@ -74,6 +74,10 @@ window.__scShare = function(o){
   } catch (e) {}
 };
 NET.bridge.init();
+/* 桌面宿主：恢复上次的悬浮置顶 / 透明度（纯网页模式 send 无副作用） */
+try {
+  if (NET.bridge.ok) NET.bridge.send({ t:'win', act:'overlay', on:!!S.cfg.overlayTop, opacity:Number(S.cfg.overlayOpacity)||100 });
+} catch (e) {}
 Vault.avail = NET.bridge.ok; // F4：有宿主桥才启用 DPAPI 保险库
 /* Android：宿主保险库为空（旧版本升级 / 首次写入前退出）时，用原生 Prefs 里已同步的配置回填，避免重启后输入框空白 */
 function hydrateAndroidCfg(){

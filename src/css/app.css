@@ -826,6 +826,14 @@ body:not(.rn-open):not(.m-chat) #empty .e-temp{right:56px} /* 让开右侧图标
   background:var(--canvas);border:1px solid var(--hairline);color:var(--ink);font-size:14px;
 }
 .f-in:focus,.f-row textarea:focus,.f-row select:focus{border-color:var(--ring-line);box-shadow:0 0 0 3px var(--ring)}
+/* 桌面悬浮：透明度滑杆（沿用主题变量，不改布局） */
+.f-range-label{display:flex;align-items:center;gap:10px;font-weight:400}
+.f-range{flex:1;min-width:120px;height:20px;margin:0;background:transparent;accent-color:var(--primary);cursor:pointer}
+.f-range-val{flex:0 0 42px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.f-range::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--hairline)}
+.f-range::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border-radius:50%;background:var(--primary);border:2px solid var(--canvas)}
+.f-range::-moz-range-track{height:4px;border-radius:2px;background:var(--hairline)}
+.f-range::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--primary);border:2px solid var(--canvas)}
 /* v0.5.13：API Key 小眼睛 */
 .pw-wrap{position:relative;display:flex;align-items:center;width:100%}
 .pw-wrap .f-in{padding-right:38px}

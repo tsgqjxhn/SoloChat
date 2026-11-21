@@ -822,6 +822,34 @@ p.appendChild(el('div', { class: 'f-row' }, [el('label', {}, [grpCk, ' 会话列
       p.appendChild(el('div', { class: 'f-row' }, [
         el('label', {}, [qbCk, ' 任务栏快速输入条（Enter 提问，Esc / × 隐藏）'])
       ]));
+      /* 桌面宿主：悬浮置顶 + 窗口透明度（手机端无桌面窗口，不显示） */
+      if (!document.body.classList.contains('m-phone')){
+        var ovTopCk = el('input', { type: 'checkbox', 'data-cfg': 'overlayTop' });
+        ovTopCk.checked = !!c.overlayTop;
+        var ovOp = el('input', { type: 'range', class: 'f-range', min: '35', max: '100', step: '1', 'data-cfg': 'overlayOpacity' });
+        var ovPctVal = Math.max(35, Math.min(100, parseInt(c.overlayOpacity, 10) || 100));
+        ovOp.value = String(ovPctVal);
+        var ovPct = el('span', { class: 'f-range-val', text: ovPctVal + '%' });
+        var syncOverlay = function(){
+          var pct = Math.max(35, Math.min(100, parseInt(ovOp.value, 10) || 100));
+          ovOp.value = String(pct);
+          ovPct.textContent = pct + '%';
+          setCfg({ overlayTop: !!ovTopCk.checked, overlayOpacity: pct });
+          try {
+            if (typeof NET !== 'undefined' && NET.bridge && NET.bridge.ok)
+              NET.bridge.send({ t: 'win', act: 'overlay', on: !!ovTopCk.checked, opacity: pct });
+          } catch (e) {}
+        };
+        ovTopCk.addEventListener('change', syncOverlay);
+        ovOp.addEventListener('input', syncOverlay); // 拖动实时生效
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', {}, [ovTopCk, ' 悬浮置顶（不显示在任务栏）'])
+        ]));
+        p.appendChild(el('div', { class: 'f-row' }, [
+          el('label', { class: 'f-range-label' }, ['窗口透明度 ', ovOp, ' ', ovPct])
+        ]));
+        if (!NET.bridge.ok) p.appendChild(el('div', { class: 'hint', text: '仅桌面宿主生效；网页模式只保存设置。' }));
+      }
       /* v0.4.0：手机端悬浮球开关（桌面无悬浮球，不显示） */
       if (document.body.classList.contains('m-phone')){
         var bbCk = el('input', { type: 'checkbox', 'data-cfg': 'bubble' });

@@ -4094,6 +4094,8 @@ $('#sidebar').addEventListener('click', function(e){
       setCfg({ maxDocMB: clamp(parseInt(v, 10) || 20, 1, 100) });
     } else if (ck === 'maxImgMB'){
       setCfg({ maxImgMB: clamp(parseInt(v, 10) || 10, 1, 100) });
+    } else if (ck === 'overlayOpacity'){
+      setCfg({ overlayOpacity: clamp(parseInt(v, 10) || 100, 35, 100) });
     } else if (ck === 'imgPartial'){
       setCfg({ imgPartial: clamp(parseInt(v, 10) || 0, 0, 3) });
     } else {
