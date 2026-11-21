@@ -212,6 +212,15 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 .msg-role{font-size:13px;font-weight:600;color:var(--ink)}
 .msg-time{font-size:12px;color:var(--faint)}
 .msg-tokens{font-size:11px;color:var(--faint)}
+/* 耗时徽标：首字-结束（4.4-4.5s）/ 旧消息总耗时（X.Xs）共用，克制但一眼能看见 */
+.msg-dur{
+  font-size:12px;font-weight:600;line-height:1.4;
+  color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 10%,var(--canvas));
+  border:1px solid color-mix(in srgb,var(--primary) 25%,var(--canvas));
+  border-radius:999px;padding:1px 7px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
 .msg-body{font-size:15px;color:var(--body);overflow-wrap:anywhere}
 .msg[data-role="user"] .msg-body{
   background:var(--bubble);border:1px solid var(--bubble-line);
@@ -1696,7 +1705,7 @@ var ASK_PROTOCOL = '提问协议（不确定就问，别猜）：需求模糊、
   '⑤ 别把问题写成正文段落，那样用户没法一键回答。';
 /* v1.29.4：通用纪律（各模式共用，避免每条协议各写一遍还写不一致） */
 /* v0.3.16：版本号只在这一个地方定义，About 页与 SC_DBG 都读它 */
-var APP_VER = 'v0.4.20';
+var APP_VER = 'v0.4.21';
 var RULES_CORE = '通用纪律（所有模式相同，优先级最高）：\n' +
   '① 事实只来自用户输入、工具结果或文件内容；没查证就说不确定并给出验证办法，禁止凭记忆编造数据、引用、API 行为。\n' +
   '② 只报告真实发生的事：跑过的写「已验证」并附输出要点；没跑的写「未验证」。任何情况下不许把「没做」写成「已完成」。\n' +

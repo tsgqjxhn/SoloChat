@@ -169,6 +169,15 @@ body:not(.rn-open):not(.m-chat) #rn-rail{display:flex}
 .msg-role{font-size:13px;font-weight:600;color:var(--ink)}
 .msg-time{font-size:12px;color:var(--faint)}
 .msg-tokens{font-size:11px;color:var(--faint)}
+/* 耗时徽标：首字-结束（4.4-4.5s）/ 旧消息总耗时（X.Xs）共用，克制但一眼能看见 */
+.msg-dur{
+  font-size:12px;font-weight:600;line-height:1.4;
+  color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 10%,var(--canvas));
+  border:1px solid color-mix(in srgb,var(--primary) 25%,var(--canvas));
+  border-radius:999px;padding:1px 7px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
 .msg-body{font-size:15px;color:var(--body);overflow-wrap:anywhere}
 .msg[data-role="user"] .msg-body{
   background:var(--bubble);border:1px solid var(--bubble-line);
